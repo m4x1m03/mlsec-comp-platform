@@ -1,0 +1,37 @@
+---
+// src/components/Navbar.astro
+const currentPath = Astro.url.pathname;
+---
+
+<nav class="bg-red-900 shadow-lg flex items-center justify-around py-4">
+  <a href="/" class="font-bold text-white text-xl">
+    MLSEC
+  </a>
+
+  <div class="space-x-6">
+    <a
+      href="/rules"
+      class:list={[
+        "font-bold hover:text-gray-300 transition-colors",
+        currentPath === '/rules' ? 'text-blue-400' : 'text-white'
+      ]}>
+      Rules
+    </a>
+    <a
+      href="/submission"
+      class:list={[
+        "font-bold hover:text-gray-300 transition-colors",
+        currentPath === '/submission' ? 'text-blue-400' : 'text-white'
+      ]}>
+      Submission
+    </a>
+    <a
+      href="/leaderboard"
+      class:list={[
+        "font-bold hover:text-gray-300 transition-colors",
+        currentPath === '/leaderboard' ? 'text-blue-400' : 'text-white'
+      ]}>
+      Leaderboard
+    </a>
+  </div>
+</nav>
