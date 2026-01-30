@@ -1,7 +1,6 @@
 ---
 import "../styles/global.css";
 import Navbar from "../components/Navbar.astro";
-import { Content } from '../content/home.md';
 ---
 
 <html lang="en">
@@ -11,10 +10,10 @@ import { Content } from '../content/home.md';
 		<link rel="icon" href="/favicon.ico" />
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
-		<title>MLSEC</title>
+		<title>MLSEC Leaderboard</title>
 	</head>
 	<body>
-		<Navbar />
-		<Content />
+    <Navbar/>
+		<h1>Leaderboard</h1>
 	</body>
 </html>
