@@ -1,5 +1,5 @@
 ---
-import "../styles/global.css";
+
 import Navbar from "../components/Navbar.astro";
 import { Content } from '../content/rules.md';
 ---
@@ -13,8 +13,10 @@ import { Content } from '../content/rules.md';
 		<meta name="generator" content={Astro.generator} />
 		<title>MLSEC Rules</title>
 	</head>
-	<body>
+	<body class="flex flex-col min-h-screen">
 		<Navbar />
-		<Content />
+		<div class="prose max-w-5xl mx-auto w-full bg-gray-100 p-7 mt-10 rounded-xl h-full">
+			<Content />
+		</div>
 	</body>
 </html>
