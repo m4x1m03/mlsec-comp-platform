@@ -1,6 +1,7 @@
 ---
 
 import Navbar from "../components/Navbar.astro";
+import Footer from "../components/Footer.astro";
 ---
 
 <html lang="en">
@@ -12,8 +13,11 @@ import Navbar from "../components/Navbar.astro";
 		<meta name="generator" content={Astro.generator} />
 		<title>MLSEC Leaderboard</title>
 	</head>
-	<body>
+	<body class="flex flex-col min-h-screen">
     <Navbar/>
-		<h1>Leaderboard</h1>
+		<div class="flex-grow">
+			<h1>Leaderboard</h1>
+		</div>
+		<Footer />
 	</body>
 </html>

@@ -1,6 +1,9 @@
 ---
 
 import Navbar from "../components/Navbar.astro";
+import Footer from "../components/Footer.astro";
+import Submit from "../components/Submit.astro";
+import PastSubmit from "../components/Past_submit.astro";
 ---
 
 <html lang="en">
@@ -12,8 +15,12 @@ import Navbar from "../components/Navbar.astro";
 		<meta name="generator" content={Astro.generator} />
 		<title>MLSEC Submission</title>
 	</head>
-	<body>
+	<body class="flex flex-col min-h-screen">
 		<Navbar />
-		<h1>Submission</h1>
+		<div class="flex flex-grow flex-row">
+			<Submit />
+			<PastSubmit />
+		</div>
+		<Footer />
 	</body>
 </html>
