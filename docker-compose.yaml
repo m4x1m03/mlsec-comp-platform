@@ -1,0 +1,45 @@
+services:
+  # TODO: PostgreSQL
+  # postgres:
+
+  # TODO: MinIO
+  # minio:
+
+  # TODO: RabbitMQ
+  # rabbitmq:
+
+  # TODO: FastAPI
+  # api:
+
+  # TODO: Celery Worker
+  # worker:
+
+  # Frontend (Astro)
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    container_name: mlsec-frontend
+    environment:
+      PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ./services/frontend:/app
+      - /app/node_modules
+    ports:
+      - "4321:4321"
+    networks:
+      - backend_net
+    # TODO: Make depend on API once ready
+    # depends_on:
+      # - api
+
+  # TODO: Adminer (Nice to have, not necessary)
+  # adminer:
+
+
+networks:
+  # TODO: Secure communication network for evaluation end.
+  backend_net:
+    driver: bridge
+# volumes:
+  # TODO: Establish volumes for postgres, minio, rabbitmq
