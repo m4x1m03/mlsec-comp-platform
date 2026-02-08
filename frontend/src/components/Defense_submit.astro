@@ -1,0 +1,23 @@
+---
+import InputLink from "../components/InputLink.astro";
+import FileUpload from "./FileUpload.astro";
+---
+
+<div class="flex flex-col flex-1 bg-green-100 m-7 p-7 rounded-xl">
+  <h1 class="text-2xl font-semibold text-gray-900 pb-6">Model Submission</h1>
+  <form>
+    <InputLink title="DockerHub Link:" placeholder="https://hub.docker.com/" submit_text="Submit Model"/>
+    <div class="flex items-center my-6">
+      <div class="flex-1 border-t border-gray-300"></div>
+      <span class="px-3 text-sm text-gray-500 font-medium">OR</span>
+      <div class="flex-1 border-t border-gray-300"></div>
+    </div>
+    <FileUpload title="Upload Docker Image" subtext="Uplaod Dockerfile up to 10Mb"/>
+    <button
+      type="submit"
+      class="w-full bg-primary hover:bg-secondary text-white font-medium py-2 px-4 rounded-lg transition duration-200 ease-in-out"
+    >
+      Submit Model
+    </button>
+  </form>
+</div>

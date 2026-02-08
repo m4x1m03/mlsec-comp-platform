@@ -1,6 +1,7 @@
 ---
 
 import Navbar from "../components/Navbar.astro";
+import Footer from "../components/Footer.astro";
 import { Content } from '../content/rules.md';
 ---
 
@@ -15,8 +16,9 @@ import { Content } from '../content/rules.md';
 	</head>
 	<body class="flex flex-col min-h-screen">
 		<Navbar />
-		<div class="prose max-w-5xl mx-auto w-full bg-gray-100 p-7 mt-10 rounded-xl h-full">
+		<div class="prose max-w-5xl mx-auto w-full bg-gray-100 p-7 my-10 rounded-xl h-full flex-grow">
 			<Content />
 		</div>
+		<Footer />
 	</body>
 </html>
