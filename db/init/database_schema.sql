@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS defense_submission_details (
 --------------------------------------------------
 -- OFFENSE SUBMISSION DETAILS 
 --------------------------------------------------
-CREATE TABLE offense_submission_details (
+CREATE TABLE IF NOT EXISTS offense_submission_details (
     submission_id UUID PRIMARY KEY
         REFERENCES submissions(id) ON DELETE CASCADE,
 
@@ -92,7 +92,7 @@ CREATE TABLE offense_submission_details (
 --------------------------------------------------
 -- OFFENSE FILES 
 --------------------------------------------------
-CREATE TABLE offense_files (
+CREATE TABLE IF NOT EXISTS offense_files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     offense_submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
@@ -120,7 +120,7 @@ ON offense_files(offense_submission_id);
 --------------------------------------------------
 -- ACTIVE SUBMISSIONS 
 --------------------------------------------------
-CREATE TABLE active_submissions (
+CREATE TABLE IF NOT EXISTS active_submissions (
     user_id UUID NOT NULL
         REFERENCES users(id) ON DELETE CASCADE,
 
@@ -139,7 +139,7 @@ CREATE TABLE active_submissions (
 --------------------------------------------------
 -- EVALUATIONS RUNS
 --------------------------------------------------
-CREATE TABLE evaluation_runs (
+CREATE TABLE IF NOT EXISTS evaluation_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     defense_submission_id UUID NOT NULL
@@ -166,7 +166,7 @@ CREATE TABLE evaluation_runs (
 --------------------------------------------------
 -- EVALUATION FILE RESULTS 
 --------------------------------------------------
-CREATE TABLE evaluation_file_results (
+CREATE TABLE IF NOT EXISTS evaluation_file_results (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     evaluation_run_id UUID NOT NULL
@@ -187,7 +187,7 @@ CREATE TABLE evaluation_file_results (
 --------------------------------------------------
 -- EVALUATION PAIR SCORES 
 --------------------------------------------------
-CREATE TABLE evaluation_pair_scores (
+CREATE TABLE IF NOT EXISTS evaluation_pair_scores (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     defense_submission_id UUID NOT NULL
@@ -214,7 +214,7 @@ CREATE TABLE evaluation_pair_scores (
 --------------------------------------------------
 -- JOBS 
 --------------------------------------------------
-CREATE TABLE jobs (
+CREATE TABLE IF NOT EXISTS jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     job_type TEXT NOT NULL, 
