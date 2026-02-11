@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS offense_files (
 
     is_malware BOOLEAN, -- ground truth label
 
-    behavior_status TEXT, -- unknown / safe / malicious / different
+    behavior_status TEXT, -- unknown / same / different / error
     behavior_report_ref TEXT,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
         status IN ('queued','running','done','failed')
     ),
 
-    include_meaningful_differences BOOLEAN,
+    include_behavior_different BOOLEAN,
     error TEXT,
     duration_ms INT,
 
@@ -200,10 +200,10 @@ CREATE TABLE IF NOT EXISTS evaluation_pair_scores (
         REFERENCES evaluation_runs(id),
 
     zip_score_avg NUMERIC,
-    n_files_scanned INT,
+    n_files_scored INT,
     n_files_error INT,
 
-    include_behavior_differences BOOLEAN,
+    include_behavior_different BOOLEAN,
 
     computed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
