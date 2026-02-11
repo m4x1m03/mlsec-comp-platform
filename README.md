@@ -25,7 +25,15 @@ Open the "Run and Debug" menu (Ctrl + Shift + D), select the "Development Server
 WIP
 
 ## Postgres
-WIP
+
+### Starting Postgres db server 
+```
+docker-compose up postgres
+```
+### Accessing Postgres db 
+```
+docker exec -it postgres-db psql -U postgres -d mlsec
+```
 
 ## MinIO
 WIP

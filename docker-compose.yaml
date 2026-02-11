@@ -1,7 +1,17 @@
 services:
   # TODO: PostgreSQL
-  # postgres:
-
+  postgres:
+    image: postgres:18
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: mlsec
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./services/postgres/init:/docker-entrypoint-initdb.d
   # TODO: MinIO
   # minio:
 
@@ -41,5 +51,8 @@ networks:
   # TODO: Secure communication network for evaluation end.
   backend_net:
     driver: bridge
-# volumes:
+volumes:
   # TODO: Establish volumes for postgres, minio, rabbitmq
+  pgdata:
+
+
