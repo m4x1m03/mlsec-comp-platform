@@ -232,5 +232,3 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX idx_jobs_status ON jobs(status);
-
-

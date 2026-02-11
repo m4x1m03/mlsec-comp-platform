@@ -11,7 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./db/init:/docker-entrypoint-initdb.d
+      - ./services/postgres/init:/docker-entrypoint-initdb.d
   # TODO: MinIO
   # minio:
 
