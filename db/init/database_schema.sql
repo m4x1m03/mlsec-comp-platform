@@ -1,91 +1,236 @@
 --------------------------------------------------
 -- USERS
 --------------------------------------------------
-
 -- TODO: In the future this should not be hard coded but pulled from YAML somehow
 CREATE TABLE IF NOT EXISTS users (
-    -- do we want to generate uuids? 
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- allows us to just insert a new user
-    username VARCHAR(50) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username TEXT UNIQUE NOT NULL, -- do we want to use TEXT instead of VARCHAR 
+    email TEXT UNIQUE NOT NULL,
     is_admin BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    disabled_at TIMESTAMPTZ NULL -- NULL = active
 );
 
---------------------------------------------------
--- DEFENSE SUBMISSIONS
---------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS defense_submissions (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id INT NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    docker_hub_link TEXT,
-    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--------------------------------------------------
+-- AUTH IDENTITIES 
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS auth_identities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
-    CONSTRAINT fk_defense_user
-        FOREIGN KEY (user_id)
-        REFERENCES users (id)
-        ON DELETE CASCADE
+    provider TEXT NOT NULL,                -- google, local, github
+    provider_subject TEXT,                 -- google sub if applicable
+    password_hash TEXT,                    -- ignored if oauth
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- IMPORTANT: Index foreign keys
-CREATE INDEX IF NOT EXISTS idx_defense_user
-ON defense_submissions(user_id);
+CREATE INDEX idx_auth_user ON auth_identities(user_id);
+
 
 --------------------------------------------------
--- OFFENSE SAMPLES
+-- SUBMISSIONS
 --------------------------------------------------
+CREATE TABLE IF NOT EXISTS submissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
-CREATE TABLE IF NOT EXISTS offense_samples (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id INT NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    submission_type TEXT NOT NULL CHECK (
+        submission_type IN ('defense', 'offense')
+    ),
 
-    CONSTRAINT fk_offense_user
-        FOREIGN KEY (user_id)
-        REFERENCES users (id)
-        ON DELETE CASCADE
+    version TEXT NOT NULL,
+    display_name TEXT,
+
+    status TEXT NOT NULL CHECK (
+        status IN ('submitted', 'evaluating', 'ready', 'failed')
+    ),
+
+    is_functional BOOLEAN,
+    functional_error TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMPTZ NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_offense_user
-ON offense_samples(user_id);
+CREATE INDEX idx_submissions_user ON submissions(user_id);
+CREATE INDEX idx_submissions_type ON submissions(submission_type);
+
 
 --------------------------------------------------
--- EVALUATIONS 
+-- DEFENSE SUBMISSIONS DETAILS 
 --------------------------------------------------
-/*
+CREATE TABLE IF NOT EXISTS defense_submission_details (
+    submission_id UUID PRIMARY KEY
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    source_type TEXT NOT NULL, -- docker | github | zip
+
+    docker_image TEXT,
+    git_repo TEXT,
+
+    object_key TEXT NOT NULL, -- MinIO/S3 location
+    sha256 TEXT
+);
+
 
 --------------------------------------------------
--- UNDER CONSTRUCTION 
+-- OFFENSE SUBMISSION DETAILS 
 --------------------------------------------------
+CREATE TABLE offense_submission_details (
+    submission_id UUID PRIMARY KEY
+        REFERENCES submissions(id) ON DELETE CASCADE,
 
-THIS IS NOT A PART OF THE DB YET BUT WILL BE SOON
+    zip_object_key TEXT NOT NULL,
+    zip_sha256 TEXT,
+    file_count INT,
+    extracted_at TIMESTAMPTZ
+);
 
-CREATE TABLE IF NOT EXISTS evaluations (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    defense_submission_id INT NOT NULL,
-    offense_sample_id INT NOT NULL,
+
+--------------------------------------------------
+-- OFFENSE FILES 
+--------------------------------------------------
+CREATE TABLE offense_files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    offense_submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    original_file_id UUID
+        REFERENCES offense_files(id),
+
+    object_key TEXT NOT NULL,
+    filename TEXT,
+    byte_size BIGINT,
+    sha256 TEXT NOT NULL,
+
+    is_malware BOOLEAN, -- ground truth label
+
+    behavior_status TEXT, -- unknown / safe / malicious / different
+    behavior_report_ref TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_offense_files_submission
+ON offense_files(offense_submission_id);
+
+
+--------------------------------------------------
+-- ACTIVE SUBMISSIONS 
+--------------------------------------------------
+CREATE TABLE active_submissions (
+    user_id UUID NOT NULL
+        REFERENCES users(id) ON DELETE CASCADE,
+
+    submission_type TEXT NOT NULL
+        CHECK (submission_type IN ('defense','offense')),
+
+    submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (user_id, submission_type)
+);
+
+
+--------------------------------------------------
+-- EVALUATIONS RUNS
+--------------------------------------------------
+CREATE TABLE evaluation_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    defense_submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    offense_submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    scope TEXT, -- zip | s3 | both
+    status TEXT CHECK (
+        status IN ('queued','running','done','failed')
+    ),
+
+    include_meaningful_differences BOOLEAN,
+    error TEXT,
+    duration_ms INT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+
+--------------------------------------------------
+-- EVALUATION FILE RESULTS 
+--------------------------------------------------
+CREATE TABLE evaluation_file_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    evaluation_run_id UUID NOT NULL
+        REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+
+    offense_file_id UUID NOT NULL
+        REFERENCES offense_files(id) ON DELETE CASCADE,
+
+    model_output SMALLINT, -- 0 benign / 1 malware
     score FLOAT,
-    status VARCHAR(20) DEFAULT 'pending',
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
+    error TEXT,
+    duration_ms INT,
 
-    CONSTRAINT fk_eval_defense
-        FOREIGN KEY (defense_submission_id)
-        REFERENCES defense_submissions(id)
-        ON DELETE CASCADE,
-
-    CONSTRAINT fk_eval_offense
-        FOREIGN KEY (offense_sample_id)
-        REFERENCES offense_samples(id)
-        ON DELETE CASCADE
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_eval_defense
-ON evaluations(defense_submission_id);
 
-CREATE INDEX IF NOT EXISTS idx_eval_offense
-ON evaluations(offense_sample_id);
-*/
+--------------------------------------------------
+-- EVALUATION PAIR SCORES 
+--------------------------------------------------
+CREATE TABLE evaluation_pair_scores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    defense_submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    offense_submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+
+    latest_evaluation_run_id UUID
+        REFERENCES evaluation_runs(id),
+
+    zip_score_avg NUMERIC,
+    n_files_scanned INT,
+    n_files_error INT,
+
+    include_behavior_differences BOOLEAN,
+
+    computed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(defense_submission_id, offense_submission_id)
+);
+
+
+--------------------------------------------------
+-- JOBS 
+--------------------------------------------------
+CREATE TABLE jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    job_type TEXT NOT NULL, 
+    status TEXT NOT NULL CHECK (
+        status IN ('queued','running','done','failed')
+    ),
+
+    requested_by_user_id UUID
+        REFERENCES users(id),
+
+    payload JSONB,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_jobs_status ON jobs(status);
+
+
