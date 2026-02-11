@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS defense_submission_details (
     docker_image TEXT,
     git_repo TEXT,
 
-    object_key TEXT NOT NULL, -- MinIO/S3 location
+    object_key TEXT, -- MinIO/S3 location
     sha256 TEXT
 );
 
