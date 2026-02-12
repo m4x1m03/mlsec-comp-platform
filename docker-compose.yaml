@@ -52,13 +52,14 @@ services:
   api:
     build:
       context: ./services/api
-      dockerfile: Dockerfile
     container_name: mlsec-api
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
     ports:
       - "8000:8000"
+    depends_on:
+      - postgres
     networks:
       - backend_net
     depends_on:
