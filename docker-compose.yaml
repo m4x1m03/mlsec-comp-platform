@@ -19,7 +19,16 @@ services:
   # rabbitmq:
 
   # TODO: FastAPI
-  # api:
+  api:
+    build:
+      context: ./services/api
+    container_name: mlsec-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+    networks:
+      - backend_net
 
   # TODO: Celery Worker
   # worker:

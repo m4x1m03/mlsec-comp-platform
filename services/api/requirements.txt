@@ -1,0 +1,11 @@
+# This file lists the dependencies for the API service. You can install them using pip:
+# pip install -r requirements.txt
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+alembic
+pydantic
+python-dotenv
+minio
+aio-pika
