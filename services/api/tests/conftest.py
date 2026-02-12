@@ -21,6 +21,7 @@ def setup_database():
     Base.metadata.drop_all(bind=engine)
 
 
+# Provide a new database session for each test
 @pytest.fixture()
 def db_session():
 
@@ -32,11 +33,11 @@ def db_session():
     yield session
 
     session.close()
-    #transaction.rollback()
+    transaction.rollback()
     connection.close()
 
 
-# Override FastAPI dependency
+# Override FastAPI dependency since we want to use the test database session
 @pytest.fixture()
 def client(db_session):
 
