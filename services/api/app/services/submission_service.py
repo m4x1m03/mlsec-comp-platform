@@ -1,32 +1,27 @@
 from sqlalchemy.orm import Session # type: ignore
-from ..models.submission import Submission, DefenseSubmissionDetail
+from ..models.submission import Submission
 
 
-def create_defense_submission(db: Session, user_id, data):
-
+def create_submission(db: Session, user_id, data):
     submission = Submission(
         user_id=user_id,
-        submission_type="defense",
+        submission_type=data.submission_type,
         version=data.version,
         display_name=data.display_name,
         status="submitted"
     )
 
     db.add(submission)
-    db.flush()  # get ID without commit
-
-    detail = DefenseSubmissionDetail(
-        submission_id=submission.id,
-        source_type=data.source_type,
-        docker_image=data.docker_image,
-        git_repo=data.git_repo,
-        object_key=data.object_key,
-        sha256=data.sha256
-    )
-
-    db.add(detail)
-
     db.commit()
     db.refresh(submission)
 
     return submission
+
+
+def list_submissions(db: Session, user_id):
+    return (
+        db.query(Submission)
+        .filter(Submission.user_id == user_id, Submission.deleted_at.is_(None))
+        .order_by(Submission.created_at.desc())
+        .all()
+    )

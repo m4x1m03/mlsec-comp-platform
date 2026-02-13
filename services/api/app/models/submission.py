@@ -32,3 +32,5 @@ class Submission(Base):
         TIMESTAMP(timezone=True),
         server_default=text("CURRENT_TIMESTAMP")
     )
+
+    deleted_at = Column(TIMESTAMP(timezone=True))
