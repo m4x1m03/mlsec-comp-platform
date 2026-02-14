@@ -12,6 +12,21 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
       - ./services/postgres/init:/docker-entrypoint-initdb.d
+
+  # Test database 
+  postgres-test:
+    image: postgres:18
+    container_name: test-postgres-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: mlsec_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_test:/var/lib/postgresql
+      - ./services/postgres/init:/docker-entrypoint-initdb.d
+
   # TODO: MinIO
   # minio:
 
@@ -54,5 +69,6 @@ networks:
 volumes:
   # TODO: Establish volumes for postgres, minio, rabbitmq
   pgdata:
+  pgdata_test:
 
 
