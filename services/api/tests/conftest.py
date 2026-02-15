@@ -3,8 +3,8 @@ from sqlalchemy import create_engine # type: ignore
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.core.database import Base, get_db
+from main import app
+from core.database import Base, get_db
 
 
 TEST_DB_URL = "postgresql://postgres:password123@localhost:5433/mlsec_test"
