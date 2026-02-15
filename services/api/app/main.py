@@ -1,7 +1,24 @@
-from fastapi import FastAPI # type: ignore
+import logging
 
-app = FastAPI()
+from fastapi import FastAPI
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+from app.api.routers.health import router as health_router
+from app.core.settings import get_settings
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+
+    logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+
+    app = FastAPI(
+        title="MLSEC Platform API",
+        version="0.1.0",
+    )
+
+    app.include_router(health_router)
+
+    return app
+
+
+app = create_app()

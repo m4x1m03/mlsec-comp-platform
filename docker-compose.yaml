@@ -12,6 +12,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
       - ./services/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - backend_net
 
   # Test database 
   postgres-test:
@@ -26,6 +28,8 @@ services:
     volumes:
       - pgdata_test:/var/lib/postgresql
       - ./services/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - backend_net
 
   # TODO: MinIO
   # minio:
@@ -34,7 +38,19 @@ services:
   # rabbitmq:
 
   # TODO: FastAPI
-  # api:
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: mlsec-api
+    environment:
+      DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
+    ports:
+      - "8000:8000"
+    networks:
+      - backend_net
+    depends_on:
+      - postgres
 
   # TODO: Celery Worker
   # worker:
@@ -54,9 +70,8 @@ services:
       - "4321:4321"
     networks:
       - backend_net
-    # TODO: Make depend on API once ready
-    # depends_on:
-      # - api
+    depends_on:
+      - api
 
   # TODO: Adminer (Nice to have, not necessary)
   # adminer:
