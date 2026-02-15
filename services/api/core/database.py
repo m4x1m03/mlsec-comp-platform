@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, text  # type: ignore
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from app.core.settings import get_settings
+from core.settings import get_settings
 
 # TODO: Change this to .env for resolving password, port, etc.
 DEFAULT_DATABASE_URL = "postgresql://postgres:password123@postgres:5432/mlsec"

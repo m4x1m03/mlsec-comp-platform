@@ -1,4 +1,4 @@
-from fastapi import APIRouter # type: ignore
+from fastapi import APIRouter  # type: ignore
 
 router = APIRouter(tags=["health"])
 

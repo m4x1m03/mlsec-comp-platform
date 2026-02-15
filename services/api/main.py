@@ -2,13 +2,12 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api.routers.health import router as health_router
-from app.core.settings import get_settings
+from core.settings import get_settings
+from routers.health import router as health_router
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 
     app = FastAPI(
@@ -17,7 +16,6 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
-
     return app
 
 

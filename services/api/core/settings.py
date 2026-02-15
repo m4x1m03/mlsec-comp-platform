@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     env: str = "dev"
     log_level: str = "INFO"
 
-    # * Kept for future stuff, connection to DB not mandatory hence None
     database_url: str | None = None
 
 
