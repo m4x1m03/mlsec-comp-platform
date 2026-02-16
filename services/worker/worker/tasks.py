@@ -22,7 +22,7 @@ def run_defense_job(
     try:
         set_job_status(job_id=job_id, status="running")
         _ = (defense_submission_id, scope, include_behavior_different)
-        time.sleep(0.5)
+        time.sleep(10)
         set_job_status(job_id=job_id, status="done")
     except Exception as exc:  # noqa: BLE001
         set_job_status(job_id=job_id, status="failed", error=str(exc))
@@ -39,7 +39,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
     try:
         set_job_status(job_id=job_id, status="running")
         _ = attack_submission_id
-        time.sleep(0.5)
+        time.sleep(10)
         set_job_status(job_id=job_id, status="done")
     except Exception as exc:  # noqa: BLE001
         set_job_status(job_id=job_id, status="failed", error=str(exc))
