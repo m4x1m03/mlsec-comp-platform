@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
     submission_type TEXT NOT NULL CHECK (
-        submission_type IN ('defense', 'offense')
+        submission_type IN ('defense', 'attack')
     ),
 
     version TEXT NOT NULL,
@@ -76,9 +76,9 @@ CREATE TABLE IF NOT EXISTS defense_submission_details (
 
 
 --------------------------------------------------
--- OFFENSE SUBMISSION DETAILS 
+-- ATTACK SUBMISSION DETAILS 
 --------------------------------------------------
-CREATE TABLE IF NOT EXISTS offense_submission_details (
+CREATE TABLE IF NOT EXISTS attack_submission_details (
     submission_id UUID PRIMARY KEY
         REFERENCES submissions(id) ON DELETE CASCADE,
 
@@ -90,15 +90,15 @@ CREATE TABLE IF NOT EXISTS offense_submission_details (
 
 
 --------------------------------------------------
--- OFFENSE FILES 
+-- ATTACK FILES 
 --------------------------------------------------
-CREATE TABLE IF NOT EXISTS offense_files (
+CREATE TABLE IF NOT EXISTS attack_files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    offense_submission_id UUID NOT NULL
+    attack_submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
 
     original_file_id UUID
-        REFERENCES offense_files(id),
+        REFERENCES attack_files(id),
 
     object_key TEXT NOT NULL,
     filename TEXT,
@@ -113,8 +113,8 @@ CREATE TABLE IF NOT EXISTS offense_files (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_offense_files_submission
-ON offense_files(offense_submission_id);
+CREATE INDEX idx_attack_files_submission
+ON attack_files(attack_submission_id);
 
 
 --------------------------------------------------
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS active_submissions (
         REFERENCES users(id) ON DELETE CASCADE,
 
     submission_type TEXT NOT NULL
-        CHECK (submission_type IN ('defense','offense')),
+        CHECK (submission_type IN ('defense','attack')),
 
     submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     defense_submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
 
-    offense_submission_id UUID NOT NULL
+    attack_submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
 
     scope TEXT, -- zip | s3 | both
@@ -172,8 +172,8 @@ CREATE TABLE IF NOT EXISTS evaluation_file_results (
     evaluation_run_id UUID NOT NULL
         REFERENCES evaluation_runs(id) ON DELETE CASCADE,
 
-    offense_file_id UUID NOT NULL
-        REFERENCES offense_files(id) ON DELETE CASCADE,
+    attack_file_id UUID NOT NULL
+        REFERENCES attack_files(id) ON DELETE CASCADE,
 
     model_output SMALLINT, -- 0 benign / 1 malware
     score FLOAT,
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS evaluation_pair_scores (
     defense_submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
 
-    offense_submission_id UUID NOT NULL
+    attack_submission_id UUID NOT NULL
         REFERENCES submissions(id) ON DELETE CASCADE,
 
     latest_evaluation_run_id UUID
@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS evaluation_pair_scores (
 
     computed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    UNIQUE(defense_submission_id, offense_submission_id)
+    UNIQUE(defense_submission_id, attack_submission_id)
 );
 
 
