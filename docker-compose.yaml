@@ -67,12 +67,14 @@ services:
 
   # Placeholder worker container (Celery wiring added in a later step)
   worker:
-    image: python:3.11-slim
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
     container_name: mlsec-worker
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
-    command: ["python", "-c", "import time; print('worker placeholder - celery wiring comes later'); time.sleep(10**9)"]
+      CELERY_DEFAULT_QUEUE: mlsec
     networks:
       - backend_net
     depends_on:
