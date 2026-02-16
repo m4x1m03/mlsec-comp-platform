@@ -22,7 +22,42 @@ Open the "Run and Debug" menu (Ctrl + Shift + D), select the "Development Server
 *Note: You may need to perform `cd ./services/frontend/` and `npm install` before running with VSCode*
 
 ## API
-WIP
+The API can be launched either via Docker or locally.
+
+### Docker
+```
+docker-compose up api
+```
+
+### Local
+```
+cd ./services/api/
+python -m venv .venv
+```
+Activate the venv, then install dependencies:
+```
+pip install -r requirements-dev.txt
+```
+Run the API:
+```
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+### Requirements
+- `services/api/requirements.txt` contains runtime dependencies for the API service.
+- `services/api/requirements-dev.txt` contains developer/test dependencies and includes `requirements.txt`.
+
+## API Testing 
+Place all test scripts into the tests folder
+Make sure to keep test_----.py naming convention 
+```
+cd services/api/ 
+pytest -v
+```
+or to allow printing 
+```
+pytest -s
+```
 
 ## Postgres
 
@@ -34,6 +69,15 @@ docker-compose up postgres
 ```
 docker exec -it postgres-db psql -U postgres -d mlsec
 ```
+### Starting TEST Postgres db server 
+```
+docker-compose up postgres-test
+```
+### Accessing TEST Postgres db 
+```
+docker exec -it test-postgres-db psql -U postgres -d mlsec-test
+```
+
 
 ## MinIO
 WIP
