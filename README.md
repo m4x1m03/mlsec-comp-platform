@@ -83,8 +83,39 @@ docker exec -it test-postgres-db psql -U postgres -d mlsec-test
 WIP
 
 ## RabbitMQ
-WIP
+RabbitMQ is used as the Celery broker (queue) for jobs.
+
+### Docker
+Start RabbitMQ (and the API/worker if you want to run jobs):
+```
+docker compose -f docker-compose.yaml up -d rabbitmq api worker
+```
+
+### Management UI
+- http://localhost:15672
+- Username: `mlsec`
+- Password: `mlsec`
+
+### Ports
+- `5672` (AMQP broker)
+- `15672` (management UI)
 
 ## Celery
-WIP
+Celery workers consume jobs from RabbitMQ and execute task stubs.
+
+### Docker
+Start the worker:
+```
+docker compose -f docker-compose.yaml up -d --build worker
+```
+
+View worker logs:
+```
+docker logs -f mlsec-worker
+```
+
+### Enqueuing jobs
+The API publishes Celery tasks when you call:
+- `POST /queue/defense`
+- `POST /queue/attack`
 
