@@ -5,8 +5,7 @@ from __future__ import annotations
 These tests are intentionally without RabbitMQ
 
 Validates:
-1) The endpoint writes a `jobs` row to Postgres with the expected
-     `job_type` and `status='queued'`.
+1) The endpoint writes `jobs` row to Postgres with the expected `job_type` and `status='queued'`.
 2) The endpoint attempts to publish the correct Celery task name (routing).
 """
 
