@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import create_engine # type: ignore
+from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
@@ -29,6 +30,21 @@ def db_session():
     transaction = connection.begin()
 
     session = TestingSessionLocal(bind=connection)
+
+    # Tests run inside a transaction that is rolled back at the end of the test.
+    #
+    # Our API endpoints legitimately call `db.commit()` (e.g., after inserting a
+    # row into `jobs`). If we didn't do anything special, a commit inside the
+    # endpoint would end the transaction that the test is relying on.
+    #
+    # The nested transaction (SAVEPOINT) pattern makes application-level commits
+    # safe while still guaranteeing isolation via the outer rollback.
+    session.begin_nested()
+
+    @event.listens_for(session, "after_transaction_end")
+    def _restart_savepoint(sess, trans):
+        if trans.nested and not trans._parent.nested:
+            sess.begin_nested()
 
     yield session
 

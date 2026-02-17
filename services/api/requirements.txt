@@ -1,5 +1,6 @@
 fastapi>=0.110,<1
 uvicorn[standard]>=0.27,<1
 pydantic-settings>=2.2,<3
+celery>=5.3,<6
 SQLAlchemy>=2.0,<3
-psycopg2-binary>=2.9,<3
+psycopg2-binary>=2.9,<3

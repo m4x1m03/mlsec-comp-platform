@@ -13,6 +13,9 @@ class Settings(BaseSettings):
 
     database_url: str | None = None
 
+    celery_broker_url: str | None = None
+    celery_default_queue: str = "mlsec"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

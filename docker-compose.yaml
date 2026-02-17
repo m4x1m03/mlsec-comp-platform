@@ -34,8 +34,19 @@ services:
   # TODO: MinIO
   # minio:
 
-  # TODO: RabbitMQ
-  # rabbitmq:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: mlsec
+      RABBITMQ_DEFAULT_PASS: mlsec
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    networks:
+      - backend_net
 
   # TODO: FastAPI
   api:
@@ -45,15 +56,30 @@ services:
     container_name: mlsec-api
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
+      CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
     ports:
       - "8000:8000"
     networks:
       - backend_net
     depends_on:
       - postgres
+      - rabbitmq
 
-  # TODO: Celery Worker
-  # worker:
+  # Placeholder worker container (Celery wiring added in a later step)
+  worker:
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    container_name: mlsec-worker
+    environment:
+      DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
+      CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
+      CELERY_DEFAULT_QUEUE: mlsec
+    networks:
+      - backend_net
+    depends_on:
+      - postgres
+      - rabbitmq
 
   # Frontend (Astro)
   frontend:
@@ -85,5 +111,6 @@ volumes:
   # TODO: Establish volumes for postgres, minio, rabbitmq
   pgdata:
   pgdata_test:
+  rabbitmqdata:
 
 
