@@ -1,9 +1,13 @@
 ---
 import InputLink from "./InputLink.astro";
+import FileUpload from "./FileUpload.astro";
+import SubmissionForm from "./Form.astro"
 ---
 
-<div class="flex flex-col flex-1 bg-purple-100 m-7 p-7 rounded-xl">
-  <h1 class="text-2xl font-semibold text-gray-900 pb-6">Attack Submission</h1>
-  <InputLink title="Attack zip file:" type="file" submit_text="Submit Attacks"/>
+<div class="flex flex-col flex-grow bg-purple-100 ml-6 mr-3 mb-6 mt-3 p-7 rounded-xl">
+  <h1 class="text-2xl font-semibold text-gray-900 pb-2">Attack Submission</h1>
+  <SubmissionForm button_text="Submit Attack">
+    <FileUpload title="Upload Locked Zip File:" subtext="Samples must be below 5MB each"/>
+  </SubmissionForm>
 </div>
 

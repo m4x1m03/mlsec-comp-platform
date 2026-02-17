@@ -1,0 +1,15 @@
+---
+const { button_text = "Submit"} = Astro.props;
+---
+
+<form>
+  <slot />
+  <div class="flex justify-center w-full max-w-md mx-auto p-6">
+      <button
+      type="submit"
+      class="w-full bg-primary hover:bg-secondary text-white font-medium py-2 rounded-lg transition duration-200 ease-in-out"
+      >
+      {button_text}
+      </button>
+    </div>
+</form>

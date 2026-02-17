@@ -9,6 +9,10 @@ import tailwind from '@astrojs/tailwind';
 export default defineConfig({
   integrations: [react(), tailwind()],
   vite: {
-    plugins: [],
+    server: {
+      proxy: {
+        '/health': 'http://127.0.0.1:8000',
+      },
+    },
   },
 });
