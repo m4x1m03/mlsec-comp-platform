@@ -52,6 +52,7 @@ services:
   api:
     build:
       context: ./services/api
+      dockerfile: Dockerfile
     container_name: mlsec-api
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
