@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field # type: ignore
 
 
 class SubmissionCreateRequest(BaseModel):
-    submission_type: Literal["defense", "offense"]
+    submission_type: Literal["defense", "attack"]
     version: str = Field(min_length=1, max_length=128)
     display_name: Optional[str] = Field(default=None, max_length=255)
 

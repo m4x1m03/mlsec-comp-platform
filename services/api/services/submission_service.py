@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import text # type: ignore
+from sqlalchemy.exc import IntegrityError # type: ignore
 from sqlalchemy.orm import Session # type: ignore
 
 from models.submission import Submission
@@ -26,6 +27,19 @@ def ensure_user_exists(db: Session, user_id: UUID) -> None:
     )
 
 
+def _submission_type_candidates(submission_type: str) -> list[str]:
+    normalized = submission_type.lower()
+    if normalized == "attack":
+        return ["attack", "offense"]
+    if normalized == "offense":
+        return ["offense", "attack"]
+    return [submission_type]
+
+
+def _is_submission_type_check_violation(exc: IntegrityError) -> bool:
+    return "submissions_submission_type_check" in str(exc.orig)
+
+
 def create_submission(
     db: Session,
     user_id: UUID,
@@ -33,19 +47,30 @@ def create_submission(
 ) -> Submission:
     ensure_user_exists(db, user_id)
 
-    submission = Submission(
-        user_id=user_id,
-        submission_type=data.submission_type,
-        version=data.version,
-        display_name=data.display_name,
-        status="submitted",
-    )
+    last_error: IntegrityError | None = None
+    for submission_type in _submission_type_candidates(data.submission_type):
+        submission = Submission(
+            user_id=user_id,
+            submission_type=submission_type,
+            version=data.version,
+            display_name=data.display_name,
+            status="submitted",
+        )
 
-    db.add(submission)
-    db.commit()
-    db.refresh(submission)
+        db.add(submission)
+        try:
+            db.commit()
+            db.refresh(submission)
+            return submission
+        except IntegrityError as exc:
+            db.rollback()
+            if not _is_submission_type_check_violation(exc):
+                raise
+            last_error = exc
 
-    return submission
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Failed to create submission")
 
 
 def list_submissions(db: Session, user_id: UUID) -> list[Submission]:

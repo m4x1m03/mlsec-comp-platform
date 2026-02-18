@@ -19,12 +19,13 @@ TestingSessionLocal = sessionmaker(bind=engine)
 def setup_database():
     yield
 
-
 # Provide a new database session for each test
 @pytest.fixture()
 def db_session():
+
     connection = engine.connect()
     transaction = connection.begin()
+
     session = TestingSessionLocal(bind=connection)
 
     # Tests run inside a transaction that is rolled back at the end of the test.
@@ -47,7 +48,6 @@ def db_session():
     session.close()
     transaction.rollback()
     connection.close()
-
 
 # Override FastAPI dependency since we want to use the test database session
 @pytest.fixture()
