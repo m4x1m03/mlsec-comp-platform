@@ -56,7 +56,7 @@ async def submission_client(submission_db_session):
     app.dependency_overrides.clear()
 
 
-@pytest.mark.anyio
+@pytest.mark.anyio # tells pytest to run this test in an async event loop
 async def test_submission_creates_row_in_database(submission_client, submission_db_session):
     payload = {
         "submission_type": "defense",

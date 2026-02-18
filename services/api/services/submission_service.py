@@ -27,15 +27,6 @@ def ensure_user_exists(db: Session, user_id: UUID) -> None:
     )
 
 
-def _submission_type_candidates(submission_type: str) -> list[str]:
-    normalized = submission_type.lower()
-    if normalized == "attack":
-        return ["attack", "offense"]
-    if normalized == "offense":
-        return ["offense", "attack"]
-    return [submission_type]
-
-
 def _is_submission_type_check_violation(exc: IntegrityError) -> bool:
     return "submissions_submission_type_check" in str(exc.orig)
 
@@ -48,25 +39,24 @@ def create_submission(
     ensure_user_exists(db, user_id)
 
     last_error: IntegrityError | None = None
-    for submission_type in _submission_type_candidates(data.submission_type):
-        submission = Submission(
-            user_id=user_id,
-            submission_type=submission_type,
-            version=data.version,
-            display_name=data.display_name,
-            status="submitted",
-        )
+    submission = Submission(
+        user_id=user_id,
+        submission_type=data.submission_type,
+        version=data.version,
+        display_name=data.display_name,
+        status="submitted",
+    )
 
-        db.add(submission)
-        try:
-            db.commit()
-            db.refresh(submission)
-            return submission
-        except IntegrityError as exc:
-            db.rollback()
-            if not _is_submission_type_check_violation(exc):
-                raise
-            last_error = exc
+    db.add(submission)
+    try:
+        db.commit()
+        db.refresh(submission)
+        return submission
+    except IntegrityError as exc:
+        db.rollback()
+        if not _is_submission_type_check_violation(exc):
+            raise
+        last_error = exc
 
     if last_error is not None:
         raise last_error
