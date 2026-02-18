@@ -58,8 +58,6 @@ services:
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
     ports:
       - "8000:8000"
-    depends_on:
-      - postgres
     networks:
       - backend_net
     depends_on:
