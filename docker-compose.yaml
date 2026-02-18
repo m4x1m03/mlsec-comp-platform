@@ -89,7 +89,8 @@ services:
       dockerfile: Dockerfile
     container_name: mlsec-frontend
     environment:
-      PUBLIC_API_URL: http://localhost:8000
+      PUBLIC_API_URL: /api
+      API_PROXY_TARGET: http://api:8000
     volumes:
       - ./services/frontend:/app
       - /app/node_modules
@@ -113,5 +114,4 @@ volumes:
   pgdata:
   pgdata_test:
   rabbitmqdata:
-
 

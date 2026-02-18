@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
 from main import app
-from core.database import Base, get_db
+from core.database import get_db
 
 
 TEST_DB_URL = "postgresql://postgres:password123@localhost:5433/mlsec_test"
@@ -14,21 +14,17 @@ engine = create_engine(TEST_DB_URL)
 TestingSessionLocal = sessionmaker(bind=engine)
 
 
-# Create tables once per test session
+# Test schema is expected to be pre-created by postgres init scripts.
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
 
 
 # Provide a new database session for each test
 @pytest.fixture()
 def db_session():
-
     connection = engine.connect()
     transaction = connection.begin()
-
     session = TestingSessionLocal(bind=connection)
 
     # Tests run inside a transaction that is rolled back at the end of the test.
@@ -56,7 +52,6 @@ def db_session():
 # Override FastAPI dependency since we want to use the test database session
 @pytest.fixture()
 def client(db_session):
-
     def override_get_db():
         yield db_session
 
@@ -64,3 +59,4 @@ def client(db_session):
 
     with TestClient(app) as c:
         yield c
+    app.dependency_overrides.clear()
