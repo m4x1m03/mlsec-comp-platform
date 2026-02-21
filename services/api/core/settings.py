@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     celery_broker_url: str | None = None
     celery_default_queue: str = "mlsec"
 
+    auth_session_ttl_minutes: int = 720
+    auth_session_renew_on_validation: bool = True
+    auth_session_renew_threshold_minutes: int = 60
+    auth_session_max_lifetime_minutes: int = 10080
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
