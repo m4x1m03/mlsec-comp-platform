@@ -30,6 +30,25 @@ CREATE INDEX idx_auth_user ON auth_identities(user_id);
 
 
 --------------------------------------------------
+-- USER SESSIONS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    token_hash TEXT NOT NULL UNIQUE,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_seen_at TIMESTAMPTZ NULL,
+    revoked_at TIMESTAMPTZ NULL
+);
+
+CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
+CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
+
+
+--------------------------------------------------
 -- SUBMISSIONS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS submissions (

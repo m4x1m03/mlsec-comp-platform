@@ -9,6 +9,10 @@ Validates:
 2) The endpoint attempts to publish the correct Celery task name (routing).
 """
 
+import hashlib
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
 from sqlalchemy import text
 
 
@@ -25,7 +29,6 @@ class _FakeCelery:
         self.sent.append((name, kwargs))
         return _FakeAsyncResult("test-task-id")
 
-
 def _create_user(db_session) -> str:
     row = db_session.execute(
         text(
@@ -38,6 +41,27 @@ def _create_user(db_session) -> str:
     ).fetchone()
     assert row is not None
     return str(row[0])
+
+
+def _create_session_token(db_session, *, user_id: str) -> str:
+    token = f"queue-test-token-{uuid4()}"
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    db_session.execute(
+        text(
+            """
+            INSERT INTO user_sessions (user_id, token_hash, expires_at, last_seen_at)
+            VALUES (:user_id, :token_hash, :expires_at, :last_seen_at)
+            """
+        ),
+        {
+            "user_id": user_id,
+            "token_hash": token_hash,
+            "expires_at": now + timedelta(hours=2),
+            "last_seen_at": now,
+        },
+    )
+    return token
 
 
 def _create_submission(db_session, *, user_id: str, submission_type: str) -> str:
@@ -74,6 +98,7 @@ def test_enqueue_defense_job_inserts_job_and_publishes(client, db_session, monke
     monkeypatch.setattr(queue_module, "get_celery", lambda: fake)
 
     user_id = _create_user(db_session)
+    access_token = _create_session_token(db_session, user_id=user_id)
     defense_submission_id = _create_submission(db_session, user_id=user_id, submission_type="defense")
 
     resp = client.post(
@@ -83,6 +108,7 @@ def test_enqueue_defense_job_inserts_job_and_publishes(client, db_session, monke
             "scope": None,
             "include_behavior_different": None,
         },
+        headers={"Authorization": f"Bearer {access_token}"},
     )
 
     assert resp.status_code == 200
@@ -97,12 +123,13 @@ def test_enqueue_defense_job_inserts_job_and_publishes(client, db_session, monke
 
     job_id = body["job_id"]
     row = db_session.execute(
-        text("SELECT job_type, status FROM jobs WHERE id = :id"),
+        text("SELECT job_type, status, requested_by_user_id FROM jobs WHERE id = :id"),
         {"id": job_id},
     ).fetchone()
     assert row is not None
     assert row[0] == "D"
     assert row[1] == "queued"
+    assert str(row[2]) == user_id
 
 
 def test_enqueue_attack_job_inserts_job_and_publishes(client, db_session, monkeypatch):
@@ -118,11 +145,13 @@ def test_enqueue_attack_job_inserts_job_and_publishes(client, db_session, monkey
     monkeypatch.setattr(queue_module, "get_celery", lambda: fake)
 
     user_id = _create_user(db_session)
+    access_token = _create_session_token(db_session, user_id=user_id)
     attack_submission_id = _create_submission(db_session, user_id=user_id, submission_type="attack")
 
     resp = client.post(
         "/queue/attack",
         json={"attack_submission_id": attack_submission_id},
+        headers={"Authorization": f"Bearer {access_token}"},
     )
 
     assert resp.status_code == 200
@@ -136,9 +165,19 @@ def test_enqueue_attack_job_inserts_job_and_publishes(client, db_session, monkey
 
     job_id = body["job_id"]
     row = db_session.execute(
-        text("SELECT job_type, status FROM jobs WHERE id = :id"),
+        text("SELECT job_type, status, requested_by_user_id FROM jobs WHERE id = :id"),
         {"id": job_id},
     ).fetchone()
     assert row is not None
     assert row[0] == "A"
     assert row[1] == "queued"
+    assert str(row[2]) == user_id
+
+
+def test_enqueue_requires_authentication(client):
+    resp = client.post(
+        "/queue/attack",
+        json={"attack_submission_id": str(uuid4())},
+    )
+
+    assert resp.status_code == 401
