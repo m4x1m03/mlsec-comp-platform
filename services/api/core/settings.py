@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     auth_session_renew_threshold_minutes: int = 60
     auth_session_max_lifetime_minutes: int = 10080
 
+    cors_allow_origins: list[str] = [
+        "http://localhost:4321",
+        "http://127.0.0.1:4321",
+    ]
+    cors_allow_methods: list[str] = ["*"]
+    cors_allow_headers: list[str] = ["*"]
+    cors_allow_credentials: bool = True
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
