@@ -1,0 +1,49 @@
+---
+const { title, type } = Astro.props;
+
+// placeholder API url while we wait for official ones
+const endpoint = type === "attack" ? "http://localhost/attacks" : "http://localhost/defense";
+
+
+let submissions = [{
+      display_name: "Test",
+      status: "Pending review",
+    },{
+      display_name: "Test 2",
+      status: "Done",
+    },{
+      display_name: "Test 3",
+      status: "Pending review",
+    },];
+
+try {
+  const res = await fetch(endpoint);
+  if (!res.ok) throw new Error("Failed to fetch submissions");
+
+  submissions = await res.json();
+} catch (err) {
+  console.error(err);
+}
+
+---
+
+<div class="flex flex-col flex-grow">
+  <h1 class="text-xl text-gray-900">{title}</h1>
+
+  <div class="flex flex-grow bg-gray-100 rounded-lg p-4 m-3">
+    {submissions.length === 0 ? (
+      <p class="text-gray-500">No submissions found.</p>
+    ) : (
+      <ul class="space-y-2 w-full">
+        {submissions.map((submission: { display_name: unknown; status: unknown; }) => (
+          <li class="bg-white p-3 rounded shadow">
+            <p class="font-semibold">{submission.display_name}</p>
+            {submission.status && (
+              <p class="text-sm text-gray-600">{submission.status}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+</div>
