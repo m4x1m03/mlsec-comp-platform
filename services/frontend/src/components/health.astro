@@ -1,0 +1,77 @@
+---
+// HealthStatus.astro
+// Calls /health on the client side and displays backend status
+// Expects: GET /health → { "status": "ok" }
+---
+
+<div id="health-widget" class="inline-flex items-center gap-3 bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2.5">
+  <!-- Pulse wrapper -->
+  <div class="relative flex items-center justify-center w-2.5 h-2.5">
+    <span id="ping" class="absolute h-full w-full rounded-full opacity-75 hidden animate-ping"></span>
+    <span id="dot" class="relative inline-flex w-2.5 h-2.5 rounded-full bg-zinc-300"></span>
+  </div>
+
+  <!-- Text -->
+  <div class="flex flex-col leading-tight">
+    <span class="text-[9px] font-semibold tracking-widest text-zinc-400 uppercase">System</span>
+    <span id="status-text" class="text-sm font-semibold text-zinc-400 tracking-wide">checking…</span>
+  </div>
+
+  <!-- Latency -->
+  <span id="latency" class="ml-1 text-xs text-zinc-400 tabular-nums"></span>
+</div>
+
+<script>
+  const STATE = {
+    healthy:   { dot: 'bg-green-500', ping: 'bg-green-400', text: 'text-green-600' },
+    degraded:  { dot: 'bg-amber-500', ping: 'bg-amber-400', text: 'text-amber-600' },
+    unhealthy: { dot: 'bg-red-500',   ping: '',             text: 'text-red-600'   },
+  };
+
+  const allDotColors  = ['bg-green-500', 'bg-amber-500', 'bg-red-500', 'bg-zinc-300'];
+  const allPingColors = ['bg-green-400', 'bg-amber-400'];
+  const allTextColors = ['text-green-600', 'text-amber-600', 'text-red-600', 'text-zinc-400'];
+
+  async function checkHealth() {
+    const dot        = document.getElementById('dot');
+    const ping       = document.getElementById('ping');
+    const statusText = document.getElementById('status-text');
+    const latencyEl  = document.getElementById('latency');
+
+    const t0 = performance.now();
+
+    try {
+      const res  = await fetch('/health', { signal: AbortSignal.timeout(5000) });
+      const ms   = Math.round(performance.now() - t0);
+      const data = await res.json();
+
+      let state = 'unhealthy';
+      if (res.ok && data.status === 'ok') {
+        state = ms < 500 ? 'healthy' : 'degraded';
+      }
+
+      apply(state, data.status ?? state, ms);
+    } catch {
+      apply('unhealthy', 'unreachable', Math.round(performance.now() - t0));
+    }
+
+    function apply(state: string, label: string | null, ms: number) {
+      const cfg = STATE[state];
+
+      dot.classList.remove(...allDotColors);
+      dot.classList.add(cfg.dot);
+
+      ping.classList.remove(...allPingColors, 'hidden');
+      ping.classList.add(cfg.ping || 'hidden');
+
+      statusText.classList.remove(...allTextColors);
+      statusText.classList.add(cfg.text);
+      statusText.textContent = label;
+
+      latencyEl.textContent = `${ms} ms`;
+    }
+  }
+
+  checkHealth();
+  setInterval(checkHealth, 3_000);
+</script>
