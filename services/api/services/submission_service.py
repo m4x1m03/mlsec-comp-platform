@@ -1,44 +1,18 @@
+from __future__ import annotations
+
 from uuid import UUID
 
-from sqlalchemy import text # type: ignore
-from sqlalchemy.exc import IntegrityError # type: ignore
-from sqlalchemy.orm import Session # type: ignore
+from sqlalchemy.orm import Session
 
 from models.submission import Submission
 from schemas.submission import SubmissionCreateRequest
-
-# Temporary helper to ensure the dev user exists before creating submissions.
-# Remove this once proper user management and authentication is implemented.
-def ensure_user_exists(db: Session, user_id: UUID) -> None:
-    user_suffix = str(user_id).replace("-", "")[:12]
-    db.execute(
-        text(
-            """
-            INSERT INTO users (id, username, email, is_admin)
-            VALUES (:id, :username, :email, FALSE)
-            ON CONFLICT (id) DO NOTHING
-            """
-        ),
-        {
-            "id": str(user_id),
-            "username": f"dev_user_{user_suffix}",
-            "email": f"dev_user_{user_suffix}@local.test",
-        },
-    )
-
-
-def _is_submission_type_check_violation(exc: IntegrityError) -> bool:
-    return "submissions_submission_type_check" in str(exc.orig)
 
 
 def create_submission(
     db: Session,
     user_id: UUID,
-    data: SubmissionCreateRequest
+    data: SubmissionCreateRequest,
 ) -> Submission:
-    ensure_user_exists(db, user_id)
-
-    last_error: IntegrityError | None = None
     submission = Submission(
         user_id=user_id,
         submission_type=data.submission_type,
@@ -48,19 +22,9 @@ def create_submission(
     )
 
     db.add(submission)
-    try:
-        db.commit()
-        db.refresh(submission)
-        return submission
-    except IntegrityError as exc:
-        db.rollback()
-        if not _is_submission_type_check_violation(exc):
-            raise
-        last_error = exc
-
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError("Failed to create submission")
+    db.commit()
+    db.refresh(submission)
+    return submission
 
 
 def list_submissions(db: Session, user_id: UUID) -> list[Submission]:

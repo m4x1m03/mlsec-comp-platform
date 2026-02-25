@@ -30,7 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(queue_router)
-    
+    app.include_router(submissions_router)
     return app
 
 

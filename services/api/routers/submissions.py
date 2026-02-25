@@ -1,8 +1,9 @@
-from uuid import UUID
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends # type: ignore
-from sqlalchemy.orm import Session # type: ignore
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
 
+from core.auth import AuthenticatedUser, get_authenticated_user
 from core.database import get_db
 from schemas.submission import (
     SubmissionCreateRequest,
@@ -11,36 +12,22 @@ from schemas.submission import (
 )
 from services.submission_service import create_submission, list_submissions
 
-router = APIRouter()
-
-DEV_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+router = APIRouter(prefix="/submissions", tags=["submissions"])
 
 
-# TODO: Replace with real authentication and user retrieval logic.
-def get_current_user_id() -> UUID:
-    return DEV_USER_ID
-
-
-# Primitive base endpoint for a generic submission record.
-@router.post("", response_model=SubmissionResponse, status_code=201)
-async def submit(
+@router.post("", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
+def submit(
     payload: SubmissionCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
 ) -> SubmissionResponse:
-    submission = create_submission(
-        db,
-        user_id,
-        payload
-    )
-
-    return submission
+    return create_submission(db, current_user.user_id, payload)
 
 
 @router.get("", response_model=SubmissionListResponse)
-async def get_submissions(
+def get_submissions(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
-    user_id: UUID = Depends(get_current_user_id),
 ) -> SubmissionListResponse:
-    submissions = list_submissions(db, user_id)
-    return {"submissions": submissions}
+    submissions = list_submissions(db, current_user.user_id)
+    return SubmissionListResponse(submissions=submissions)
