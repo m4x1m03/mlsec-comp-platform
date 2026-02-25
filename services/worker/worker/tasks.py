@@ -13,9 +13,12 @@ import json
 from websockets.sync.client import connect as ws_connect
 
 from worker.celery_app import celery_app
+from worker.config import get_config
 from worker.db import set_job_status, get_defense_docker_image, ensure_evaluation_run, upsert_evaluation
 
 logger = get_task_logger(__name__)
+
+config = get_config()
 
 log_config = LogConfig(
     type=LogConfig.types.JSON,
@@ -24,6 +27,7 @@ log_config = LogConfig(
         'max-file': '3'
     }
 )
+
 
 # Temporary helper to resolve dockerhub links
 def _resolve_image_name(image_reference: str) -> str:
@@ -49,7 +53,6 @@ class QueueStatus:
 
 
 def _fetch_samples(q: queue.Queue, status_dict: dict):
-    # Determine the FastAPI WebSocket URL. If we're inside the docker-compose network, `api` is the hostname.
     api_ws_url = os.getenv("API_WS_URL", "ws://api:8000/ws/eval/samples")
     try:
         with ws_connect(api_ws_url, max_size=None) as ws:
@@ -122,7 +125,7 @@ def _evaluate_defense(defense_submission_id: str, url: str):
                     url,
                     data=sample_bytes,
                     headers={"Content-Type": "application/octet-stream"},
-                    timeout=5 # Should be configurable in YAML
+                    timeout=config.worker.evaluation.requests_timeout_seconds
                 )
                 success = True
                 break
@@ -209,9 +212,9 @@ def run_defense_job(
             image_name,
             detach=True,
             network="eval_net",  # Isolated network for eval
-            mem_limit="1g", # Should be configurable in YAML 
-            nano_cpus=1000000000, 
-            pids_limit=200, # Grahams model too big I had to increase to 200
+            mem_limit=config.worker.defense_job.mem_limit,
+            nano_cpus=config.worker.defense_job.nano_cpus, 
+            pids_limit=config.worker.defense_job.pids_limit,
             read_only=True,
             privileged=False,
             user='1000:1000',
@@ -222,14 +225,14 @@ def run_defense_job(
                 '/run': 'size=16M', 
                 '/var/tmp': 'size=16M'
             },
-            log_config=log_config
+            log_config=log_config # Temporary for debugging and such, remove on deployment
         )
 
         logger.info(f"Container {container.id[:12]} successfully spun up")
         
         logger.info("Waiting for defense to be ready...")
         url = f"http://{container.name}:8080/"
-        container_timeout = int(os.getenv("CONTAINER_START_TIMEOUT_SECONDS", "300"))
+        container_timeout = config.worker.defense_job.container_timeout
         start_wait = time.time()
         container_ready = False
 

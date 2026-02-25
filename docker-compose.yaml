@@ -65,7 +65,7 @@ services:
       - postgres
       - rabbitmq
 
-  # Placeholder worker container (Celery wiring added in a later step)
+  # Placeholder worker container (Celery wiring added in a later step. Unless we want to have persistent workers?)
   worker:
     build:
       context: ./services/worker
@@ -80,6 +80,9 @@ services:
       - "host.docker.internal:host-gateway" # Also Temporary for WebSocket Simulation
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./config.yaml:/app/config.yaml:ro
+    group_add:
+      - "${DOCKER_GID:-999}" # Allows Worker container to interact with Docker Engine
     networks:
       - backend_net
       - eval_net
