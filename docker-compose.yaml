@@ -41,7 +41,7 @@ services:
       RABBITMQ_DEFAULT_USER: mlsec
       RABBITMQ_DEFAULT_PASS: mlsec
     ports:
-      - "5672:5672"   # AMQP
+      - "5672:5672" # AMQP
       - "15672:15672" # Management UI
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
@@ -75,8 +75,14 @@ services:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
       CELERY_DEFAULT_QUEUE: mlsec
+      API_WS_URL: ws://host.docker.internal:8765/ws/eval/samples # Temporary WebSocket to Simulate FastAPI
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Also Temporary for WebSocket Simulation
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - backend_net
+      - eval_net
     depends_on:
       - postgres
       - rabbitmq
@@ -98,7 +104,6 @@ services:
       - backend_net
     depends_on:
       - api
-
   # TODO: Adminer (Nice to have, not necessary)
   # adminer:
 
@@ -106,7 +111,12 @@ services:
 networks:
   # TODO: Secure communication network for evaluation end.
   backend_net:
+    name: backend_net
     driver: bridge
+  eval_net:
+    name: eval_net
+    driver: bridge
+    internal: true
 volumes:
   # TODO: Establish volumes for postgres, minio, rabbitmq
   pgdata:
