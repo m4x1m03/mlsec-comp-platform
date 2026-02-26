@@ -10,6 +10,7 @@ import queue
 import threading
 import requests
 import json
+import socket
 from websockets.sync.client import connect as ws_connect
 
 from worker.celery_app import celery_app
@@ -20,6 +21,7 @@ logger = get_task_logger(__name__)
 
 config = get_config()
 
+# Prevents massive log files from container
 log_config = LogConfig(
     type=LogConfig.types.JSON,
     config={
@@ -114,7 +116,7 @@ def _evaluate_defense(defense_submission_id: str, url: str):
         run_id = evaluation_runs[attack_submission_id]
         start_time = time.time()
         
-        max_retries = 2
+        max_retries = 1
         success = False
         prediction = None
         error_msg = None
@@ -131,8 +133,7 @@ def _evaluate_defense(defense_submission_id: str, url: str):
                 break
             except requests.exceptions.ConnectionError as e:
                 if retry < max_retries - 1:
-                    logger.info(f"Connection failed (attempt {retry+1}/{max_retries}), retrying in 3s...")
-                    time.sleep(3)
+                    logger.info(f"Connection failed (attempt {retry+1}/{max_retries}), retrying...") # Removed timer it was annoying, can add back if we need
                 else:
                     error_msg = f"ConnectionError on final retry: {e}"
             except requests.Timeout:
@@ -157,7 +158,7 @@ def _evaluate_defense(defense_submission_id: str, url: str):
                 except Exception as e:
                     error_msg = f"Failed to parse JSON: {e}"
         else:
-            logger.error(f"Sample {file_id} failed: {error_msg}")
+            logger.info(f"Sample {file_id} failed: {error_msg}")
             
         upsert_evaluation(
             evaluation_run_id=run_id,
@@ -170,6 +171,61 @@ def _evaluate_defense(defense_submission_id: str, url: str):
         INTERNAL_QUEUE.task_done()
     
     producer.join()
+    
+
+def _validate_defense(image_name: str, url: str):
+    logger.info(f"Validating defense container: {url}")
+    client = docker.from_env()
+    
+    # Uncompressed image size check
+    try:
+        image = client.images.get(image_name)
+        size_bytes = image.attrs.get('Size', 0)
+        size_mb = size_bytes / (1024 * 1024)
+        max_size_mb = config.worker.defense_job.max_uncompressed_size_mb
+        
+        logger.info(f"Image uncompressed size: {size_mb:.2f} MB (limit: {max_size_mb} MB)")
+        if size_mb > max_size_mb:
+            raise ValueError(f"Image size {size_mb:.2f}MB exceeds limit of {max_size_mb}MB")
+    except docker.errors.ImageNotFound:
+        raise ValueError(f"Image {image_name} not found for validation")
+
+    # POST / check
+    probe_path = os.path.join(os.path.dirname(__file__), "..", "tests", "minimal.exe")
+    if os.path.exists(probe_path):
+        with open(probe_path, "rb") as f:
+            probe_data = f.read(4096)
+    else:
+        probe_data = b"MZ" + b"\x00" * 4094
+    
+    try:
+        response = requests.post(
+            url,
+            data=probe_data,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=config.worker.evaluation.requests_timeout_seconds
+        )
+    except requests.exceptions.RequestException as e:
+        raise ValueError(f"Defense validation failed: Could not POST to port 8080: {e}")
+
+    if response.status_code != 200:
+        raise ValueError(f"Defense validation failed: POST / returned HTTP {response.status_code}")
+
+    # Content-Type header check
+    content_type = response.headers.get("Content-Type", "")
+    if "application/json" not in content_type:
+         raise ValueError(f"Defense validation failed: Expected application/json response, got {content_type}")
+
+    # Prediction in range check
+    try:
+        result_json = response.json()
+        prediction = result_json.get("result")
+        if prediction not in [0, 1]:
+            raise ValueError(f"Defense validation failed: Result field must be 0 or 1, got {prediction}")
+    except Exception as e:
+        raise ValueError(f"Defense validation failed: Failed to parse JSON response: {e}")
+
+    logger.info("Defense validation successful")
 
 
 @celery_app.task(name="worker.tasks.run_defense_job", bind=True)
@@ -181,15 +237,17 @@ def run_defense_job(
     scope: str | None = None,
     include_behavior_different: bool | None = None,
 ) -> None:
-    """Stub defense job.
-
-    MVP behavior: pull image mapping from DB, instantiate docker container tightly constrained
-    inside eval_net, log container states using celery logger, and tear down gracefully.
+    """
+    MVP behavior: pull image mapping from DB, instantiate docker container inside a unique network, 
+    log container states (temporarily) using celery logger, and tear down gracefully.
     """
     logger.info(
         f"Starting defense job {job_id} for submission {defense_submission_id}"
     )
     container = None
+    network = None
+    network_name = f"eval_net_{job_id}"
+    worker_container_id = socket.gethostname()
     try:
         set_job_status(job_id=job_id, status="running")
         
@@ -207,11 +265,15 @@ def run_defense_job(
             logger.info(f"Pulling image: {image_name}")
             client.images.pull(image_name)
 
-        logger.info(f"Starting container from image: {image_name} on network eval_net")
+        # logger.info(f"Creating isolated network: {network_name}")
+        network = client.networks.create(network_name, internal=True)
+        network.connect(worker_container_id)
+
+        logger.info(f"Starting container from image: {image_name} on network {network_name}")
         container = client.containers.run(
             image_name,
             detach=True,
-            network="eval_net",  # Isolated network for eval
+            network=network_name,  # Isolated network for eval
             mem_limit=config.worker.defense_job.mem_limit,
             nano_cpus=config.worker.defense_job.nano_cpus, 
             pids_limit=config.worker.defense_job.pids_limit,
@@ -243,7 +305,7 @@ def run_defense_job(
                     response = requests.get(url, timeout=2)
                     # Any response means container is listening
                     container_ready = True
-                    logger.info(f"Container ready after {int(time.time() - start_wait)}s")
+                    logger.info(f"Defense ready after {int(time.time() - start_wait)}s")
                     break
                 except requests.exceptions.RequestException:
                     # Container not ready yet, wait and retry
@@ -251,7 +313,11 @@ def run_defense_job(
                     logger.info(f"Defense starting...")
         
         # Run the evaluation logic using the internal container networking
-        logger.info(f"Predict endpoint should be {url}")
+        # logger.info(f"Predict endpoint should be {url}")
+        
+        # Validate before evaluation
+        _validate_defense(image_name, url)
+        
         _evaluate_defense(defense_submission_id, url)
         
         # Grab container logs and send to Celery logs
@@ -279,6 +345,17 @@ def run_defense_job(
                 container.remove()
             except Exception as cleanup_err:
                 logger.warning(f"Failed to cleanup container {container.id[:12]}: {cleanup_err}")
+
+        if network:
+            logger.info(f"Cleaning up network {network_name}")
+            try:
+                network.disconnect(worker_container_id, force=True)
+            except Exception as e:
+                logger.warning(f"Failed to disconnect worker from network {network_name}: {e}")
+            try:
+                network.remove()
+            except Exception as e:
+                logger.warning(f"Failed to remove network {network_name}: {e}")
 
 
 @celery_app.task(name="worker.tasks.run_attack_job")

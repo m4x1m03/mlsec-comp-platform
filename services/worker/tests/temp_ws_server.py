@@ -33,13 +33,13 @@ async def handle_client(websocket):
             await websocket.send(json.dumps(metadata))
             
             # Delay to test sequential queue processing
-            await asyncio.sleep(0.5) 
+            # await asyncio.sleep(0.5) 
             
             logger.info(f"Sending binary data for sample {i+1}/{len(file_ids)}")
             await websocket.send(file_bytes)
             
             # Wait a bit between samples to distinguish them in logs
-            await asyncio.sleep(1)
+            # await asyncio.sleep(1)
 
         # Finish stream
         await websocket.send(json.dumps({"status": "done"}))
@@ -59,7 +59,7 @@ async def main():
     host = os.getenv("WS_HOST", "0.0.0.0")
     logger.info(f"Starting mock WebSocket server on ws://{host}:{port}")
     async with websockets.serve(handle_client, host, port, max_size=None):
-        await asyncio.Future()
+        await asyncio.sleep(120)
 
 if __name__ == "__main__":
     asyncio.run(main())

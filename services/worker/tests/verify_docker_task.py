@@ -12,6 +12,7 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://mlsec:mlsec@localhost
 DOCKER_IMAGE = "https://hub.docker.com/r/gamdm/tsdes-defender"
 # https://hub.docker.com/r/thompaar003/notconv
 # https://hub.docker.com/r/gamdm/tsdes-defender
+# https://hub.docker.com/r/thompaar003/evil-defense
 
 def setup_test_data():
     engine = create_engine(DATABASE_URL)
@@ -57,7 +58,7 @@ def setup_test_data():
             npp_bytes = f.read()
 
         file_ids = []
-        for i in range(10):
+        for i in range(200):
             file_id = str(uuid.uuid4())
             conn.execute(
                 text("INSERT INTO attack_files (id, attack_submission_id, object_key, filename, byte_size, sha256) VALUES (:id, :atk, :ok, :fn, :size, :hash)"),

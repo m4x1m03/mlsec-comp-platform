@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 class DefenseJobConfig(BaseModel):
     mem_limit: str = "1g"
     nano_cpus: int = 1000000000
-    pids_limit: int = 200
+    pids_limit: int = 100
     container_timeout: int = 30
+    max_uncompressed_size_mb: int = 1024
 
 class EvaluationConfig(BaseModel):
     requests_timeout_seconds: int = 5

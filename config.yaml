@@ -2,7 +2,8 @@ worker:
   defense_job:
     mem_limit: "1g"
     nano_cpus: 1000000000
-    pids_limit: 200
+    pids_limit: 100
     container_timeout: 30
+    max_uncompressed_size_mb: 1024
   evaluation:
     requests_timeout_seconds: 5
