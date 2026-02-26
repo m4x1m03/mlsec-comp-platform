@@ -39,7 +39,7 @@ def _resolve_image_name(image_reference: str) -> str:
         return image_reference
     parsed = urlparse(image_reference)
     path = parsed.path.strip('/')
-    if 'hub.docker.com' in parsed.netloc:
+    if parsed.netloc == 'hub.docker.com':
         match = re.search(r'^r/([^/]+/[^/]+)', path)
         if match:
             return match.group(1)
