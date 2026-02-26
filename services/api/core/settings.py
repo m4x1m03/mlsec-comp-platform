@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,6 +21,12 @@ class Settings(BaseSettings):
     auth_session_renew_on_validation: bool = True
     auth_session_renew_threshold_minutes: int = 60
     auth_session_max_lifetime_minutes: int = 10080
+    auth_session_cookie_name: str = "mlsec_session"
+    auth_session_cookie_secure: bool = False
+    auth_session_cookie_httponly: bool = True
+    auth_session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    auth_session_cookie_path: str = "/"
+    auth_session_cookie_domain: str | None = None
 
     cors_allow_origins: list[str] = [
         "http://localhost:4321",
