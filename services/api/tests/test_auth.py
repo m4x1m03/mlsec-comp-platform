@@ -12,9 +12,10 @@ def _session_cookie_name() -> str:
 
 
 def _assert_session_cookie_flags(set_cookie_header: str) -> None:
-    assert "HttpOnly" in set_cookie_header
-    assert "Path=/" in set_cookie_header
-    assert f"SameSite={get_settings().auth_session_cookie_samesite.capitalize()}" in set_cookie_header
+    header = set_cookie_header.lower()
+    assert "httponly" in header
+    assert "path=/" in header
+    assert f"samesite={get_settings().auth_session_cookie_samesite}" in header
 
 
 def test_login_unknown_email_requires_registration(client, db_session):
