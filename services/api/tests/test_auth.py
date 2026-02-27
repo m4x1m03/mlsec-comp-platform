@@ -4,6 +4,19 @@ import hashlib
 
 from sqlalchemy import text
 
+from core.settings import get_settings
+
+
+def _session_cookie_name() -> str:
+    return get_settings().auth_session_cookie_name
+
+
+def _assert_session_cookie_flags(set_cookie_header: str) -> None:
+    header = set_cookie_header.lower()
+    assert "httponly" in header
+    assert "path=/" in header
+    assert f"samesite={get_settings().auth_session_cookie_samesite}" in header
+
 
 def test_login_unknown_email_requires_registration(client, db_session):
     resp = client.post("/auth/login", json={"email": "new-user@example.com"})
@@ -13,7 +26,8 @@ def test_login_unknown_email_requires_registration(client, db_session):
     assert body["authenticated"] is False
     assert body["requires_registration"] is True
     assert body["required_registration_fields"] == ["username"]
-    assert body["access_token"] is None
+    assert body["user"] is None
+    assert "set-cookie" not in resp.headers
 
 
 def test_register_creates_user_identity_and_session(client, db_session):
@@ -24,10 +38,12 @@ def test_register_creates_user_identity_and_session(client, db_session):
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["token_type"] == "bearer"
     assert body["user"]["email"] == "register-flow@example.com"
     assert body["user"]["username"] == "register_user"
-    assert body["access_token"]
+    assert body["expires_at"] is not None
+    assert "set-cookie" in resp.headers
+    assert f"{_session_cookie_name()}=" in resp.headers["set-cookie"]
+    _assert_session_cookie_flags(resp.headers["set-cookie"])
 
     user_row = db_session.execute(
         text(
@@ -57,7 +73,9 @@ def test_register_creates_user_identity_and_session(client, db_session):
     assert identity_row[0] == "email_2fa"
     assert identity_row[1] == "register-flow@example.com"
 
-    token_hash = hashlib.sha256(body["access_token"].encode("utf-8")).hexdigest()
+    session_cookie = client.cookies.get(_session_cookie_name())
+    assert session_cookie is not None
+    token_hash = hashlib.sha256(session_cookie.encode("utf-8")).hexdigest()
     session_row = db_session.execute(
         text(
             """
@@ -92,10 +110,14 @@ def test_login_registered_user_issues_session_token(client, db_session):
     assert body["authenticated"] is True
     assert body["requires_registration"] is False
     assert body["user"]["email"] == "existing-user@example.com"
-    assert body["token_type"] == "bearer"
-    assert body["access_token"]
+    assert body["expires_at"] is not None
+    assert "set-cookie" in resp.headers
+    assert f"{_session_cookie_name()}=" in resp.headers["set-cookie"]
+    _assert_session_cookie_flags(resp.headers["set-cookie"])
 
-    token_hash = hashlib.sha256(body["access_token"].encode("utf-8")).hexdigest()
+    session_cookie = client.cookies.get(_session_cookie_name())
+    assert session_cookie is not None
+    token_hash = hashlib.sha256(session_cookie.encode("utf-8")).hexdigest()
     session_row = db_session.execute(
         text(
             """
@@ -117,15 +139,15 @@ def test_logout_revokes_session_and_blocks_reuse(client, db_session):
     )
     assert register_resp.status_code == 201
 
-    access_token = register_resp.json()["access_token"]
-    headers = {"Authorization": f"Bearer {access_token}"}
-
-    me_resp = client.get("/auth/me", headers=headers)
+    me_resp = client.get("/auth/me")
     assert me_resp.status_code == 200
     assert me_resp.json()["user"]["email"] == "logout-flow@example.com"
 
-    logout_resp = client.post("/auth/logout", headers=headers)
+    logout_resp = client.post("/auth/logout")
     assert logout_resp.status_code == 204
+    assert "set-cookie" in logout_resp.headers
+    assert f"{_session_cookie_name()}=" in logout_resp.headers["set-cookie"]
+    _assert_session_cookie_flags(logout_resp.headers["set-cookie"])
 
-    me_after_logout_resp = client.get("/auth/me", headers=headers)
+    me_after_logout_resp = client.get("/auth/me")
     assert me_after_logout_resp.status_code == 401

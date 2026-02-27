@@ -61,8 +61,6 @@ class AuthenticatedUserResponse(BaseModel):
 
 
 class SessionResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
     expires_at: datetime
     user: AuthenticatedUserResponse
 
@@ -71,8 +69,6 @@ class LoginResponse(BaseModel):
     authenticated: bool
     requires_registration: bool
     required_registration_fields: list[str] = Field(default_factory=list)
-    access_token: str | None = None
-    token_type: str | None = None
     expires_at: datetime | None = None
     user: AuthenticatedUserResponse | None = None
 
