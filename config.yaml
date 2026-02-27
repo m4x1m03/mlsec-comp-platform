@@ -7,3 +7,18 @@ worker:
     max_uncompressed_size_mb: 1024
   evaluation:
     requests_timeout_seconds: 5
+  source:
+    # Resource limits
+    max_zip_size_mb: 512
+    max_build_time_seconds: 300
+    build_mem_limit: "2g"
+    temp_build_dir: "/tmp/mlsec-builds"  # Inside container only - NOT mounted from host
+    
+    # Security settings for build isolation
+    use_buildkit: true                    # Enable Docker BuildKit security features
+    network_disabled: true                # Prevent network access during builds
+    no_cache: true                        # Prevent cache poisoning
+    build_cpu_quota: 100000               # Limit CPU usage to 1 core (prevent resource spamming)
+    max_dockerfile_size_kb: 100           # Limit Dockerfile size (negotiable, we can remove this)
+  minio:
+    bucket_name: "defense-submissions"

@@ -31,8 +31,25 @@ services:
     networks:
       - backend_net
 
-  # TODO: MinIO
-  # minio:
+  minio:
+    image: minio/minio:latest
+    container_name: mlsec-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"  # API
+      - "9001:9001"  # Console UI
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - backend_net
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -57,6 +74,10 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_SECURE: "false"
     ports:
       - "8000:8000"
     networks:
@@ -64,6 +85,7 @@ services:
     depends_on:
       - postgres
       - rabbitmq
+      - minio
 
   # Gateway to control traffic for student containers
   eval-gateway:
@@ -91,6 +113,10 @@ services:
       API_WS_URL: ws://host.docker.internal:8765/ws/eval/samples # Temporary WebSocket to Simulate FastAPI
       GATEWAY_SECRET: welovemarcus
       GATEWAY_URL: http://mlsec-gateway:8080
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_SECURE: "false"
     extra_hosts:
       - "host.docker.internal:host-gateway" # Also Temporary for WebSocket Simulation
     volumes:
@@ -103,6 +129,7 @@ services:
     depends_on:
       - postgres
       - rabbitmq
+      - minio
 
   # Frontend (Astro)
   frontend:
@@ -135,5 +162,6 @@ volumes:
   pgdata:
   pgdata_test:
   rabbitmqdata:
+  miniodata:
 
 
