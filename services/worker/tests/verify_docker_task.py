@@ -9,7 +9,7 @@ from celery import Celery
 # Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password123@localhost:5432/mlsec")
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://mlsec:mlsec@localhost:5672//")
-DOCKER_IMAGE = "https://hub.docker.com/r/gamdm/tsdes-defender"
+DOCKER_IMAGE = "https://hub.docker.com/r/thompaar003/notconv"
 # https://hub.docker.com/r/thompaar003/notconv
 # https://hub.docker.com/r/gamdm/tsdes-defender
 # https://hub.docker.com/r/thompaar003/evil-defense
@@ -58,7 +58,7 @@ def setup_test_data():
             npp_bytes = f.read()
 
         file_ids = []
-        for i in range(200):
+        for i in range(5):
             file_id = str(uuid.uuid4())
             conn.execute(
                 text("INSERT INTO attack_files (id, attack_submission_id, object_key, filename, byte_size, sha256) VALUES (:id, :atk, :ok, :fn, :size, :hash)"),

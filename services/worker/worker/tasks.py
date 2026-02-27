@@ -121,12 +121,19 @@ def _evaluate_defense(defense_submission_id: str, url: str):
         prediction = None
         error_msg = None
         
+        gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
+        gateway_secret = os.getenv("GATEWAY_SECRET", "")
+        
         for retry in range(max_retries):
             try:
                 response = requests.post(
-                    url,
+                    gateway_url,
                     data=sample_bytes,
-                    headers={"Content-Type": "application/octet-stream"},
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "X-Target-Url": url,
+                        "X-Gateway-Auth": gateway_secret
+                    },
                     timeout=config.worker.evaluation.requests_timeout_seconds
                 )
                 success = True
@@ -198,11 +205,18 @@ def _validate_defense(image_name: str, url: str):
     else:
         probe_data = b"MZ" + b"\x00" * 4094
     
+    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
+    gateway_secret = os.getenv("GATEWAY_SECRET", "")
+    
     try:
         response = requests.post(
-            url,
+            gateway_url,
             data=probe_data,
-            headers={"Content-Type": "application/octet-stream"},
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Target-Url": url,
+                "X-Gateway-Auth": gateway_secret
+            },
             timeout=config.worker.evaluation.requests_timeout_seconds
         )
     except requests.exceptions.RequestException as e:
@@ -267,11 +281,15 @@ def run_defense_job(
 
         # logger.info(f"Creating isolated network: {network_name}")
         network = client.networks.create(network_name, internal=True)
-        network.connect(worker_container_id)
+        # Ensure the worker is not connected
+        gateway_container = client.containers.get("mlsec-gateway")
+        network.connect(gateway_container)
 
         logger.info(f"Starting container from image: {image_name} on network {network_name}")
+        container_name = f"eval_defense_{job_id}"
         container = client.containers.run(
             image_name,
+            name=container_name,
             detach=True,
             network=network_name,  # Isolated network for eval
             mem_limit=config.worker.defense_job.mem_limit,
@@ -301,9 +319,18 @@ def run_defense_job(
         # Stealing this from Graham prototype
         while (time.time() - start_wait) < container_timeout: 
                 try:
-                    # Try to connect to the container
-                    response = requests.get(url, timeout=2)
-                    # Any response means container is listening
+                    # Try to connect to the container via gateway
+                    headers = {
+                        "X-Target-Url": url,
+                        "X-Gateway-Auth": os.getenv("GATEWAY_SECRET", "")
+                    }
+                    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
+                    response = requests.get(gateway_url, headers=headers, timeout=2)
+                    if response.status_code == 502:
+                        # Gateway couldn't connect to upstream
+                        time.sleep(1)
+                        continue
+                    # Any other response type means container is listening
                     container_ready = True
                     logger.info(f"Defense ready after {int(time.time() - start_wait)}s")
                     break
@@ -349,9 +376,10 @@ def run_defense_job(
         if network:
             logger.info(f"Cleaning up network {network_name}")
             try:
-                network.disconnect(worker_container_id, force=True)
+                gateway_container = client.containers.get("mlsec-gateway")
+                network.disconnect(gateway_container, force=True)
             except Exception as e:
-                logger.warning(f"Failed to disconnect worker from network {network_name}: {e}")
+                logger.warning(f"Failed to disconnect gateway from network {network_name}: {e}")
             try:
                 network.remove()
             except Exception as e:
