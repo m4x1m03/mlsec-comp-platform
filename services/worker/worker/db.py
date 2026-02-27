@@ -45,6 +45,7 @@ def set_job_status(*, job_id: str, status: str, error: str | None = None) -> Non
                 {"status": status, "id": job_id, "error": error},
             )
 
+
 def get_defense_docker_image(*, submission_id: str) -> str | None:
     engine = get_engine()
     with engine.connect() as conn:
@@ -61,6 +62,7 @@ def get_defense_docker_image(*, submission_id: str) -> str | None:
         ).scalar()
         return result
 
+
 def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: str) -> str:
     engine = get_engine()
     with engine.begin() as conn:
@@ -75,6 +77,7 @@ def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: s
             {"def_id": defense_submission_id, "atk_id": attack_submission_id},
         ).scalar()
         return str(result)
+
 
 def upsert_evaluation(
     *,
@@ -101,3 +104,58 @@ def upsert_evaluation(
                 "dur": duration_ms
             }
         )
+
+
+def get_defense_submission_source(submission_id: str) -> tuple[str, dict]:
+    """
+    Query defense_submission_details and return source type with relevant data.
+
+    Args:
+        submission_id: UUID of the defense submission
+
+    Returns:
+        Tuple of (source_type, data_dict) where data_dict contains:
+        - For 'docker': {'docker_image': str, 'sha256': str | None}
+        - For 'github': {'git_repo': str, 'sha256': str | None}
+        - For 'zip': {'object_key': str, 'sha256': str | None}
+
+    Raises:
+        ValueError: If submission not found or invalid source_type
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text(
+                """
+                SELECT source_type, docker_image, git_repo, object_key, sha256
+                FROM defense_submission_details
+                WHERE submission_id = :submission_id
+                """
+            ),
+            {"submission_id": submission_id},
+        ).fetchone()
+
+        if result is None:
+            raise ValueError(f"Defense submission not found: {submission_id}")
+
+        source_type, docker_image, git_repo, object_key, sha256 = result
+
+        # Build data dict based on source type
+        if source_type == "docker":
+            if not docker_image:
+                raise ValueError(
+                    f"Invalid defense submission {submission_id}: source_type='docker' but docker_image is NULL")
+            return (source_type, {"docker_image": docker_image, "sha256": sha256})
+        elif source_type == "github":
+            if not git_repo:
+                raise ValueError(
+                    f"Invalid defense submission {submission_id}: source_type='github' but git_repo is NULL")
+            return (source_type, {"git_repo": git_repo, "sha256": sha256})
+        elif source_type == "zip":
+            if not object_key:
+                raise ValueError(
+                    f"Invalid defense submission {submission_id}: source_type='zip' but object_key is NULL")
+            return (source_type, {"object_key": object_key, "sha256": sha256})
+        else:
+            raise ValueError(
+                f"Invalid source_type for submission {submission_id}: {source_type}")
