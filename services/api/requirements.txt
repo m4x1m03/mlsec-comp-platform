@@ -4,3 +4,5 @@ pydantic-settings>=2.2,<3
 celery>=5.3,<6
 SQLAlchemy>=2.0,<3
 psycopg2-binary>=2.9,<3
+minio>=7.2.0,<8
+redis>=5.0.0,<6
