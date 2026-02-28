@@ -3,36 +3,34 @@
 from __future__ import annotations
 
 import os
-import json
-import queue
-import threading
 import time
 import requests
-from websockets.sync.client import connect as ws_connect
+from minio import Minio
 from celery.utils.log import get_task_logger
-from ..db import ensure_evaluation_run, upsert_evaluation
+from ..db import (
+    ensure_evaluation_run,
+    upsert_evaluation,
+    get_attack_files
+)
+from ..redis_client import WorkerRegistry
 
 logger = get_task_logger(__name__)
 
 
-class QueueStatus:
-    """Status of the sample fetching queue."""
-    OPEN = "OPEN"
-    CLOSED = "CLOSED"
-
-
-def run_evaluation(
-    defense_submission_id: int,
+def evaluate_defense_with_redis(
+    worker_id: str,
+    defense_submission_id: str,
     container_url: str,
     config: dict
 ) -> None:
     """
-    Evaluate defense container against all attack samples.
+    Evaluate defense container against attacks from Redis INTERNAL_QUEUE.
 
-    Uses WebSocket to stream samples from API, then sends each
-    sample to the defense container via gateway and records results.
+    Polls Redis queue for attack IDs, queries database for attack files,
+    downloads from MinIO, evaluates against defense, records results.
 
     Args:
+        worker_id: Worker ID for Redis registration
         defense_submission_id: Defense submission ID
         container_url: URL of running defense container 
         config: Configuration dict with worker settings
@@ -40,21 +38,24 @@ def run_evaluation(
     Raises:
         Exception: If evaluation encounters critical errors
     """
-    logger.info(f"Starting evaluation for defense {defense_submission_id}")
+    logger.info(
+        f"Starting Redis-based evaluation for defense {defense_submission_id}")
 
-    # Setup internal queue for producer-consumer pattern
-    INTERNAL_QUEUE = queue.Queue(maxsize=100)
-    status_dict = {"status": QueueStatus.OPEN}
+    # Initialize Redis registry
+    registry = WorkerRegistry()
 
-    # Start producer thread to fetch samples via WebSocket
-    producer = threading.Thread(
-        target=_fetch_samples,
-        args=(INTERNAL_QUEUE, status_dict)
+    # Initialize MinIO client
+    minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+    minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+    minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    minio_bucket = os.getenv("MINIO_BUCKET", "mlsec-submissions")
+
+    minio_client = Minio(
+        minio_endpoint,
+        access_key=minio_access_key,
+        secret_key=minio_secret_key,
+        secure=False  # TODO: Enable TLS in production
     )
-    producer.start()
-
-    # Track evaluation runs (defense-attack pairs)
-    evaluation_runs = {}  # attack_submission_id -> run_id
 
     # Get config values
     worker_config = config.get('worker', {})
@@ -64,141 +65,125 @@ def run_evaluation(
     gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
     gateway_secret = os.getenv("GATEWAY_SECRET", "")
 
-    # Consumer loop: process samples from queue
+    # Track evaluation runs (defense-attack pairs)
+    evaluation_runs = {}  # attack_submission_id -> run_id
+
+    # Consumer loop: poll Redis queue for attacks
     while True:
-        try:
-            item = INTERNAL_QUEUE.get(timeout=1.0)
-        except queue.Empty:
-            # Check if producer has finished
-            if status_dict["status"] == QueueStatus.CLOSED:
-                break
+        # Blocking pop with 1s timeout (per RabbitMQ Scenario step 5)
+        attack_id = registry.pop_next_attack(worker_id)
+
+        if attack_id is None:
+            # No attacks in queue, check if we should close
+            # Queue remains OPEN until explicitly closed by external signal
+            # For now, continue polling indefinitely
             continue
 
-        metadata, sample_bytes = item
-        attack_submission_id = metadata["attack_submission_id"]
-        file_id = metadata["file_id"]
+        logger.info(
+            f"Processing attack {attack_id} for defense {defense_submission_id}")
 
         # Ensure evaluation run exists for this defense-attack pair
-        if attack_submission_id not in evaluation_runs:
+        if attack_id not in evaluation_runs:
             run_id = ensure_evaluation_run(
                 defense_submission_id=defense_submission_id,
-                attack_submission_id=attack_submission_id
+                attack_submission_id=attack_id
             )
-            evaluation_runs[attack_submission_id] = run_id
+            evaluation_runs[attack_id] = run_id
 
-        run_id = evaluation_runs[attack_submission_id]
-        start_time = time.time()
+        run_id = evaluation_runs[attack_id]
 
-        # Evaluate sample with retry logic
-        max_retries = 1
-        success = False
-        prediction = None
-        error_msg = None
+        # Query database for attack files
+        attack_files = get_attack_files(attack_id)
+        logger.info(f"Found {len(attack_files)} files for attack {attack_id}")
 
-        for retry in range(max_retries):
+        # Process each attack file
+        for file_info in attack_files:
+            file_id = file_info["id"]
+            object_key = file_info["object_key"]
+
+            start_time = time.time()
+
+            # Download file from MinIO
             try:
-                response = requests.post(
-                    gateway_url,
-                    data=sample_bytes,
-                    headers={
-                        "Content-Type": "application/octet-stream",
-                        "X-Target-Url": container_url,
-                        "X-Gateway-Auth": gateway_secret
-                    },
-                    timeout=timeout
-                )
-                success = True
-                break
-            except requests.exceptions.ConnectionError as e:
-                if retry < max_retries - 1:
-                    logger.info(
-                        f"Connection failed (attempt {retry+1}/{max_retries}), "
-                        "retrying..."
-                    )
-                else:
-                    error_msg = f"ConnectionError on final retry: {e}"
-            except requests.Timeout:
-                error_msg = "HTTP request timeout"
-                break
+                response = minio_client.get_object(minio_bucket, object_key)
+                sample_bytes = response.read()
+                response.close()
+                response.release_conn()
             except Exception as e:
-                error_msg = f"Unexpected error: {e}"
-                break
+                logger.error(
+                    f"Failed to download {object_key} from MinIO: {e}")
+                upsert_evaluation(
+                    evaluation_run_id=run_id,
+                    attack_file_id=file_id,
+                    result=None,
+                    error=f"MinIO download failed: {e}",
+                    duration_ms=0
+                )
+                continue
 
-        duration_ms = int((time.time() - start_time) * 1000)
+            # Evaluate sample with retry logic
+            max_retries = 1
+            success = False
+            prediction = None
+            error_msg = None
 
-        # Parse response if successful
-        if success:
-            if response.status_code != 200:
-                error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
-            else:
+            for retry in range(max_retries):
                 try:
-                    result_json = response.json()
-                    prediction = result_json.get("result")
-                    if prediction not in [0, 1]:
-                        error_msg = f"Invalid prediction: {prediction}"
-                        prediction = None
+                    response = requests.post(
+                        gateway_url,
+                        data=sample_bytes,
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "X-Target-Url": container_url,
+                            "X-Gateway-Auth": gateway_secret
+                        },
+                        timeout=timeout
+                    )
+                    success = True
+                    break
+                except requests.exceptions.ConnectionError as e:
+                    if retry < max_retries - 1:
+                        logger.info(
+                            f"Connection failed (attempt {retry+1}/{max_retries}), "
+                            "retrying..."
+                        )
+                    else:
+                        error_msg = f"ConnectionError on final retry: {e}"
+                except requests.Timeout:
+                    error_msg = "HTTP request timeout"
+                    break
                 except Exception as e:
-                    error_msg = f"Failed to parse JSON: {e}"
-        else:
-            logger.info(f"Sample {file_id} failed: {error_msg}")
+                    error_msg = f"Unexpected error: {e}"
+                    break
 
-        # Record evaluation result
-        upsert_evaluation(
-            evaluation_run_id=run_id,
-            attack_file_id=file_id,
-            result=prediction,
-            error=error_msg,
-            duration_ms=duration_ms
-        )
+            duration_ms = int((time.time() - start_time) * 1000)
 
-        INTERNAL_QUEUE.task_done()
+            # Parse response if successful
+            if success:
+                if response.status_code != 200:
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                else:
+                    try:
+                        result_json = response.json()
+                        prediction = result_json.get("result")
+                        if prediction not in [0, 1]:
+                            error_msg = f"Invalid prediction: {prediction}"
+                            prediction = None
+                    except Exception as e:
+                        error_msg = f"Failed to parse JSON: {e}"
+            else:
+                logger.info(f"Sample {file_id} failed: {error_msg}")
 
-    # Wait for producer thread to finish
-    producer.join()
+            # Record evaluation result
+            upsert_evaluation(
+                evaluation_run_id=run_id,
+                attack_file_id=file_id,
+                result=prediction,
+                error=error_msg,
+                duration_ms=duration_ms
+            )
+
+        # Update heartbeat after processing each attack
+        registry.heartbeat(worker_id)
 
     logger.info(f"Evaluation complete for defense {defense_submission_id}")
-
-
-def _fetch_samples(q: queue.Queue, status_dict: dict) -> None:
-    """
-    Producer thread: Fetch samples from API via WebSocket.
-
-    Connects to API WebSocket endpoint and streams samples,
-    placing them in the queue for consumer processing.
-
-    Args:
-        q: Queue to place (metadata, bytes) tuples
-        status_dict: Shared dict with 'status' key for signaling completion
-    """
-    api_ws_url = os.getenv("API_WS_URL", "ws://api:8000/ws/eval/samples")
-
-    try:
-        with ws_connect(api_ws_url, max_size=None) as ws:
-            while True:
-                # Receive metadata JSON
-                metadata_str = ws.recv()
-                try:
-                    metadata = json.loads(metadata_str)
-                except json.JSONDecodeError:
-                    logger.error(
-                        f"Failed to decode metadata JSON: {metadata_str}")
-                    break
-
-                # Check for completion signal
-                if "status" in metadata and metadata["status"] == "done":
-                    break
-                if "error" in metadata:
-                    logger.error(f"WebSocket error: {metadata['error']}")
-                    break
-
-                # Receive sample bytes
-                file_bytes = ws.recv()
-
-                # Add to queue
-                q.put((metadata, file_bytes))
-
-    except Exception as e:
-        logger.error(f"Error streaming samples via WebSocket: {e}")
-    finally:
-        # Signal consumer that producer is done
-        status_dict["status"] = QueueStatus.CLOSED

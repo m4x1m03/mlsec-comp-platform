@@ -159,3 +159,198 @@ def get_defense_submission_source(submission_id: str) -> tuple[str, dict]:
         else:
             raise ValueError(
                 f"Invalid source_type for submission {submission_id}: {source_type}")
+
+
+def get_all_validated_defenses() -> list[str]:
+    """
+    Query all defense submissions that have passed functional validation.
+    Used by attack job to enqueue defenses for evaluation.
+
+    Returns:
+        List of defense submission IDs (UUIDs as strings)
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT id FROM submissions 
+                WHERE submission_type = 'defense' 
+                AND is_functional = TRUE 
+                AND status = 'ready'
+                AND deleted_at IS NULL
+            """)
+        ).fetchall()
+        return [str(row[0]) for row in result]
+
+
+def get_unevaluated_attacks(defense_submission_id: str) -> list[str]:
+    """
+    Query attack submissions not yet evaluated by this defense.
+    Used by worker during initialization to populate INTERNAL_QUEUE.
+
+    Args:
+        defense_submission_id: Defense submission UUID
+
+    Returns:
+        List of attack submission IDs (UUIDs as strings)
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT id FROM submissions 
+                WHERE submission_type = 'attack' 
+                AND status = 'ready'
+                AND deleted_at IS NULL
+                AND id NOT IN (
+                    SELECT attack_submission_id 
+                    FROM evaluation_runs 
+                    WHERE defense_submission_id = :def_id
+                    AND status IN ('running', 'done')
+                )
+            """),
+            {"def_id": defense_submission_id}
+        ).fetchall()
+        return [str(row[0]) for row in result]
+
+
+def check_if_needs_validation(defense_submission_id: str) -> bool:
+    """
+    Check if defense has been functionally validated.
+
+    Args:
+        defense_submission_id: Defense submission UUID
+
+    Returns:
+        True if is_functional is NULL (not yet validated), False otherwise
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT is_functional FROM submissions 
+                WHERE id = :id
+            """),
+            {"id": defense_submission_id}
+        ).scalar()
+        return result is None
+
+
+def mark_defense_validated(defense_submission_id: str) -> None:
+    """
+    Mark defense as functionally validated.
+
+    Args:
+        defense_submission_id: Defense submission UUID
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE submissions 
+                SET is_functional = TRUE,
+                    status = 'ready'
+                WHERE id = :id
+            """),
+            {"id": defense_submission_id}
+        )
+
+
+def mark_defense_failed(defense_submission_id: str, error: str) -> None:
+    """
+    Mark defense as failed validation.
+
+    Args:
+        defense_submission_id: Defense submission UUID
+        error: Error message describing validation failure
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE submissions 
+                SET is_functional = FALSE,
+                    functional_error = :error,
+                    status = 'failed'
+                WHERE id = :id
+            """),
+            {"id": defense_submission_id, "error": error}
+        )
+
+
+def get_attack_files(attack_submission_id: str) -> list[dict]:
+    """
+    Query all attack files for a given attack submission.
+    Used during evaluation to fetch files from database.
+
+    Args:
+        attack_submission_id: Attack submission UUID
+
+    Returns:
+        List of dicts with id, object_key, filename, sha256, is_malware
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT id, object_key, filename, sha256, is_malware
+                FROM attack_files
+                WHERE attack_submission_id = :attack_id
+                ORDER BY created_at
+            """),
+            {"attack_id": attack_submission_id}
+        ).fetchall()
+        return [
+            {
+                "id": str(row[0]),
+                "object_key": row[1],
+                "filename": row[2],
+                "sha256": row[3],
+                "is_malware": row[4]
+            }
+            for row in result
+        ]
+
+
+def is_evaluation_in_progress(defense_id: str, attack_id: str) -> bool:
+    """
+    Check if defense-attack pair is already running or queued.
+
+    Args:
+        defense_id: Defense submission UUID
+        attack_id: Attack submission UUID
+
+    Returns:
+        True if evaluation is queued or running, False otherwise
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM evaluation_runs
+                WHERE defense_submission_id = :def_id
+                AND attack_submission_id = :atk_id
+                AND status IN ('queued', 'running')
+            """),
+            {"def_id": defense_id, "atk_id": attack_id}
+        ).scalar()
+        return result > 0
+
+
+def mark_attack_validated(attack_submission_id: str) -> None:
+    """
+    Mark attack as validated and ready.
+
+    Args:
+        attack_submission_id: Attack submission UUID
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE submissions
+                SET status = 'ready'
+                WHERE id = :id
+            """),
+            {"id": attack_submission_id}
+        )

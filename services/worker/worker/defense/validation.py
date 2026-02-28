@@ -270,3 +270,19 @@ def validate_heuristic(
     # - File system activity
 
     return {}
+
+
+def validate_defense(submission_id: str, source_type: str, config: dict) -> None:
+    """
+    Validate defense submission (stub for Phase 4).
+
+    Args:
+        submission_id: Defense submission UUID
+        source_type: Source type ('docker', 'github', 'zip')
+        config: Configuration dictionary
+
+    Raises:
+        NotImplementedError: This function is pending implementation
+    """
+    raise NotImplementedError(
+        "validate_defense pending implementation in Phase 5")

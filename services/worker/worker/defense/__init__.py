@@ -9,7 +9,7 @@ from .validation import (
     validate_dockerfile_safety,
     validate_build_context,
 )
-from .evaluate import run_evaluation
+from .evaluate import evaluate_defense_with_redis
 
 __all__ = [
     "pull_and_resolve_docker_image",
@@ -19,5 +19,5 @@ __all__ = [
     "validate_heuristic",
     "validate_dockerfile_safety",
     "validate_build_context",
-    "run_evaluation",
+    "evaluate_defense_with_redis",
 ]
