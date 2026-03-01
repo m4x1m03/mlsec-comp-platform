@@ -9,13 +9,39 @@ from io import BytesIO
 from worker.defense.evaluate import evaluate_defense_with_redis
 
 
+def make_pop_attack_sequence(*attacks):
+    """
+    Create a pop_next_attack mock that returns attacks in sequence,
+    then returns None 3 times to trigger termination (max_empty_polls=3).
+
+    Args:
+        *attacks: Attack IDs to return in sequence
+
+    Returns:
+        Function that can be used as pop_next_attack mock (accepts self, worker_id)
+    """
+    call_count = [0]
+    attack_list = list(attacks)
+
+    def pop_next_attack(self, worker_id):
+        if call_count[0] < len(attack_list):
+            result = attack_list[call_count[0]]
+            call_count[0] += 1
+            return result
+        # Return None for 3+ consecutive calls to trigger termination
+        call_count[0] += 1
+        return None
+
+    return pop_next_attack
+
+
 def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
     """Test evaluation polls Redis queue for attacks."""
     # Monkeypatch Redis client
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -94,7 +120,7 @@ def test_evaluate_downloads_from_minio(db_session, fake_redis, test_helpers, mon
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -139,15 +165,11 @@ def test_evaluate_downloads_from_minio(db_session, fake_redis, test_helpers, mon
                         **kwargs: mock_http_response)
 
     # Mock pop to return attack once then None
-    pop_count = [0]
-
-    def fake_pop(wid):
-        if pop_count[0] == 0:
-            pop_count[0] += 1
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id)
+    )
 
     # Run evaluation
     evaluate_defense_with_redis(
@@ -168,7 +190,7 @@ def test_evaluate_sends_to_gateway(db_session, fake_redis, test_helpers, monkeyp
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -217,15 +239,11 @@ def test_evaluate_sends_to_gateway(db_session, fake_redis, test_helpers, monkeyp
     monkeypatch.setattr("requests.post", fake_post)
 
     # Mock pop to return attack once then None
-    pop_count = [0]
-
-    def fake_pop(wid):
-        if pop_count[0] == 0:
-            pop_count[0] += 1
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id)
+    )
 
     # Run evaluation
     container_url = "http://defense:8080/"
@@ -251,7 +269,7 @@ def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypa
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -296,15 +314,11 @@ def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypa
     monkeypatch.setattr("requests.post", fake_post)
 
     # Mock pop to return attack once then None
-    pop_count = [0]
-
-    def fake_pop(wid):
-        if pop_count[0] == 0:
-            pop_count[0] += 1
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id)
+    )
 
     # Run evaluation
     evaluate_defense_with_redis(
@@ -343,7 +357,7 @@ def test_evaluate_updates_heartbeat(db_session, fake_redis, test_helpers, monkey
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -391,17 +405,11 @@ def test_evaluate_updates_heartbeat(db_session, fake_redis, test_helpers, monkey
                         **kwargs: mock_http_response)
 
     # Mock pop to return both attacks then None
-    pop_count = [0]
-    attacks = [attack1_id, attack2_id]
-
-    def fake_pop(wid):
-        if pop_count[0] < len(attacks):
-            result = attacks[pop_count[0]]
-            pop_count[0] += 1
-            return result
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack1_id, attack2_id)
+    )
 
     # Run evaluation
     evaluate_defense_with_redis(
@@ -422,7 +430,7 @@ def test_evaluate_handles_minio_error(db_session, fake_redis, test_helpers, monk
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -453,15 +461,11 @@ def test_evaluate_handles_minio_error(db_session, fake_redis, test_helpers, monk
     monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
 
     # Mock pop to return attack once then None
-    pop_count = [0]
-
-    def fake_pop(wid):
-        if pop_count[0] == 0:
-            pop_count[0] += 1
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id)
+    )
 
     # Run evaluation
     evaluate_defense_with_redis(
@@ -493,7 +497,7 @@ def test_evaluate_handles_gateway_timeout(db_session, fake_redis, test_helpers, 
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -532,15 +536,11 @@ def test_evaluate_handles_gateway_timeout(db_session, fake_redis, test_helpers, 
     monkeypatch.setattr("requests.post", fake_post)
 
     # Mock pop to return attack once then None
-    pop_count = [0]
-
-    def fake_pop(wid):
-        if pop_count[0] == 0:
-            pop_count[0] += 1
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id)
+    )
 
     # Run evaluation
     evaluate_defense_with_redis(
@@ -572,7 +572,7 @@ def test_evaluate_handles_invalid_response(db_session, fake_redis, test_helpers,
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -612,15 +612,11 @@ def test_evaluate_handles_invalid_response(db_session, fake_redis, test_helpers,
     monkeypatch.setattr("requests.post", fake_post)
 
     # Mock pop to return attack once then None
-    pop_count = [0]
-
-    def fake_pop(wid):
-        if pop_count[0] == 0:
-            pop_count[0] += 1
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack", fake_pop)
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id)
+    )
 
     # Run evaluation
     evaluate_defense_with_redis(

@@ -400,7 +400,7 @@ def test_helpers(db_session):
                 text("""
                     INSERT INTO jobs
                     (job_type, status, payload)
-                    VALUES (:type, :status, :payload::jsonb)
+                    VALUES (:type, :status, CAST(:payload AS jsonb))
                     RETURNING id
                 """),
                 {

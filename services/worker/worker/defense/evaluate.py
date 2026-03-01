@@ -61,12 +61,16 @@ def evaluate_defense_with_redis(
     worker_config = config.get('worker', {})
     eval_config = worker_config.get('evaluation', {})
     timeout = eval_config.get('requests_timeout_seconds', 5)
+    max_empty_polls = eval_config.get('max_empty_polls', 3)
 
     gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
     gateway_secret = os.getenv("GATEWAY_SECRET", "")
 
     # Track evaluation runs (defense-attack pairs)
     evaluation_runs = {}  # attack_submission_id -> run_id
+    
+    # Track consecutive empty polls for queue closure
+    empty_poll_count = 0
 
     # Consumer loop: poll Redis queue for attacks
     while True:
@@ -74,10 +78,21 @@ def evaluate_defense_with_redis(
         attack_id = registry.pop_next_attack(worker_id)
 
         if attack_id is None:
-            # No attacks in queue, check if we should close
-            # Queue remains OPEN until explicitly closed by external signal
-            # For now, continue polling indefinitely
+            # No attacks in queue, increment empty poll counter
+            empty_poll_count += 1
+            logger.debug(f"Empty poll {empty_poll_count}/{max_empty_polls}")
+            
+            if empty_poll_count >= max_empty_polls:
+                # Queue exhausted, close and exit
+                logger.info(f"Queue exhausted after {empty_poll_count} empty polls, closing")
+                registry.close_queue(worker_id)
+                break
+            
+            # Continue polling
             continue
+        
+        # Reset empty poll counter when we get an attack
+        empty_poll_count = 0
 
         logger.info(
             f"Processing attack {attack_id} for defense {defense_submission_id}")

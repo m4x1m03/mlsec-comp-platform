@@ -354,3 +354,79 @@ def mark_attack_validated(attack_submission_id: str) -> None:
             """),
             {"id": attack_submission_id}
         )
+
+
+def get_attack_submission_source(attack_submission_id: str) -> dict:
+    """
+    Get attack submission source information.
+
+    Args:
+        attack_submission_id: Attack submission UUID
+
+    Returns:
+        Dictionary with 'zip_object_key' and optional 'zip_sha256', 'file_count'
+
+    Raises:
+        ValueError: If submission not found or missing data
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT zip_object_key, zip_sha256, file_count
+                FROM attack_submission_details
+                WHERE submission_id = :id
+            """),
+            {"id": attack_submission_id}
+        ).fetchone()
+
+        if not result:
+            raise ValueError(
+                f"Attack submission {attack_submission_id} not found in attack_submission_details")
+
+        return {
+            "zip_object_key": result[0],
+            "zip_sha256": result[1],
+            "file_count": result[2]
+        }
+
+
+def insert_attack_files(attack_submission_id: str, files: list[dict]) -> int:
+    """
+    Bulk insert attack files into attack_files table.
+
+    Args:
+        attack_submission_id: Attack submission UUID
+        files: List of file dictionaries with keys:
+            - filename: str
+            - sha256: str
+            - byte_size: int
+            - object_key: str
+            - is_malware: bool (optional)
+
+    Returns:
+        Number of files inserted
+    """
+    if not files:
+        return 0
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        for file_info in files:
+            conn.execute(
+                text("""
+                    INSERT INTO attack_files
+                    (attack_submission_id, object_key, filename, byte_size, sha256, is_malware)
+                    VALUES (:attack_id, :object_key, :filename, :byte_size, :sha256, :is_malware)
+                """),
+                {
+                    "attack_id": attack_submission_id,
+                    "object_key": file_info["object_key"],
+                    "filename": file_info["filename"],
+                    "byte_size": file_info["byte_size"],
+                    "sha256": file_info["sha256"],
+                    "is_malware": file_info.get("is_malware")
+                }
+            )
+
+    return len(files)

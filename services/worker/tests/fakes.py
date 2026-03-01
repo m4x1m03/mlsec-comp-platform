@@ -123,6 +123,32 @@ class FakeRedis:
         """Get length of list."""
         return len(self.lists.get(key, []))
 
+    def lrange(self, key: str, start: int, stop: int) -> list:
+        """Get range of elements from list.
+
+        Args:
+            key: List key
+            start: Start index (0-based, negative = from end)
+            stop: Stop index (-1 = all remaining elements)
+
+        Returns:
+            List of elements in range as bytes (for redis-py compatibility)
+        """
+        if key not in self.lists:
+            return []
+
+        lst = self.lists[key]
+
+        # Handle negative indices
+        if stop == -1:
+            stop = len(lst)
+        else:
+            stop = stop + 1  # Redis stop is inclusive
+
+        # Return as bytes for redis-py compatibility
+        return [item.encode() if isinstance(item, str) else item
+                for item in lst[start:stop]]
+
     def setnx(self, key: str, value: Any) -> bool:
         """Set key if not exists (atomic).
 

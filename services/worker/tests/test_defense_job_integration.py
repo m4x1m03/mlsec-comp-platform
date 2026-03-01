@@ -49,7 +49,7 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -81,6 +81,11 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     # Mock HTTP requests (defense ready check)
@@ -93,14 +98,15 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
     monkeypatch.setattr("requests.get", mock_get)
 
     # Mock validation
-    monkeypatch.setattr("worker.tasks.validate_defense", lambda *args: None)
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional", lambda *args: None)
 
     # Mock Docker image pulling
-    def mock_pull_docker_image(image_name):
+    def mock_pull_and_resolve_docker_image(image_name):
         return image_name
 
     monkeypatch.setattr(
-        "worker.defense.docker_handler.pull_docker_image", mock_pull_docker_image)
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", mock_pull_and_resolve_docker_image)
 
     # Mock evaluation function
     evaluation_called = []
@@ -152,7 +158,7 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -187,6 +193,11 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     mock_response = Mock()
@@ -195,7 +206,7 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
 
     # Mock image handler
     monkeypatch.setattr(
-        "worker.defense.docker_handler.pull_docker_image", lambda x: x)
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
     # Mock evaluation
     evaluation_called = []
@@ -230,7 +241,7 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -257,6 +268,11 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     mock_response = Mock()
@@ -265,13 +281,14 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
 
     # Mock image handler
     monkeypatch.setattr(
-        "worker.defense.docker_handler.pull_docker_image", lambda x: x)
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
     # Mock validation to fail
     def mock_validate_fail(*args):
         raise ValueError("Defense failed health check")
 
-    monkeypatch.setattr("worker.tasks.validate_defense", mock_validate_fail)
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional", mock_validate_fail)
 
     # Run defense job (should fail)
     with pytest.raises(ValueError, match="Defense validation failed"):
@@ -302,7 +319,7 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -329,6 +346,11 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     # Mock HTTP to always return 502 (not ready)
@@ -339,7 +361,7 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
 
     # Mock image handler
     monkeypatch.setattr(
-        "worker.defense.docker_handler.pull_docker_image", lambda x: x)
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
     # Reduce timeout for faster test
     config_dict["worker"]["defense_job"]["container_timeout"] = 2
@@ -363,7 +385,7 @@ def test_defense_job_github_source(db_session, fake_redis, test_helpers, monkeyp
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -390,6 +412,11 @@ def test_defense_job_github_source(db_session, fake_redis, test_helpers, monkeyp
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     mock_response = Mock()
@@ -399,12 +426,12 @@ def test_defense_job_github_source(db_session, fake_redis, test_helpers, monkeyp
     # Mock GitHub handler
     github_called = []
 
-    def mock_build_from_github(repo, def_id):
+    def mock_build_from_github_repo(repo, def_id, config):
         github_called.append((repo, def_id))
         return f"defense-{def_id}:latest"
 
     monkeypatch.setattr(
-        "worker.defense.github_handler.build_from_github", mock_build_from_github)
+        "worker.defense.github_handler.build_from_github_repo", mock_build_from_github_repo)
 
     # Mock evaluation
     monkeypatch.setattr(
@@ -426,7 +453,7 @@ def test_defense_job_zip_source(db_session, fake_redis, test_helpers, monkeypatc
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -453,6 +480,11 @@ def test_defense_job_zip_source(db_session, fake_redis, test_helpers, monkeypatc
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     mock_response = Mock()
@@ -462,12 +494,12 @@ def test_defense_job_zip_source(db_session, fake_redis, test_helpers, monkeypatc
     # Mock ZIP handler
     zip_called = []
 
-    def mock_build_from_zip(obj_key, def_id):
+    def mock_build_from_zip_archive(obj_key, def_id, config, minio_client=None):
         zip_called.append((obj_key, def_id))
         return f"defense-{def_id}:latest"
 
     monkeypatch.setattr(
-        "worker.defense.zip_handler.build_from_zip", mock_build_from_zip)
+        "worker.defense.zip_handler.build_from_zip_archive", mock_build_from_zip_archive)
 
     # Mock evaluation
     monkeypatch.setattr(
@@ -489,7 +521,7 @@ def test_defense_job_cleanup_on_error(db_session, fake_redis, test_helpers, monk
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -538,6 +570,11 @@ def test_defense_job_cleanup_on_error(db_session, fake_redis, test_helpers, monk
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     mock_response = Mock()
@@ -546,7 +583,7 @@ def test_defense_job_cleanup_on_error(db_session, fake_redis, test_helpers, monk
 
     # Mock image handler
     monkeypatch.setattr(
-        "worker.defense.docker_handler.pull_docker_image", lambda x: x)
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
     # Mock evaluation to fail
     def mock_evaluate_fail(*args, **kwargs):
@@ -573,7 +610,7 @@ def test_defense_job_unregisters_worker_on_error(db_session, fake_redis, test_he
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
-        self.redis = fake_redis
+        self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
@@ -600,6 +637,11 @@ def test_defense_job_unregisters_worker_on_error(db_session, fake_redis, test_he
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
 
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
     monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
 
     mock_response = Mock()
@@ -608,7 +650,7 @@ def test_defense_job_unregisters_worker_on_error(db_session, fake_redis, test_he
 
     # Mock image handler
     monkeypatch.setattr(
-        "worker.defense.docker_handler.pull_docker_image", lambda x: x)
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
     # Mock evaluation to fail
     def mock_evaluate_fail(*args, **kwargs):
@@ -624,3 +666,200 @@ def test_defense_job_unregisters_worker_on_error(db_session, fake_redis, test_he
     # Verify all workers unregistered
     active_workers = fake_redis.smembers("active_workers")
     assert len(active_workers) == 0
+
+
+def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """Test that built images (GitHub/ZIP) are removed after evaluation."""
+    from worker import tasks
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    # Create GitHub defense
+    defense_id = test_helpers.create_defense(
+        source_type="github",
+        github_url="https://github.com/user/repo",
+        github_commit="abc123",
+        is_functional=True
+    )
+
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_id
+    )
+
+    # Create attack
+    attack_id = test_helpers.create_attack()
+
+    # Mock Docker
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork(f"eval_net_{job_id}")
+
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    mock_docker_client.images.remove = Mock()  # Track cleanup
+
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    # Mock HTTP requests
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    # Mock github handler to return test image name
+    test_image = "test-defense:abc123"
+    monkeypatch.setattr(
+        "worker.defense.github_handler.build_from_github_repo",
+        lambda *args, **kwargs: test_image
+    )
+
+    # Mock validation
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional",
+        lambda *args, **kwargs: None
+    )
+
+    # Mock pop_next_attack to return one attack then None (3 times for termination)
+    call_count = {"value": 0}
+
+    def mock_pop_next_attack(self):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return attack_id
+        return None
+
+    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
+                        mock_pop_next_attack)
+
+    # Mock attack file retrieval
+    monkeypatch.setattr(
+        "worker.tasks.get_attack_files",
+        lambda attack_id: [{"object_key": "attacks/test.exe"}]
+    )
+
+    # Mock MinIO download
+    monkeypatch.setattr(
+        "worker.tasks.Minio",
+        lambda *args, **kwargs: Mock(fget_object=Mock())
+    )
+
+    # Mock evaluation result upload
+    monkeypatch.setattr(
+        "worker.tasks.upload_evaluation_result",
+        lambda *args, **kwargs: None
+    )
+
+    # Run defense job
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+
+    # Verify image cleanup was called
+    mock_docker_client.images.remove.assert_called_once_with(
+        test_image, force=True)
+
+
+def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """Test that Docker Hub images are NOT removed after evaluation."""
+    from worker import tasks
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    # Create Docker Hub defense
+    defense_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense:latest",
+        is_functional=True
+    )
+
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_id
+    )
+
+    # Create attack
+    attack_id = test_helpers.create_attack()
+
+    # Mock Docker
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork(f"eval_net_{job_id}")
+
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    mock_docker_client.images.remove = Mock()  # Track cleanup
+
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    # Mock HTTP requests
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    # Mock docker handler
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image",
+        lambda x: x
+    )
+
+    # Mock validation
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional",
+        lambda *args, **kwargs: None
+    )
+
+    # Mock pop_next_attack to return one attack then None (3 times for termination)
+    call_count = {"value": 0}
+
+    def mock_pop_next_attack(self):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return attack_id
+        return None
+
+    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
+                        mock_pop_next_attack)
+
+    # Mock attack file retrieval
+    monkeypatch.setattr(
+        "worker.tasks.get_attack_files",
+        lambda attack_id: [{"object_key": "attacks/test.exe"}]
+    )
+
+    # Mock MinIO download
+    monkeypatch.setattr(
+        "worker.tasks.Minio",
+        lambda *args, **kwargs: Mock(fget_object=Mock())
+    )
+
+    # Mock evaluation result upload
+    monkeypatch.setattr(
+        "worker.tasks.upload_evaluation_result",
+        lambda *args, **kwargs: None
+    )
+
+    # Run defense job
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+
+    # Verify image cleanup was NOT called
+    mock_docker_client.images.remove.assert_not_called()

@@ -20,6 +20,7 @@ class DefenseJobConfig(BaseModel):
 
 class EvaluationConfig(BaseModel):
     requests_timeout_seconds: int = 5
+    max_empty_polls: int = 3  # Close queue after N consecutive empty polls
 
 
 class SourceConfig(BaseModel):
@@ -36,6 +37,10 @@ class SourceConfig(BaseModel):
     no_cache: bool = True
     build_cpu_quota: int = 100000  # 1 core = 100000
     max_dockerfile_size_kb: int = 100
+
+    # Cleanup settings
+    # Remove GitHub/ZIP images after evaluation TODO: Adjust settings
+    cleanup_built_images: bool = True
 
 
 class MinIOConfig(BaseModel):

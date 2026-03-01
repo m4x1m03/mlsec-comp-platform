@@ -10,6 +10,11 @@ import requests
 import socket
 import uuid
 import json
+import tempfile
+import zipfile
+import hashlib
+from pathlib import Path
+from minio import Minio
 
 from worker.celery_app import celery_app
 from worker.config import get_config
@@ -22,10 +27,12 @@ from worker.db import (
     mark_defense_validated,
     mark_defense_failed,
     is_evaluation_in_progress,
-    mark_attack_validated
+    mark_attack_validated,
+    get_attack_submission_source,
+    insert_attack_files
 )
 from worker.redis_client import WorkerRegistry
-from worker.defense.validation import validate_defense
+from worker.defense.validation import validate_functional
 from worker.defense.evaluate import evaluate_defense_with_redis
 
 logger = get_task_logger(__name__)
@@ -145,6 +152,8 @@ def run_defense_job(
     container = None
     network = None
     network_name = f"eval_net_{job_id}"
+    source_type = None
+    image_name = None
 
     try:
         set_job_status(job_id=job_id, status="running")
@@ -172,20 +181,26 @@ def run_defense_job(
         logger.info(f"Defense source type: {source_type}")
 
         # Build/pull defense image from source (per Phase 3 handlers)
+        # Convert config to dict for defense module functions
+        config_dict = config.model_dump()
+
         if source_type == "docker":
-            from worker.defense.docker_handler import pull_docker_image
-            image_name = pull_docker_image(source_data["docker_image"])
+            from worker.defense.docker_handler import pull_and_resolve_docker_image
+            image_name = pull_and_resolve_docker_image(
+                source_data["docker_image"])
         elif source_type == "github":
-            from worker.defense.github_handler import build_from_github
-            image_name = build_from_github(
+            from worker.defense.github_handler import build_from_github_repo
+            image_name = build_from_github_repo(
                 source_data["git_repo"],
-                defense_submission_id
+                defense_submission_id,
+                config_dict
             )
         elif source_type == "zip":
-            from worker.defense.zip_handler import build_from_zip
-            image_name = build_from_zip(
+            from worker.defense.zip_handler import build_from_zip_archive
+            image_name = build_from_zip_archive(
                 source_data["object_key"],
-                defense_submission_id
+                defense_submission_id,
+                config_dict
             )
         else:
             raise ValueError(f"Unsupported source type: {source_type}")
@@ -259,7 +274,7 @@ def run_defense_job(
         # Validate defense if needed (per RabbitMQ Scenario step 4)
         if needs_validation:
             try:
-                validate_defense(image_name, url, config)
+                validate_functional(image_name, url, config_dict)
                 mark_defense_validated(defense_submission_id)
                 logger.info("Defense validation successful")
             except Exception as e:
@@ -271,7 +286,7 @@ def run_defense_job(
             worker_id=worker_id,
             defense_submission_id=defense_submission_id,
             container_url=url,
-            config=config
+            config=config_dict
         )
 
         # Grab container logs
@@ -308,6 +323,21 @@ def run_defense_job(
             except Exception as cleanup_err:
                 logger.warning(
                     f"Failed to cleanup container {container.id[:12]}: {cleanup_err}")
+
+        # Cleanup built image (GitHub/ZIP sources only)
+        if image_name and source_type in ['github', 'zip']:
+            cleanup_enabled = config_dict.get('worker', {}).get(
+                'source', {}).get('cleanup_built_images', True)
+            if cleanup_enabled:
+                logger.info(f"Cleaning up built image {image_name}")
+                try:
+                    client = docker.from_env()
+                    client.images.remove(image_name, force=True)
+                    logger.info(f"Removed image {image_name}")
+                except docker.errors.ImageNotFound:
+                    logger.debug(f"Image {image_name} already removed")
+                except docker.errors.APIError as e:
+                    logger.warning(f"Failed to remove image {image_name}: {e}")
 
         # Cleanup network
         if network:
@@ -348,15 +378,110 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
         logger.info(
             f"Starting attack job {job_id} for submission {attack_submission_id}")
 
-        # TODO: Add attack validation logic here
-        # - Download ZIP from MinIO
-        # - Extract files
-        # - Run behavior checks
-        # - Populate attack_files table
+        # Attack validation logic (per Attack Scenario step 1-2)
+        logger.info("Starting attack ZIP validation")
 
-        # For now, mark as validated (per Attack Scenario step 1-2)
-        mark_attack_validated(attack_submission_id)
-        logger.info(f"Attack {attack_submission_id} marked as validated")
+        # Get attack source information
+        attack_source = get_attack_submission_source(attack_submission_id)
+        zip_object_key = attack_source["zip_object_key"]
+        logger.info(f"Attack ZIP object key: {zip_object_key}")
+
+        # Initialize MinIO client
+        config_dict = config.model_dump()
+        minio_config = config_dict.get('worker', {}).get('minio', {})
+        endpoint = minio_config.get('endpoint', 'minio:9000')
+        access_key = minio_config.get('access_key', 'minioadmin')
+        secret_key = minio_config.get('secret_key', 'minioadmin')
+        bucket_name = minio_config.get('bucket_name', 'defense-submissions')
+        secure = minio_config.get('secure', False)
+
+        minio_client = Minio(
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            secure=secure
+        )
+
+        # Download ZIP to temporary file
+        temp_zip = tempfile.NamedTemporaryFile(
+            suffix='.zip',
+            prefix=f'attack_{attack_submission_id}_',
+            delete=False
+        )
+        temp_zip.close()
+
+        temp_extract_dir = None
+
+        try:
+            logger.info(f"Downloading {zip_object_key} from MinIO")
+            minio_client.fget_object(
+                bucket_name, zip_object_key, temp_zip.name)
+            logger.info(f"Downloaded to {temp_zip.name}")
+
+            # Extract ZIP with password "infected"
+            temp_extract_dir = tempfile.mkdtemp(
+                prefix=f"attack_{attack_submission_id}_extract_"
+            )
+            logger.info(f"Extracting ZIP to {temp_extract_dir}")
+
+            try:
+                with zipfile.ZipFile(temp_zip.name, 'r') as zf:
+                    # Try extracting with password "infected"
+                    zf.extractall(temp_extract_dir, pwd=b'infected')
+                logger.info("Successfully extracted attack ZIP")
+            except RuntimeError as e:
+                if "password" in str(e).lower():
+                    raise ValueError(
+                        "Wrong password for attack ZIP (expected 'infected')")
+                raise ValueError(f"Failed to extract ZIP: {e}")
+
+            # Scan extracted files and populate attack_files table
+            extract_path = Path(temp_extract_dir)
+            extracted_files = []
+
+            for file_path in extract_path.rglob('*'):
+                if file_path.is_file():
+                    # Calculate SHA256
+                    sha256_hash = hashlib.sha256()
+                    with open(file_path, 'rb') as f:
+                        for chunk in iter(lambda: f.read(8192), b''):
+                            sha256_hash.update(chunk)
+
+                    # Get relative path
+                    rel_path = file_path.relative_to(extract_path)
+
+                    # Construct object key for future reference
+                    # In a real implementation, these might be uploaded back to MinIO
+                    file_object_key = f"attacks/{attack_submission_id}/{rel_path}"
+
+                    extracted_files.append({
+                        "filename": str(rel_path),
+                        "sha256": sha256_hash.hexdigest(),
+                        "byte_size": file_path.stat().st_size,
+                        "object_key": file_object_key,
+                        "is_malware": True  # Default assumption for attack samples
+                    })
+
+            logger.info(f"Found {len(extracted_files)} files in attack ZIP")
+
+            # Insert files into database
+            if extracted_files:
+                inserted_count = insert_attack_files(
+                    attack_submission_id, extracted_files)
+                logger.info(
+                    f"Inserted {inserted_count} attack files into database")
+
+            # Mark attack as validated
+            mark_attack_validated(attack_submission_id)
+            logger.info(f"Attack {attack_submission_id} marked as validated")
+
+        finally:
+            # Cleanup temporary files
+            if os.path.exists(temp_zip.name):
+                os.unlink(temp_zip.name)
+            if temp_extract_dir and os.path.exists(temp_extract_dir):
+                import shutil
+                shutil.rmtree(temp_extract_dir)
 
         # Initialize Redis client
         # Use a temporary worker ID for API-side operations
@@ -378,7 +503,9 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
                 continue
 
             # Try to mark as queued using Redis atomic operation
-            if not registry.mark_evaluation_queued(defense_id, attack_submission_id):
+            # Generate a placeholder job_id for tracking
+            placeholder_job_id = f"attack-{attack_submission_id}-defense-{defense_id}"
+            if not registry.mark_evaluation_queued(defense_id, attack_submission_id, placeholder_job_id):
                 logger.info(
                     f"Evaluation already marked for defense {defense_id}, skipping")
                 continue
@@ -389,7 +516,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
             if open_workers:
                 # Add attack to existing worker's queue
                 worker_id = open_workers[0]  # Use first available worker
-                registry.add_attack_to_worker(worker_id, attack_submission_id)
+                registry.add_attack_to_queue(worker_id, attack_submission_id)
                 logger.info(
                     f"Added attack {attack_submission_id} to worker {worker_id} queue")
                 enqueued_count += 1
