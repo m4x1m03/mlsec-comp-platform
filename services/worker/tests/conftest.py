@@ -183,6 +183,18 @@ def mock_minio_client(monkeypatch):
 
             return FakeMinioResponse(self.storage[bucket][object_key])
 
+        def fget_object(self, bucket: str, object_key: str, file_path: str):
+            """Download object from bucket to file."""
+            if bucket not in self.storage:
+                raise Exception(f"Bucket {bucket} not found")
+            if object_key not in self.storage[bucket]:
+                raise Exception(
+                    f"Object {object_key} not found in bucket {bucket}")
+
+            # Write data to file
+            with open(file_path, 'wb') as f:
+                f.write(self.storage[bucket][object_key])
+
         def put_object(self, bucket: str, object_key: str, data, length: int):
             """Put object in bucket."""
             if bucket not in self.storage:

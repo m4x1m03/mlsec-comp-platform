@@ -22,7 +22,8 @@ MAX_FILE_COUNT = 10000  # Maximum number of files in archive
 def build_from_zip_archive(
     object_key: str,
     submission_id: int,
-    config: dict
+    config: dict,
+    minio_client=None
 ) -> str:
     """
     Download ZIP archive from MinIO and build Docker image from it.
@@ -31,6 +32,7 @@ def build_from_zip_archive(
         object_key: MinIO object key (e.g., "defense-123.zip")
         submission_id: Defense submission ID for tagging
         config: Configuration dict with source and minio settings
+        minio_client: Optional MinIO client (for testing)
 
     Returns:
         Built image name (defense-{submission_id}:latest)
@@ -47,16 +49,21 @@ def build_from_zip_archive(
         endpoint = minio_config.get('endpoint', 'minio:9000')
         access_key = minio_config.get('access_key', 'minioadmin')
         secret_key = minio_config.get('secret_key', 'minioadmin')
-        bucket_name = minio_config.get('bucket_name', 'defense-submissions')
+        # Try both 'bucket' and 'bucket_name' for compatibility
+        bucket_name = minio_config.get('bucket_name') or minio_config.get(
+            'bucket', 'mlsec-submissions')
         secure = minio_config.get('secure', False)
 
-        # Initialize MinIO client
-        client = Minio(
-            endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure
-        )
+        # Initialize MinIO client if not provided
+        if minio_client is None:
+            client = Minio(
+                endpoint,
+                access_key=access_key,
+                secret_key=secret_key,
+                secure=secure
+            )
+        else:
+            client = minio_client
 
         # Download ZIP to temporary file
         temp_zip = tempfile.NamedTemporaryFile(
@@ -98,6 +105,15 @@ def build_from_zip_archive(
 
         # Validate build context and Dockerfile
         build_context = Path(temp_extract_dir)
+
+        # Check if everything is in a single top-level directory (common with GitHub ZIPs)
+        top_level_items = list(build_context.iterdir())
+        if len(top_level_items) == 1 and top_level_items[0].is_dir():
+            # Use the single directory as build context
+            build_context = top_level_items[0]
+            logger.info(
+                f"Using subdirectory as build context: {build_context.name}")
+
         dockerfile_path = build_context / "Dockerfile"
 
         if not dockerfile_path.exists():
