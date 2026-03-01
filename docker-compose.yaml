@@ -65,6 +65,22 @@ services:
     networks:
       - backend_net
 
+  redis:
+    image: redis:7-alpine
+    container_name: mlsec-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - backend_net
+
   # TODO: FastAPI
   api:
     build:
@@ -74,6 +90,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
+      REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -85,6 +102,7 @@ services:
     depends_on:
       - postgres
       - rabbitmq
+      - redis
       - minio
 
   # Gateway to control traffic for student containers
@@ -110,6 +128,7 @@ services:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
       CELERY_DEFAULT_QUEUE: mlsec
+      REDIS_URL: redis://redis:6379/0
       API_WS_URL: ws://host.docker.internal:8765/ws/eval/samples # Temporary WebSocket to Simulate FastAPI
       GATEWAY_SECRET: welovemarcus
       GATEWAY_URL: http://mlsec-gateway:8080
@@ -129,6 +148,7 @@ services:
     depends_on:
       - postgres
       - rabbitmq
+      - redis
       - minio
 
   # Frontend (Astro)
@@ -162,6 +182,7 @@ volumes:
   pgdata:
   pgdata_test:
   rabbitmqdata:
+  redisdata:
   miniodata:
 
 

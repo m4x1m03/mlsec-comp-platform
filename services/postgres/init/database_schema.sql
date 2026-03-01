@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 
 CREATE INDEX idx_submissions_user ON submissions(user_id);
 CREATE INDEX idx_submissions_type ON submissions(submission_type);
+CREATE INDEX idx_submissions_status_type ON submissions(status, submission_type);
 
 
 --------------------------------------------------
@@ -191,6 +192,11 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Indexes for evaluation_runs queries
+CREATE INDEX idx_evaluation_runs_defense_attack 
+ON evaluation_runs(defense_submission_id, attack_submission_id);
+CREATE INDEX idx_evaluation_runs_status 
+ON evaluation_runs(status);
 
 
 --------------------------------------------------
