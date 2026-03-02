@@ -20,5 +20,8 @@ worker:
     no_cache: true                        # Prevent cache poisoning
     build_cpu_quota: 100000               # Limit CPU usage to 1 core (prevent resource spamming)
     max_dockerfile_size_kb: 100           # Limit Dockerfile size (negotiable, we can remove this)
+    
+    # Cleanup settings
+    cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
   minio:
     bucket_name: "defense-submissions"
