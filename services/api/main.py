@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +11,28 @@ from routers.queue import router as queue_router
 from routers.submissions import router as submissions_router
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events."""
+    from core.storage import ensure_bucket_exists
+
+    logger = logging.getLogger(__name__)
+    logger.info("Initializing API startup tasks...")
+
+    try:
+        logger.info("Ensuring MinIO bucket exists...")
+        ensure_bucket_exists()
+        logger.info("MinIO bucket ready")
+    except Exception as e:
+        logger.error(f"Failed to initialize MinIO: {e}")
+        # Continue startup (may fail later on upload, but allows API to start)
+
+    yield  # Application runs here
+
+    # NOTE: Cleanup code would go here
+    logger.info("API shutting down...")
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=getattr(
@@ -18,6 +41,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="MLSEC Platform API",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     app.add_middleware(
@@ -27,22 +51,6 @@ def create_app() -> FastAPI:
         allow_methods=settings.cors_allow_methods,
         allow_headers=settings.cors_allow_headers,
     )
-
-    @app.on_event("startup")
-    async def startup():
-        """Initialize infrastructure on API startup."""
-        from core.storage import ensure_bucket_exists
-
-        logger = logging.getLogger(__name__)
-        logger.info("Initializing API startup tasks...")
-
-        try:
-            logger.info("Ensuring MinIO bucket exists...")
-            ensure_bucket_exists()
-            logger.info("MinIO bucket ready")
-        except Exception as e:
-            logger.error(f"Failed to initialize MinIO: {e}")
-            # Continue startup (may fail later on upload, but allows API to start)
 
     app.include_router(health_router)
     app.include_router(auth_router)
