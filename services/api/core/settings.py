@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     auth_session_renew_threshold_minutes: int = 60
     auth_session_max_lifetime_minutes: int = 10080
 
+    admin_localhost_only: bool = True
+    admin_trusted_proxy_hosts: list[str] = ["127.0.0.1", "::1"]
+    admin_forwarded_for_header: str = "x-forwarded-for"
+
     cors_allow_origins: list[str] = [
         "http://localhost:4321",
         "http://127.0.0.1:4321",
