@@ -125,9 +125,10 @@ def test_mark_evaluation_queued_first_call(fake_redis, monkeypatch):
     registry = WorkerRegistry()
     defense_id = "def-123"
     attack_id = "attack-456"
+    job_id = "job-789"
 
     # First call should succeed
-    success = registry.mark_evaluation_queued(defense_id, attack_id)
+    success = registry.mark_evaluation_queued(defense_id, attack_id, job_id)
 
     assert success is True
 
@@ -144,13 +145,16 @@ def test_mark_evaluation_queued_duplicate(fake_redis, monkeypatch):
     registry = WorkerRegistry()
     defense_id = "def-123"
     attack_id = "attack-456"
+    job_id = "job-789"
 
     # First call succeeds
-    first_result = registry.mark_evaluation_queued(defense_id, attack_id)
+    first_result = registry.mark_evaluation_queued(
+        defense_id, attack_id, job_id)
     assert first_result is True
 
     # Second call should fail (already exists)
-    second_result = registry.mark_evaluation_queued(defense_id, attack_id)
+    second_result = registry.mark_evaluation_queued(
+        defense_id, attack_id, job_id)
     assert second_result is False
 
 
@@ -162,9 +166,9 @@ def test_mark_evaluation_queued_different_pairs(fake_redis, monkeypatch):
     registry = WorkerRegistry()
 
     # Different pairs should succeed
-    success1 = registry.mark_evaluation_queued("def-1", "attack-1")
-    success2 = registry.mark_evaluation_queued("def-1", "attack-2")
-    success3 = registry.mark_evaluation_queued("def-2", "attack-1")
+    success1 = registry.mark_evaluation_queued("def-1", "attack-1", "job-1")
+    success2 = registry.mark_evaluation_queued("def-1", "attack-2", "job-2")
+    success3 = registry.mark_evaluation_queued("def-2", "attack-1", "job-3")
 
     assert success1 is True
     assert success2 is True
@@ -184,9 +188,10 @@ def test_mark_evaluation_queued_sets_ttl(fake_redis, monkeypatch):
     registry = WorkerRegistry()
     defense_id = "def-123"
     attack_id = "attack-456"
+    job_id = "job-789"
 
     # Mark evaluation
-    registry.mark_evaluation_queued(defense_id, attack_id)
+    registry.mark_evaluation_queued(defense_id, attack_id, job_id)
 
     # Verify TTL set (24 hours = 86400 seconds)
     key = f"evaluations:queued:{defense_id}:{attack_id}"

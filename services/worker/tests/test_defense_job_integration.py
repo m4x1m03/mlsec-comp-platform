@@ -91,11 +91,17 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
     # Mock HTTP requests (defense ready check)
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.json.return_value = {"result": 1}
+    mock_response.headers = {"Content-Type": "application/json"}
 
     def mock_get(*args, **kwargs):
         return mock_response
 
+    def mock_post(*args, **kwargs):
+        return mock_response
+
     monkeypatch.setattr("requests.get", mock_get)
+    monkeypatch.setattr("requests.post", mock_post)
 
     # Mock validation
     monkeypatch.setattr(
@@ -202,7 +208,10 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
 
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.json.return_value = {"result": 1}
+    mock_response.headers = {"Content-Type": "application/json"}
     monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+    monkeypatch.setattr("requests.post", lambda *args, **kwargs: mock_response)
 
     # Mock image handler
     monkeypatch.setattr(
@@ -218,6 +227,10 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
     monkeypatch.setattr(
         "worker.tasks.evaluate_defense_with_redis", mock_evaluate)
 
+    # Mock unregister to preserve queue for assertion
+    monkeypatch.setattr(WorkerRegistry, "unregister",
+                        lambda self, worker_id: None)
+
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
@@ -225,7 +238,7 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
     worker_id = evaluation_called[0]
 
     # Verify INTERNAL_QUEUE contains attack2 and attack3 (not attack1)
-    queue_key = f"worker:{defense_id}:{worker_id}:INTERNAL_QUEUE"
+    queue_key = f"worker:{worker_id}:attacks"
     queue_items = fake_redis.lrange(queue_key, 0, -1)
     queue_attacks = {item.decode() for item in queue_items}
 
@@ -277,7 +290,10 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
 
     mock_response = Mock()
     mock_response.status_code = 200
+    mock_response.json.return_value = {"result": 1}
+    mock_response.headers = {"Content-Type": "application/json"}
     monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+    monkeypatch.setattr("requests.post", lambda *args, **kwargs: mock_response)
 
     # Mock image handler
     monkeypatch.setattr(
@@ -288,7 +304,7 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
         raise ValueError("Defense failed health check")
 
     monkeypatch.setattr(
-        "worker.defense.validation.validate_functional", mock_validate_fail)
+        "worker.tasks.validate_functional", mock_validate_fail)
 
     # Run defense job (should fail)
     with pytest.raises(ValueError, match="Defense validation failed"):
@@ -306,7 +322,7 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
 
     # Verify job failed
     job_status = db_session.execute(
-        text("SELECT status FROM jobs WHERE id = :id::uuid"),
+        text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
         {"id": job_id}
     ).scalar()
     assert job_status == "failed"
@@ -372,7 +388,7 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
 
     # Verify job failed
     job_status = db_session.execute(
-        text("SELECT status FROM jobs WHERE id = :id::uuid"),
+        text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
         {"id": job_id}
     ).scalar()
     assert job_status == "failed"
@@ -681,8 +697,7 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
     # Create GitHub defense
     defense_id = test_helpers.create_defense(
         source_type="github",
-        github_url="https://github.com/user/repo",
-        github_commit="abc123",
+        git_repo="https://github.com/user/repo",
         is_functional=True
     )
 
@@ -733,7 +748,7 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
     # Mock pop_next_attack to return one attack then None (3 times for termination)
     call_count = {"value": 0}
 
-    def mock_pop_next_attack(self):
+    def mock_pop_next_attack(self, worker_id):
         call_count["value"] += 1
         if call_count["value"] == 1:
             return attack_id
@@ -742,23 +757,29 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
     monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
                         mock_pop_next_attack)
 
-    # Mock attack file retrieval
-    monkeypatch.setattr(
-        "worker.tasks.get_attack_files",
-        lambda attack_id: [{"object_key": "attacks/test.exe"}]
-    )
-
     # Mock MinIO download
+    mock_minio_response = Mock()
+    mock_minio_response.read.return_value = b"fake file content"
+    mock_minio_response.close = Mock()
+    mock_minio_response.release_conn = Mock()
+    mock_minio_client_eval = Mock()
+    mock_minio_client_eval.get_object.return_value = mock_minio_response
+
     monkeypatch.setattr(
         "worker.tasks.Minio",
         lambda *args, **kwargs: Mock(fget_object=Mock())
     )
-
-    # Mock evaluation result upload
     monkeypatch.setattr(
-        "worker.tasks.upload_evaluation_result",
-        lambda *args, **kwargs: None
+        "worker.defense.evaluate.Minio",
+        lambda *args, **kwargs: mock_minio_client_eval
     )
+
+    # Mock requests.post for evaluation
+    mock_post_response = Mock()
+    mock_post_response.status_code = 200
+    mock_post_response.json.return_value = {"result": 0}
+    monkeypatch.setattr("requests.post", lambda *args,
+                        **kwargs: mock_post_response)
 
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
@@ -831,7 +852,7 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
     # Mock pop_next_attack to return one attack then None (3 times for termination)
     call_count = {"value": 0}
 
-    def mock_pop_next_attack(self):
+    def mock_pop_next_attack(self, worker_id):
         call_count["value"] += 1
         if call_count["value"] == 1:
             return attack_id
@@ -840,23 +861,29 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
     monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
                         mock_pop_next_attack)
 
-    # Mock attack file retrieval
-    monkeypatch.setattr(
-        "worker.tasks.get_attack_files",
-        lambda attack_id: [{"object_key": "attacks/test.exe"}]
-    )
-
     # Mock MinIO download
+    mock_minio_response = Mock()
+    mock_minio_response.read.return_value = b"fake file content"
+    mock_minio_response.close = Mock()
+    mock_minio_response.release_conn = Mock()
+    mock_minio_client_eval = Mock()
+    mock_minio_client_eval.get_object.return_value = mock_minio_response
+
     monkeypatch.setattr(
         "worker.tasks.Minio",
         lambda *args, **kwargs: Mock(fget_object=Mock())
     )
-
-    # Mock evaluation result upload
     monkeypatch.setattr(
-        "worker.tasks.upload_evaluation_result",
-        lambda *args, **kwargs: None
+        "worker.defense.evaluate.Minio",
+        lambda *args, **kwargs: mock_minio_client_eval
     )
+
+    # Mock requests.post for evaluation
+    mock_post_response = Mock()
+    mock_post_response.status_code = 200
+    mock_post_response.json.return_value = {"result": 0}
+    monkeypatch.setattr("requests.post", lambda *args,
+                        **kwargs: mock_post_response)
 
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)

@@ -64,7 +64,7 @@ def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkey
     pop_calls = []
     original_pop = registry.pop_next_attack
 
-    def tracked_pop(wid):
+    def tracked_pop(self, wid):
         result = original_pop(wid)
         pop_calls.append(result)
         # After 2 attacks, return None to break loop
@@ -313,6 +313,16 @@ def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypa
 
     monkeypatch.setattr("requests.post", fake_post)
 
+    # Mock time.time to ensure measurable duration
+    time_counter = [1000.0]
+
+    def fake_time():
+        result = time_counter[0]
+        time_counter[0] += 0.1  # Add 100ms between calls
+        return result
+
+    monkeypatch.setattr("time.time", fake_time)
+
     # Mock pop to return attack once then None
     monkeypatch.setattr(
         WorkerRegistry,
@@ -332,8 +342,8 @@ def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypa
     from sqlalchemy import text
     results = db_session.execute(
         text("""
-            SELECT af.attack_submission_id, e.result, e.error, e.duration_ms
-            FROM evaluations e
+            SELECT af.attack_submission_id, e.model_output, e.error, e.duration_ms
+            FROM evaluation_file_results e
             JOIN attack_files af ON e.attack_file_id = af.id
             WHERE af.attack_submission_id = CAST(:attack_id AS uuid)
             ORDER BY e.created_at
@@ -379,7 +389,7 @@ def test_evaluate_updates_heartbeat(db_session, fake_redis, test_helpers, monkey
     # Track heartbeat calls
     heartbeat_calls = []
 
-    def fake_heartbeat(wid):
+    def fake_heartbeat(self, wid):
         heartbeat_calls.append(wid)
 
     monkeypatch.setattr(WorkerRegistry, "heartbeat", fake_heartbeat)
@@ -479,8 +489,8 @@ def test_evaluate_handles_minio_error(db_session, fake_redis, test_helpers, monk
     from sqlalchemy import text
     result = db_session.execute(
         text("""
-            SELECT e.result, e.error
-            FROM evaluations e
+            SELECT e.model_output, e.error
+            FROM evaluation_file_results e
             JOIN attack_files af ON e.attack_file_id = af.id
             WHERE af.attack_submission_id = CAST(:attack_id AS uuid)
         """),
@@ -554,8 +564,8 @@ def test_evaluate_handles_gateway_timeout(db_session, fake_redis, test_helpers, 
     from sqlalchemy import text
     result = db_session.execute(
         text("""
-            SELECT e.result, e.error
-            FROM evaluations e
+            SELECT e.model_output, e.error
+            FROM evaluation_file_results e
             JOIN attack_files af ON e.attack_file_id = af.id
             WHERE af.attack_submission_id = CAST(:attack_id AS uuid)
         """),
@@ -630,8 +640,8 @@ def test_evaluate_handles_invalid_response(db_session, fake_redis, test_helpers,
     from sqlalchemy import text
     result = db_session.execute(
         text("""
-            SELECT e.result, e.error
-            FROM evaluations e
+            SELECT e.model_output, e.error
+            FROM evaluation_file_results e
             JOIN attack_files af ON e.attack_file_id = af.id
             WHERE af.attack_submission_id = CAST(:attack_id AS uuid)
         """),

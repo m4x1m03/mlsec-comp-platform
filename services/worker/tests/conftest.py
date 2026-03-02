@@ -1,6 +1,7 @@
 """Pytest fixtures for worker tests."""
 
 from __future__ import annotations
+from pathlib import Path
 from fakes import FakeRedis
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, event, text
@@ -44,10 +45,33 @@ TestingSessionLocal = sessionmaker(bind=engine)
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
     """Create database tables once per test session."""
-    # Import all models to register with Base
-    # Note: Worker doesn't use SQLAlchemy models, uses raw SQL
-    # Tables should already exist from schema.sql initialization
+    # Execute SQL schema file since project uses raw SQL, not ORM models
+    schema_path = Path(__file__).parent.parent.parent / \
+        "postgres" / "init" / "database_schema.sql"
+
+    with engine.connect() as conn:
+        # Drop and recreate schema to ensure clean state
+        conn.execute(text("""
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+        """))
+        conn.commit()
+
+        # Load and execute schema
+        with open(schema_path, "r") as f:
+            schema_sql = f.read()
+        conn.execute(text(schema_sql))
+        conn.commit()
+
     yield
+
+    # Drop all tables on teardown
+    with engine.connect() as conn:
+        conn.execute(text("""
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+        """))
+        conn.commit()
 
 
 # Provide a new database session for each test
@@ -336,6 +360,21 @@ def test_helpers(db_session):
             submission_id = TestHelpers.create_submission(
                 submission_type="attack",
                 status="ready"
+            )
+
+            # Create attack submission details
+            db_session.execute(
+                text("""
+                    INSERT INTO attack_submission_details
+                    (submission_id, zip_object_key, zip_sha256, file_count, extracted_at)
+                    VALUES (CAST(:id AS uuid), :obj_key, :sha256, :file_count, NOW())
+                """),
+                {
+                    "id": submission_id,
+                    "obj_key": f"attacks/{submission_id}/attack.zip",
+                    "sha256": "0" * 64,
+                    "file_count": file_count
+                }
             )
 
             # Create attack files

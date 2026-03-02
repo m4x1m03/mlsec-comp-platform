@@ -1,6 +1,7 @@
 import pytest
+from pathlib import Path
 from sqlalchemy import create_engine  # type: ignore
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
@@ -17,9 +18,33 @@ TestingSessionLocal = sessionmaker(bind=engine)
 # Create tables once per test session
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    Base.metadata.create_all(bind=engine)
+    # Execute SQL schema file since project uses raw SQL, not ORM models
+    schema_path = Path(__file__).parent.parent.parent.parent / \
+        "services" / "postgres" / "init" / "database_schema.sql"
+
+    with engine.connect() as conn:
+        # Drop and recreate schema to ensure clean state
+        conn.execute(text("""
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+        """))
+        conn.commit()
+
+        # Load and execute schema
+        with open(schema_path, "r") as f:
+            schema_sql = f.read()
+        conn.execute(text(schema_sql))
+        conn.commit()
+
     yield
-    Base.metadata.drop_all(bind=engine)
+
+    # Drop all tables on teardown
+    with engine.connect() as conn:
+        conn.execute(text("""
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+        """))
+        conn.commit()
 
 
 # Provide a new database session for each test

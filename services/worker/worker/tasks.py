@@ -104,7 +104,7 @@ def _insert_job(
         conn.execute(
             text("""
                 INSERT INTO jobs (id, job_type, status, requested_by_user_id, payload, created_at, updated_at)
-                VALUES (:id, :job_type, :status, :user_id, :payload::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (:id, :job_type, :status, :user_id, CAST(:payload AS jsonb), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """),
             {
                 "id": job_id,
