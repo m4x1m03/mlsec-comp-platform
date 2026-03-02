@@ -58,47 +58,6 @@ jobs:
           echo "MinIO did not become ready in time."
           exit 1
 
-      - name: Create test artifacts for ZIP handler tests
-        run: |
-          mkdir -p .artifacts
-          cd .artifacts
-          
-          # Create minimal Flask defense
-          cat > app.py << 'EOF'
-          from flask import Flask, request, jsonify
-          app = Flask(__name__)
-          
-          @app.route('/', methods=['POST'])
-          def predict():
-              data = request.get_json()
-              return jsonify({"prediction": "benign", "confidence": 0.95})
-          
-          @app.route('/health', methods=['GET'])
-          def health():
-              return jsonify({"status": "healthy"})
-          
-          if __name__ == '__main__':
-              app.run(host='0.0.0.0', port=8080)
-          EOF
-          
-          cat > requirements.txt << 'EOF'
-          flask==3.0.0
-          werkzeug==3.0.0
-          EOF
-          
-          cat > Dockerfile << 'EOF'
-          FROM python:3.11-slim
-          WORKDIR /app
-          COPY requirements.txt .
-          RUN pip install --no-cache-dir -r requirements.txt
-          COPY app.py .
-          EXPOSE 8080
-          HEALTHCHECK --interval=5s --timeout=3s CMD curl -f http://localhost:8080/health || exit 1
-          CMD ["python", "app.py"]
-          EOF
-          
-          zip good_defense.zip app.py requirements.txt Dockerfile
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

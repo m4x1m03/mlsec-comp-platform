@@ -247,6 +247,63 @@ def mock_minio_client(monkeypatch):
 
 
 @pytest.fixture()
+def defense_zip_file(tmp_path):
+    """Create a test defense ZIP file with Flask app.
+    
+    Returns:
+        Path: Path to the created ZIP file
+    """
+    import zipfile
+    
+    # Create app.py content
+    app_py = """from flask import Flask, request, jsonify
+app = Flask(__name__)
+
+@app.route('/', methods=['POST'])
+def predict():
+    data = request.get_json()
+    return jsonify({"prediction": "benign", "confidence": 0.95})
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "healthy"})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+"""
+    
+    # Create requirements.txt
+    requirements = """flask==3.0.0
+werkzeug==3.0.0
+"""
+    
+    # Create Dockerfile
+    dockerfile = """FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+EXPOSE 8080
+HEALTHCHECK --interval=5s --timeout=3s CMD curl -f http://localhost:8080/health || exit 1
+CMD ["python", "app.py"]
+"""
+    
+    # Write files to temp directory
+    (tmp_path / "app.py").write_text(app_py)
+    (tmp_path / "requirements.txt").write_text(requirements)
+    (tmp_path / "Dockerfile").write_text(dockerfile)
+    
+    # Create ZIP file
+    zip_path = tmp_path / "good_defense.zip"
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.write(tmp_path / "app.py", "app.py")
+        zf.write(tmp_path / "requirements.txt", "requirements.txt")
+        zf.write(tmp_path / "Dockerfile", "Dockerfile")
+    
+    return zip_path
+
+
+@pytest.fixture()
 def test_helpers(db_session):
     """Provide helper functions for creating test data."""
 

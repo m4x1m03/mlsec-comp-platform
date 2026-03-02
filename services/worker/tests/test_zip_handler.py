@@ -5,18 +5,14 @@ from __future__ import annotations
 import pytest
 import docker
 import random
-import os
-from pathlib import Path
 
 from worker.defense.zip_handler import build_from_zip_archive
 
 
-def test_build_from_real_zip_file(config_dict, mock_minio_client):
+def test_build_from_real_zip_file(config_dict, mock_minio_client, defense_zip_file):
     """Test building image from actual ZIP file: good_defense.zip."""
     # Upload the real ZIP file to fake MinIO
-    zip_path = Path(
-        r"c:\Users\user\Documents\mlsec-comp-platform\.artifacts\good_defense.zip")
-    assert zip_path.exists(), f"ZIP file not found at {zip_path}"
+    zip_path = defense_zip_file
 
     with open(zip_path, 'rb') as f:
         zip_data = f.read()
@@ -59,11 +55,10 @@ def test_build_from_real_zip_file(config_dict, mock_minio_client):
         client.close()
 
 
-def test_zip_image_runnable(config_dict, mock_minio_client):
+def test_zip_image_runnable(config_dict, mock_minio_client, defense_zip_file):
     """Test that image built from ZIP can be instantiated."""
     # Upload the real ZIP file
-    zip_path = Path(
-        r"c:\Users\user\Documents\mlsec-comp-platform\.artifacts\good_defense.zip")
+    zip_path = defense_zip_file
     with open(zip_path, 'rb') as f:
         zip_data = f.read()
 
@@ -94,7 +89,7 @@ def test_zip_image_runnable(config_dict, mock_minio_client):
             ports={'8080/tcp': None}
         )
         assert container is not None
-        print(f"✓ ZIP-built image is valid and can be instantiated")
+        print(f"ZIP-built image is valid and can be instantiated")
 
         # Clean up
         container.remove(force=True)
@@ -103,11 +98,10 @@ def test_zip_image_runnable(config_dict, mock_minio_client):
         client.close()
 
 
-def test_zip_size_validation(config_dict, mock_minio_client):
+def test_zip_size_validation(config_dict, mock_minio_client, defense_zip_file):
     """Test that ZIP size limits are enforced."""
     # Upload the ZIP file
-    zip_path = Path(
-        r"c:\Users\user\Documents\mlsec-comp-platform\.artifacts\good_defense.zip")
+    zip_path = defense_zip_file
     with open(zip_path, 'rb') as f:
         zip_data = f.read()
 
@@ -133,7 +127,7 @@ def test_zip_size_validation(config_dict, mock_minio_client):
     )
 
     assert image_name is not None
-    print(f"✓ ZIP passed size validation")
+    print(f"ZIP passed size validation")
 
     # Clean up
     client = docker.from_env()
@@ -143,11 +137,10 @@ def test_zip_size_validation(config_dict, mock_minio_client):
         client.close()
 
 
-def test_zip_with_tiny_size_limit(config_dict, mock_minio_client):
+def test_zip_with_tiny_size_limit(config_dict, mock_minio_client, defense_zip_file):
     """Test that overly restrictive size limits are enforced."""
     # Upload the ZIP file
-    zip_path = Path(
-        r"c:\Users\user\Documents\mlsec-comp-platform\.artifacts\good_defense.zip")
+    zip_path = defense_zip_file
     with open(zip_path, 'rb') as f:
         zip_data = f.read()
 
