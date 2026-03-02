@@ -179,3 +179,8 @@ def fake_redis():
             return deleted
 
     return FakeRedis()
+    try:
+        with TestClient(app, client=("127.0.0.1", 50000)) as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)

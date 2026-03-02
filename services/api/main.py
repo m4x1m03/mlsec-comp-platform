@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.settings import get_settings
+from routers.admin import router as admin_router
 from routers.auth import router as auth_router
 from routers.health import router as health_router
 from routers.leaderboard import (
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     app.include_router(queue_router)
     app.include_router(submissions_router, prefix="/api")
     app.include_router(leaderboard_router, prefix="/api")
+    app.include_router(admin_router)
     return app
 
 
