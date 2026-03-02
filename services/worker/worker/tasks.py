@@ -49,24 +49,6 @@ log_config = LogConfig(
 )
 
 
-# Temporary helper to resolve dockerhub links
-def _resolve_image_name(image_reference: str) -> str:
-    from urllib.parse import urlparse
-    import re
-    if not image_reference.startswith('http'):
-        return image_reference
-    parsed = urlparse(image_reference)
-    path = parsed.path.strip('/')
-    if parsed.netloc == 'hub.docker.com':
-        match = re.search(r'^r/([^/]+/[^/]+)', path)
-        if match:
-            return match.group(1)
-        match = re.search(r'^_/([^/]+)', path)
-        if match:
-            return match.group(1)
-    return path
-
-
 def _insert_job(
     job_type: str,
     status: str,
@@ -158,11 +140,11 @@ def run_defense_job(
     try:
         set_job_status(job_id=job_id, status="running")
 
-        # Register worker with Redis (per RabbitMQ Scenario step 1)
+        # Register worker with Redis
         registry.register(worker_id, defense_submission_id, job_id)
         logger.info(f"Registered worker {worker_id} with Redis")
 
-        # Query unevaluated attacks and populate queue (per RabbitMQ Scenario step 2)
+        # Query unevaluated attacks and populate queue
         unevaluated_attacks = get_unevaluated_attacks(defense_submission_id)
         logger.info(f"Found {len(unevaluated_attacks)} unevaluated attacks")
 
@@ -172,7 +154,7 @@ def run_defense_job(
         logger.info(
             f"Populated INTERNAL_QUEUE with {len(unevaluated_attacks)} attacks")
 
-        # Check if defense needs validation (per RabbitMQ Scenario step 4)
+        # Check if defense needs validation
         needs_validation = check_if_needs_validation(defense_submission_id)
 
         # Get defense source information
@@ -180,7 +162,7 @@ def run_defense_job(
             defense_submission_id)
         logger.info(f"Defense source type: {source_type}")
 
-        # Build/pull defense image from source (per Phase 3 handlers)
+        # Build/pull defense image from source
         # Convert config to dict for defense module functions
         config_dict = config.model_dump()
 
@@ -265,13 +247,15 @@ def run_defense_job(
                     f"Defense ready after {int(time.time() - start_wait)}s")
                 break
             except requests.exceptions.RequestException:
-                time.sleep(1)
+                # Only sleep if we have time remaining
+                if (time.time() - start_wait + 1) < container_timeout:
+                    time.sleep(1)
 
         if not container_ready:
             raise ValueError(
                 f"Defense container failed to start within {container_timeout}s")
 
-        # Validate defense if needed (per RabbitMQ Scenario step 4)
+        # Validate defense if needed
         if needs_validation:
             try:
                 validate_functional(image_name, url, config_dict)
@@ -281,7 +265,7 @@ def run_defense_job(
                 mark_defense_failed(defense_submission_id, str(e))
                 raise ValueError(f"Defense validation failed: {e}")
 
-        # Evaluate defense with Redis-based queue (per RabbitMQ Scenario step 5-6)
+        # Evaluate defense with Redis-based queue
         evaluate_defense_with_redis(
             worker_id=worker_id,
             defense_submission_id=defense_submission_id,
@@ -307,7 +291,7 @@ def run_defense_job(
         set_job_status(job_id=job_id, status="failed", error=str(exc))
         raise
     finally:
-        # Unregister worker from Redis (per RabbitMQ Scenario step 8)
+        # Unregister worker from Redis
         try:
             registry.unregister(worker_id)
             logger.info(f"Unregistered worker {worker_id} from Redis")
@@ -370,15 +354,13 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
        - If open worker exists: add attack to worker's queue
        - If no open worker: enqueue new defense job
 
-    MVP behavior: Assumes attack is pre-validated, focuses on enqueueing logic.
-    Future: Add ZIP extraction, behavior checking, etc.
     """
     try:
         set_job_status(job_id=job_id, status="running")
         logger.info(
             f"Starting attack job {job_id} for submission {attack_submission_id}")
 
-        # Attack validation logic (per Attack Scenario step 1-2)
+        # Attack validation logic
         logger.info("Starting attack ZIP validation")
 
         # Get attack source information
@@ -387,6 +369,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
         logger.info(f"Attack ZIP object key: {zip_object_key}")
 
         # Initialize MinIO client
+        # TODO: Dont store defaults
         config_dict = config.model_dump()
         minio_config = config_dict.get('worker', {}).get('minio', {})
         endpoint = minio_config.get('endpoint', 'minio:9000')
@@ -403,6 +386,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
         )
 
         # Download ZIP to temporary file
+        # TODO: Store as individual files instead of zips, maybe?
         temp_zip = tempfile.NamedTemporaryFile(
             suffix='.zip',
             prefix=f'attack_{attack_submission_id}_',
@@ -488,7 +472,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
         temp_worker_id = f"attack_job_{job_id}"
         registry = WorkerRegistry()
 
-        # Query all validated defenses (per Attack Scenario step 3.i)
+        # Query all validated defenses (O(n))
         validated_defenses = get_all_validated_defenses()
         logger.info(f"Found {len(validated_defenses)} validated defenses")
 

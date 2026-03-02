@@ -890,3 +890,238 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
 
     # Verify image cleanup was NOT called
     mock_docker_client.images.remove.assert_not_called()
+
+
+def test_defense_job_cleanup_on_container_stop_failure(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """Test that network and image cleanup happens even if container.stop() fails."""
+    from worker import tasks
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    # Create GitHub defense (so image cleanup will be attempted)
+    defense_id = test_helpers.create_defense(
+        source_type="github",
+        git_repo="https://github.com/user/repo.git",
+        is_functional=True
+    )
+
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_id
+    )
+
+    # Create attack
+    attack_id = test_helpers.create_attack()
+
+    # Mock Docker
+    fake_container = FakeContainer()
+
+    # Make container.stop() raise an exception
+    def failing_stop(timeout=2):
+        raise Exception("Container stop failed")
+
+    fake_container.stop = failing_stop
+
+    # Create fake network with Mock methods for assertions
+    fake_network = Mock()
+    fake_network.name = f"eval_net_{job_id}"
+    fake_network.disconnect = Mock()
+    fake_network.remove = Mock()
+
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    mock_docker_client.images.remove = Mock()  # Track image cleanup
+
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    # Mock HTTP requests
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    # Mock GitHub handler
+    built_image_name = "mlsec-defense-github-123"
+    monkeypatch.setattr(
+        "worker.defense.github_handler.build_from_github_repo",
+        lambda *args, **kwargs: built_image_name
+    )
+
+    # Mock validation
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional",
+        lambda *args, **kwargs: None
+    )
+
+    # Mock pop_next_attack to return one attack then None (3 times for termination)
+    call_count = {"value": 0}
+
+    def mock_pop_next_attack(self, worker_id):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return attack_id
+        return None
+
+    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
+                        mock_pop_next_attack)
+
+    # Mock MinIO download
+    mock_minio_response = Mock()
+    mock_minio_response.read.return_value = b"fake file content"
+    mock_minio_response.close = Mock()
+    mock_minio_response.release_conn = Mock()
+    mock_minio_client_eval = Mock()
+    mock_minio_client_eval.get_object.return_value = mock_minio_response
+
+    monkeypatch.setattr(
+        "worker.defense.evaluate.Minio",
+        lambda *args, **kwargs: mock_minio_client_eval
+    )
+
+    # Mock requests.post for evaluation
+    mock_post_response = Mock()
+    mock_post_response.status_code = 200
+    mock_post_response.json.return_value = {"result": 0}
+    monkeypatch.setattr("requests.post", lambda *args,
+                        **kwargs: mock_post_response)
+
+    # Run defense job (should complete despite container cleanup failure)
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+
+    # Verify network cleanup was attempted
+    fake_network.disconnect.assert_called_once()
+    fake_network.remove.assert_called_once()
+
+    # Verify image cleanup was attempted (despite container.stop() failure)
+    mock_docker_client.images.remove.assert_called_once_with(
+        built_image_name, force=True
+    )
+
+    # Verify job completed successfully
+    job_status = db_session.execute(
+        text("SELECT status FROM jobs WHERE id = :job_id"),
+        {"job_id": job_id}
+    ).fetchone()
+    assert job_status[0] == "done"
+
+
+def test_defense_job_respects_cleanup_config(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """Test that cleanup_built_images=False preserves images."""
+    from worker import tasks
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    # Create GitHub defense
+    defense_id = test_helpers.create_defense(
+        source_type="github",
+        git_repo="https://github.com/user/repo.git",
+        is_functional=True
+    )
+
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_id
+    )
+
+    # Create attack
+    attack_id = test_helpers.create_attack()
+
+    # Modify config to disable cleanup and monkeypatch it
+    config_dict['worker']['source'] = config_dict.get('source', {})
+    config_dict['worker']['source']['cleanup_built_images'] = False
+
+    # Monkeypatch the config object to return our modified config_dict
+    mock_config = Mock()
+    mock_config.model_dump.return_value = config_dict
+    mock_config.worker.defense_job.mem_limit = config_dict['worker']['defense_job']['mem_limit']
+    mock_config.worker.defense_job.nano_cpus = config_dict['worker']['defense_job']['nano_cpus']
+    mock_config.worker.defense_job.pids_limit = config_dict['worker']['defense_job']['pids_limit']
+    mock_config.worker.defense_job.container_timeout = config_dict[
+        'worker']['defense_job']['container_timeout']
+    monkeypatch.setattr("worker.tasks.config", mock_config)
+
+    # Mock Docker
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork(f"eval_net_{job_id}")
+
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    mock_docker_client.images.remove = Mock()  # Track image cleanup
+
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    # Mock HTTP requests
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    # Mock GitHub handler
+    built_image_name = "mlsec-defense-github-456"
+    monkeypatch.setattr(
+        "worker.defense.github_handler.build_from_github_repo",
+        lambda *args, **kwargs: built_image_name
+    )
+
+    # Mock validation
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional",
+        lambda *args, **kwargs: None
+    )
+
+    # Mock pop_next_attack to return one attack then None (3 times for termination)
+    call_count = {"value": 0}
+
+    def mock_pop_next_attack(self, worker_id):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            return attack_id
+        return None
+
+    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
+                        mock_pop_next_attack)
+
+    # Mock MinIO download
+    mock_minio_response = Mock()
+    mock_minio_response.read.return_value = b"fake file content"
+    mock_minio_response.close = Mock()
+    mock_minio_response.release_conn = Mock()
+    mock_minio_client_eval = Mock()
+    mock_minio_client_eval.get_object.return_value = mock_minio_response
+
+    monkeypatch.setattr(
+        "worker.defense.evaluate.Minio",
+        lambda *args, **kwargs: mock_minio_client_eval
+    )
+
+    # Mock requests.post for evaluation
+    mock_post_response = Mock()
+    mock_post_response.status_code = 200
+    mock_post_response.json.return_value = {"result": 0}
+    monkeypatch.setattr("requests.post", lambda *args,
+                        **kwargs: mock_post_response)
+
+    # Run defense job
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+
+    # Verify image cleanup was NOT called (config disabled it)
+    mock_docker_client.images.remove.assert_not_called()
+
+    # Verify job completed successfully
+    job_status = db_session.execute(
+        text("SELECT status FROM jobs WHERE id = :job_id"),
+        {"job_id": job_id}
+    ).fetchone()
+    assert job_status[0] == "done"
