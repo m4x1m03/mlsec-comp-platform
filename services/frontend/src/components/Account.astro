@@ -1,0 +1,120 @@
+---
+interface Props {
+  session?: {
+    user: {
+      email: string;
+      username: string;
+    };
+  } | null;
+}
+
+const { session } = Astro.props;
+const user = session?.user ?? null;
+
+// Build initials from username
+function getInitials(username: string): string {
+  const parts = username.trim().split(/[\s_\-\.]+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return username.slice(0, 2).toUpperCase();
+}
+
+const initials = user ? getInitials(user.username) : '';
+---
+
+{user ? (
+  <div id="account-menu" class="relative inline-block">
+
+    <button
+      id="avatar-btn"
+      aria-haspopup="true"
+      aria-expanded="false"
+      aria-label="Account menu"
+      class="relative flex items-center justify-center w-9 h-9 rounded-full bg-primary hover:bg-secondary border border-white outline-none cursor-pointer transition-transform duration-150 hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+    >
+      <span class="text-xs font-bold tracking-wider text-white select-none z-10">
+        {initials}
+      </span>
+    </button>
+
+    <div
+      id="account-dropdown"
+      role="menu"
+      aria-label="Account options"
+      class="hidden absolute top-[calc(100%+0.6rem)] right-0 z-50 min-w-56 shadow-xl rounded-xl"
+    >
+      <div class="absolute -top-[5px] right-[10px] w-[10px] h-[10px] bg-white border-l border-t border-gray-100 rotate-45 rounded-tl-sm z-10"></div>
+
+      <div class="bg-white rounded-xl border border-gray-100 overflow-hidden">
+
+        <div class="flex items-center gap-2.5 px-4 py-3">
+          <div class="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-primary text-white text-xs font-bold tracking-wider select-none">
+            {initials}
+          </div>
+          <div class="flex flex-col min-w-0">
+            <span class="text-sm font-semibold text-gray-900 truncate">{user.username}</span>
+            <span class="text-xs text-gray-400 truncate">{user.email}</span>
+          </div>
+        </div>
+
+        <div class="h-px bg-gray-100"></div>
+
+        <slot name="logout"></slot>
+
+      </div>
+    </div>
+  </div>
+
+) : (
+
+  <button
+    id="open-login-btn"
+    aria-label="Sign in or create account"
+    class="px-4 py-2 rounded-lg bg-primary hover:bg-secondary text-white border border-whit text-sm font-semibold tracking-widecursor-pointer transition-all duration-150 hover:-translate-y-px hover:shadow-md active:translate-y-0"
+  >
+    Sign In
+  </button>
+
+)}
+
+{!user && (
+  <slot name="modal" />
+)}
+
+<script>
+  document.getElementById('open-login-btn')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('open-login-modal', { detail: { tab: 'login' } }));
+  });
+
+  const avatarBtn = document.getElementById('avatar-btn');
+  const dropdown  = document.getElementById('account-dropdown');
+
+  if (avatarBtn && dropdown) {
+    function openDropdown() {
+      dropdown!.classList.remove('hidden');
+      avatarBtn!.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeDropdown() {
+      dropdown!.classList.add('hidden');
+      avatarBtn!.setAttribute('aria-expanded', 'false');
+    }
+
+    avatarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = avatarBtn.getAttribute('aria-expanded') === 'true';
+      isOpen ? closeDropdown() : openDropdown();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!document.getElementById('account-menu')?.contains(e.target as Node)) {
+        closeDropdown();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeDropdown();
+    });
+  }
+</script>
