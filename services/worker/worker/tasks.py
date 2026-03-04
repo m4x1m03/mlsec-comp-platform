@@ -6,16 +6,34 @@ from celery.utils.log import get_task_logger
 
 import time
 import os
-import queue
-import threading
 import requests
-import json
 import socket
-from websockets.sync.client import connect as ws_connect
+import uuid
+import json
+import tempfile
+import zipfile
+import hashlib
+from pathlib import Path
+from minio import Minio
 
 from worker.celery_app import celery_app
 from worker.config import get_config
-from worker.db import set_job_status, get_defense_docker_image, ensure_evaluation_run, upsert_evaluation
+from worker.db import (
+    set_job_status,
+    get_defense_submission_source,
+    get_all_validated_defenses,
+    get_unevaluated_attacks,
+    check_if_needs_validation,
+    mark_defense_validated,
+    mark_defense_failed,
+    is_evaluation_in_progress,
+    mark_attack_validated,
+    get_attack_submission_source,
+    insert_attack_files
+)
+from worker.redis_client import WorkerRegistry
+from worker.defense.validation import validate_functional
+from worker.defense.evaluate import evaluate_defense_with_redis
 
 logger = get_task_logger(__name__)
 
@@ -31,215 +49,55 @@ log_config = LogConfig(
 )
 
 
-# Temporary helper to resolve dockerhub links
-def _resolve_image_name(image_reference: str) -> str:
-    from urllib.parse import urlparse
-    import re
-    if not image_reference.startswith('http'):
-        return image_reference
-    parsed = urlparse(image_reference)
-    path = parsed.path.strip('/')
-    if parsed.netloc == 'hub.docker.com':
-        match = re.search(r'^r/([^/]+/[^/]+)', path)
-        if match:
-            return match.group(1)
-        match = re.search(r'^_/([^/]+)', path)
-        if match:
-            return match.group(1)
-    return path
+def _insert_job(
+    job_type: str,
+    status: str,
+    defense_submission_id: str = None,
+    attack_submission_id: str = None,
+    user_id: str = None
+) -> str:
+    """
+    Insert new job into database and return job_id.
+    Helper for enqueueing defense jobs during attack processing.
 
+    Args:
+        job_type: 'defense' or 'attack'
+        status: Initial job status ('queued')
+        defense_submission_id: For defense jobs
+        attack_submission_id: For attack jobs
+        user_id: User who requested the job (optional)
 
-class QueueStatus:
-    OPEN = "OPEN"
-    CLOSED = "CLOSED"
+    Returns:
+        Job ID (UUID as string)
+    """
+    from worker.db import get_engine
+    from sqlalchemy import text
 
+    job_id = str(uuid.uuid4())
+    payload = {}
 
-def _fetch_samples(q: queue.Queue, status_dict: dict):
-    api_ws_url = os.getenv("API_WS_URL", "ws://api:8000/ws/eval/samples")
-    try:
-        with ws_connect(api_ws_url, max_size=None) as ws:
-            while True:
-                metadata_str = ws.recv()
-                try:
-                    metadata = json.loads(metadata_str)
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to decode metadata JSON: {metadata_str}")
-                    break
-                
-                if "status" in metadata and metadata["status"] == "done":
-                    break
-                if "error" in metadata:
-                    logger.error(f"WebSocket error: {metadata['error']}")
-                    break
-                
-                # Receive bytes
-                file_bytes = ws.recv()
-                
-                q.put((metadata, file_bytes))
-    except Exception as e:
-        logger.error(f"Error streaming samples via WebSocket: {e}")
-    finally:
-        status_dict["status"] = QueueStatus.CLOSED
+    if defense_submission_id:
+        payload['defense_submission_id'] = defense_submission_id
+    if attack_submission_id:
+        payload['attack_submission_id'] = attack_submission_id
 
-
-def _evaluate_defense(defense_submission_id: str, url: str):
-    # Setup internal queue
-    INTERNAL_QUEUE = queue.Queue(maxsize=100)
-    status_dict = {"status": QueueStatus.OPEN}
-    
-    # Start producer thread
-    producer = threading.Thread(target=_fetch_samples, args=(INTERNAL_QUEUE, status_dict))
-    producer.start()
-    
-    evaluation_runs = {} # attack_submission_id -> run_id
-    
-    while True:
-        try:
-            item = INTERNAL_QUEUE.get(timeout=1.0)
-        except queue.Empty:
-            if status_dict["status"] == QueueStatus.CLOSED:
-                break
-            continue
-            
-        metadata, sample_bytes = item
-        attack_submission_id = metadata["attack_submission_id"]
-        file_id = metadata["file_id"]
-        
-        # Ensure evaluation run exists for this defense-attack pair
-        if attack_submission_id not in evaluation_runs:
-            run_id = ensure_evaluation_run(
-                defense_submission_id=defense_submission_id,
-                attack_submission_id=attack_submission_id
-            )
-            evaluation_runs[attack_submission_id] = run_id
-        
-        run_id = evaluation_runs[attack_submission_id]
-        start_time = time.time()
-        
-        max_retries = 1
-        success = False
-        prediction = None
-        error_msg = None
-        
-        gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
-        gateway_secret = os.getenv("GATEWAY_SECRET", "")
-        
-        for retry in range(max_retries):
-            try:
-                response = requests.post(
-                    gateway_url,
-                    data=sample_bytes,
-                    headers={
-                        "Content-Type": "application/octet-stream",
-                        "X-Target-Url": url,
-                        "X-Gateway-Auth": gateway_secret
-                    },
-                    timeout=config.worker.evaluation.requests_timeout_seconds
-                )
-                success = True
-                break
-            except requests.exceptions.ConnectionError as e:
-                if retry < max_retries - 1:
-                    logger.info(f"Connection failed (attempt {retry+1}/{max_retries}), retrying...") # Removed timer it was annoying, can add back if we need
-                else:
-                    error_msg = f"ConnectionError on final retry: {e}"
-            except requests.Timeout:
-                error_msg = "HTTP request timeout (10s)"
-                break
-            except Exception as e:
-                error_msg = f"Unexpected error: {e}"
-                break
-                
-        duration_ms = int((time.time() - start_time) * 1000)
-        
-        if success:
-            if response.status_code != 200:
-                error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
-            else:
-                try:
-                    result_json = response.json()
-                    prediction = result_json.get("result")
-                    if prediction not in [0, 1]:
-                        error_msg = f"Invalid prediction: {prediction}"
-                        prediction = None
-                except Exception as e:
-                    error_msg = f"Failed to parse JSON: {e}"
-        else:
-            logger.info(f"Sample {file_id} failed: {error_msg}")
-            
-        upsert_evaluation(
-            evaluation_run_id=run_id,
-            attack_file_id=file_id,
-            result=prediction,
-            error=error_msg,
-            duration_ms=duration_ms
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO jobs (id, job_type, status, requested_by_user_id, payload, created_at, updated_at)
+                VALUES (:id, :job_type, :status, :user_id, CAST(:payload AS jsonb), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """),
+            {
+                "id": job_id,
+                "job_type": job_type,
+                "status": status,
+                "user_id": user_id,
+                "payload": json.dumps(payload)
+            }
         )
-        
-        INTERNAL_QUEUE.task_done()
-    
-    producer.join()
-    
 
-def _validate_defense(image_name: str, url: str):
-    logger.info(f"Validating defense container: {url}")
-    client = docker.from_env()
-    
-    # Uncompressed image size check
-    try:
-        image = client.images.get(image_name)
-        size_bytes = image.attrs.get('Size', 0)
-        size_mb = size_bytes / (1024 * 1024)
-        max_size_mb = config.worker.defense_job.max_uncompressed_size_mb
-        
-        logger.info(f"Image uncompressed size: {size_mb:.2f} MB (limit: {max_size_mb} MB)")
-        if size_mb > max_size_mb:
-            raise ValueError(f"Image size {size_mb:.2f}MB exceeds limit of {max_size_mb}MB")
-    except docker.errors.ImageNotFound:
-        raise ValueError(f"Image {image_name} not found for validation")
-
-    # POST / check
-    probe_path = os.path.join(os.path.dirname(__file__), "..", "tests", "minimal.exe")
-    if os.path.exists(probe_path):
-        with open(probe_path, "rb") as f:
-            probe_data = f.read(4096)
-    else:
-        probe_data = b"MZ" + b"\x00" * 4094
-    
-    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
-    gateway_secret = os.getenv("GATEWAY_SECRET", "")
-    
-    try:
-        response = requests.post(
-            gateway_url,
-            data=probe_data,
-            headers={
-                "Content-Type": "application/octet-stream",
-                "X-Target-Url": url,
-                "X-Gateway-Auth": gateway_secret
-            },
-            timeout=config.worker.evaluation.requests_timeout_seconds
-        )
-    except requests.exceptions.RequestException as e:
-        raise ValueError(f"Defense validation failed: Could not POST to port 8080: {e}")
-
-    if response.status_code != 200:
-        raise ValueError(f"Defense validation failed: POST / returned HTTP {response.status_code}")
-
-    # Content-Type header check
-    content_type = response.headers.get("Content-Type", "")
-    if "application/json" not in content_type:
-         raise ValueError(f"Defense validation failed: Expected application/json response, got {content_type}")
-
-    # Prediction in range check
-    try:
-        result_json = response.json()
-        prediction = result_json.get("result")
-        if prediction not in [0, 1]:
-            raise ValueError(f"Defense validation failed: Result field must be 0 or 1, got {prediction}")
-    except Exception as e:
-        raise ValueError(f"Defense validation failed: Failed to parse JSON response: {e}")
-
-    logger.info("Defense validation successful")
+    return job_id
 
 
 @celery_app.task(name="worker.tasks.run_defense_job", bind=True)
@@ -252,48 +110,102 @@ def run_defense_job(
     include_behavior_different: bool | None = None,
 ) -> None:
     """
-    MVP behavior: pull image mapping from DB, instantiate docker container inside a unique network, 
-    log container states (temporarily) using celery logger, and tear down gracefully.
+    Defense evaluation job with Redis-based work distribution.
+
+    Does the following:
+    1. Register worker with Redis
+    2. Query unevaluated attacks and populate INTERNAL_QUEUE
+    3. Check if defense needs validation
+    4. Build/pull defense from source (Docker/GitHub/ZIP)
+    5. Validate defense
+    6. Evaluate against attacks from Redis queue
+    7. Unregister and cleanup
     """
     logger.info(
         f"Starting defense job {job_id} for submission {defense_submission_id}"
     )
+
+    # Generate worker ID
+    worker_id = f"worker_{job_id}_{int(time.time())}"
+
+    # Initialize Redis client
+    registry = WorkerRegistry()
+
     container = None
     network = None
     network_name = f"eval_net_{job_id}"
-    worker_container_id = socket.gethostname()
+    source_type = None
+    image_name = None
+
     try:
         set_job_status(job_id=job_id, status="running")
-        
-        image_reference = get_defense_docker_image(submission_id=defense_submission_id)
-        if not image_reference:
-            raise ValueError(f"No docker image found for defense submission {defense_submission_id}")
 
-        image_name = _resolve_image_name(image_reference)
-        logger.info(f"Resolved image name: {image_name}")
+        # Register worker with Redis
+        registry.register(worker_id, defense_submission_id, job_id)
+        logger.info(f"Registered worker {worker_id} with Redis")
 
+        # Query unevaluated attacks and populate queue
+        unevaluated_attacks = get_unevaluated_attacks(defense_submission_id)
+        logger.info(f"Found {len(unevaluated_attacks)} unevaluated attacks")
+
+        for attack_id in unevaluated_attacks:
+            registry.add_attack_to_queue(worker_id, attack_id)
+
+        logger.info(
+            f"Populated INTERNAL_QUEUE with {len(unevaluated_attacks)} attacks")
+
+        # Check if defense needs validation
+        needs_validation = check_if_needs_validation(defense_submission_id)
+
+        # Get defense source information
+        source_type, source_data = get_defense_submission_source(
+            defense_submission_id)
+        logger.info(f"Defense source type: {source_type}")
+
+        # Build/pull defense image from source
+        # Convert config to dict for defense module functions
+        config_dict = config.model_dump()
+
+        if source_type == "docker":
+            from worker.defense.docker_handler import pull_and_resolve_docker_image
+            image_name = pull_and_resolve_docker_image(
+                source_data["docker_image"])
+        elif source_type == "github":
+            from worker.defense.github_handler import build_from_github_repo
+            image_name = build_from_github_repo(
+                source_data["git_repo"],
+                defense_submission_id,
+                config_dict
+            )
+        elif source_type == "zip":
+            from worker.defense.zip_handler import build_from_zip_archive
+            image_name = build_from_zip_archive(
+                source_data["object_key"],
+                defense_submission_id,
+                config_dict
+            )
+        else:
+            raise ValueError(f"Unsupported source type: {source_type}")
+
+        logger.info(f"Defense image ready: {image_name}")
+
+        # Create isolated network
         client = docker.from_env()
-        try:
-            client.images.get(image_name)
-        except docker.errors.ImageNotFound:
-            logger.info(f"Pulling image: {image_name}")
-            client.images.pull(image_name)
-
-        # logger.info(f"Creating isolated network: {network_name}")
         network = client.networks.create(network_name, internal=True)
-        # Ensure the worker is not connected
         gateway_container = client.containers.get("mlsec-gateway")
         network.connect(gateway_container)
 
-        logger.info(f"Starting container from image: {image_name} on network {network_name}")
+        # Start defense container
+        logger.info(
+            f"Starting container from image: {image_name} on network {network_name}")
         container_name = f"eval_defense_{job_id}"
         container = client.containers.run(
             image_name,
             name=container_name,
             detach=True,
-            network=network_name,  # Isolated network for eval
+            network=network_name,
             mem_limit=config.worker.defense_job.mem_limit,
-            nano_cpus=config.worker.defense_job.nano_cpus, 
+            nano_cpus=config.worker.defense_job.nano_cpus,
             pids_limit=config.worker.defense_job.pids_limit,
             read_only=True,
             privileged=False,
@@ -301,85 +213,126 @@ def run_defense_job(
             cap_drop=['ALL'],
             security_opt=["no-new-privileges:true"],
             tmpfs={
-                '/tmp': 'size=64M', 
-                '/run': 'size=16M', 
+                '/tmp': 'size=64M',
+                '/run': 'size=16M',
                 '/var/tmp': 'size=16M'
             },
-            log_config=log_config # Temporary for debugging and such, remove on deployment
+            log_config=log_config
         )
 
         logger.info(f"Container {container.id[:12]} successfully spun up")
-        
+
+        # Wait for container to be ready
         logger.info("Waiting for defense to be ready...")
         url = f"http://{container.name}:8080/"
         container_timeout = config.worker.defense_job.container_timeout
         start_wait = time.time()
         container_ready = False
 
-        # Stealing this from Graham prototype
-        while (time.time() - start_wait) < container_timeout: 
-                try:
-                    # Try to connect to the container via gateway
-                    headers = {
-                        "X-Target-Url": url,
-                        "X-Gateway-Auth": os.getenv("GATEWAY_SECRET", "")
-                    }
-                    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
-                    response = requests.get(gateway_url, headers=headers, timeout=2)
-                    if response.status_code == 502:
-                        # Gateway couldn't connect to upstream
-                        time.sleep(1)
-                        continue
-                    # Any other response type means container is listening
-                    container_ready = True
-                    logger.info(f"Defense ready after {int(time.time() - start_wait)}s")
-                    break
-                except requests.exceptions.RequestException:
-                    # Container not ready yet, wait and retry
+        while (time.time() - start_wait) < container_timeout:
+            try:
+                headers = {
+                    "X-Target-Url": url,
+                    "X-Gateway-Auth": os.getenv("GATEWAY_SECRET", "")
+                }
+                gateway_url = os.getenv(
+                    "GATEWAY_URL", "http://mlsec-gateway:8080/")
+                response = requests.get(
+                    gateway_url, headers=headers, timeout=2)
+                if response.status_code == 502:
                     time.sleep(1)
-                    logger.info(f"Defense starting...")
-        
-        # Run the evaluation logic using the internal container networking
-        # logger.info(f"Predict endpoint should be {url}")
-        
-        # Validate before evaluation
-        _validate_defense(image_name, url)
-        
-        _evaluate_defense(defense_submission_id, url)
-        
-        # Grab container logs and send to Celery logs
+                    continue
+                container_ready = True
+                logger.info(
+                    f"Defense ready after {int(time.time() - start_wait)}s")
+                break
+            except requests.exceptions.RequestException:
+                # Only sleep if we have time remaining
+                if (time.time() - start_wait + 1) < container_timeout:
+                    time.sleep(1)
+
+        if not container_ready:
+            raise ValueError(
+                f"Defense container failed to start within {container_timeout}s")
+
+        # Validate defense if needed
+        if needs_validation:
+            try:
+                validate_functional(image_name, url, config_dict)
+                mark_defense_validated(defense_submission_id)
+                logger.info("Defense validation successful")
+            except Exception as e:
+                mark_defense_failed(defense_submission_id, str(e))
+                raise ValueError(f"Defense validation failed: {e}")
+
+        # Evaluate defense with Redis-based queue
+        evaluate_defense_with_redis(
+            worker_id=worker_id,
+            defense_submission_id=defense_submission_id,
+            container_url=url,
+            config=config_dict
+        )
+
+        # Grab container logs
         try:
             container_logs = container.logs().decode('utf-8')
             if container_logs:
-                logger.info(f"Container logs for job {job_id}:\n{container_logs}")
-            else:
-                logger.info(f"Container for job {job_id} produced no logs.")
+                logger.info(
+                    f"Container logs for job {job_id}:\n{container_logs}")
         except Exception as log_exc:
-            logger.warning(f"Failed to fetch logs for container {container.id[:12]}: {log_exc}")
-        
+            logger.warning(
+                f"Failed to fetch logs for container {container.id[:12]}: {log_exc}")
+
         set_job_status(job_id=job_id, status="done")
         logger.info(f"Job {job_id} successfully finished")
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception(f"Job {job_id} failed with error: {exc}")
         set_job_status(job_id=job_id, status="failed", error=str(exc))
         raise
     finally:
+        # Unregister worker from Redis
+        try:
+            registry.unregister(worker_id)
+            logger.info(f"Unregistered worker {worker_id} from Redis")
+        except Exception as e:
+            logger.warning(f"Failed to unregister worker {worker_id}: {e}")
+
+        # Cleanup container
         if container:
             logger.info(f"Cleaning up container {container.id[:12]}")
             try:
                 container.stop(timeout=2)
                 container.remove()
             except Exception as cleanup_err:
-                logger.warning(f"Failed to cleanup container {container.id[:12]}: {cleanup_err}")
+                logger.warning(
+                    f"Failed to cleanup container {container.id[:12]}: {cleanup_err}")
 
+        # Cleanup built image (GitHub/ZIP sources only)
+        if image_name and source_type in ['github', 'zip']:
+            cleanup_enabled = config_dict.get('worker', {}).get(
+                'source', {}).get('cleanup_built_images', True)
+            if cleanup_enabled:
+                logger.info(f"Cleaning up built image {image_name}")
+                try:
+                    client = docker.from_env()
+                    client.images.remove(image_name, force=True)
+                    logger.info(f"Removed image {image_name}")
+                except docker.errors.ImageNotFound:
+                    logger.debug(f"Image {image_name} already removed")
+                except docker.errors.APIError as e:
+                    logger.warning(f"Failed to remove image {image_name}: {e}")
+
+        # Cleanup network
         if network:
             logger.info(f"Cleaning up network {network_name}")
             try:
+                client = docker.from_env()
                 gateway_container = client.containers.get("mlsec-gateway")
                 network.disconnect(gateway_container, force=True)
             except Exception as e:
-                logger.warning(f"Failed to disconnect gateway from network {network_name}: {e}")
+                logger.warning(
+                    f"Failed to disconnect gateway from network {network_name}: {e}")
             try:
                 network.remove()
             except Exception as e:
@@ -388,16 +341,196 @@ def run_defense_job(
 
 @celery_app.task(name="worker.tasks.run_attack_job")
 def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
-    """Stub attack job.
+    """
+    Attack validation and defense enqueueing job.
 
-    MVP behavior: mark job running, sleep briefly, mark done.
-    Future behavior: validate ZIP, extract, behavior check, populate attack_files.
+    Does the following:
+    1. Validate attack ZIP
+    2. Mark attack as validated
+    3. Query all validated defenses
+    4. For each defense:
+       - Check if evaluation already in progress
+       - Find open workers for defense
+       - If open worker exists: add attack to worker's queue
+       - If no open worker: enqueue new defense job
+
     """
     try:
         set_job_status(job_id=job_id, status="running")
-        _ = attack_submission_id
-        time.sleep(10)
+        logger.info(
+            f"Starting attack job {job_id} for submission {attack_submission_id}")
+
+        # Attack validation logic
+        logger.info("Starting attack ZIP validation")
+
+        # Get attack source information
+        attack_source = get_attack_submission_source(attack_submission_id)
+        zip_object_key = attack_source["zip_object_key"]
+        logger.info(f"Attack ZIP object key: {zip_object_key}")
+
+        # Initialize MinIO client
+        # TODO: Dont store defaults
+        config_dict = config.model_dump()
+        minio_config = config_dict.get('worker', {}).get('minio', {})
+        endpoint = minio_config.get('endpoint', 'minio:9000')
+        access_key = minio_config.get('access_key', 'minioadmin')
+        secret_key = minio_config.get('secret_key', 'minioadmin')
+        bucket_name = minio_config.get('bucket_name', 'defense-submissions')
+        secure = minio_config.get('secure', False)
+
+        minio_client = Minio(
+            endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            secure=secure
+        )
+
+        # Download ZIP to temporary file
+        # TODO: Store as individual files instead of zips, maybe?
+        temp_zip = tempfile.NamedTemporaryFile(
+            suffix='.zip',
+            prefix=f'attack_{attack_submission_id}_',
+            delete=False
+        )
+        temp_zip.close()
+
+        temp_extract_dir = None
+
+        try:
+            logger.info(f"Downloading {zip_object_key} from MinIO")
+            minio_client.fget_object(
+                bucket_name, zip_object_key, temp_zip.name)
+            logger.info(f"Downloaded to {temp_zip.name}")
+
+            # Extract ZIP with password "infected"
+            temp_extract_dir = tempfile.mkdtemp(
+                prefix=f"attack_{attack_submission_id}_extract_"
+            )
+            logger.info(f"Extracting ZIP to {temp_extract_dir}")
+
+            try:
+                with zipfile.ZipFile(temp_zip.name, 'r') as zf:
+                    # Try extracting with password "infected"
+                    zf.extractall(temp_extract_dir, pwd=b'infected')
+                logger.info("Successfully extracted attack ZIP")
+            except RuntimeError as e:
+                if "password" in str(e).lower():
+                    raise ValueError(
+                        "Wrong password for attack ZIP (expected 'infected')")
+                raise ValueError(f"Failed to extract ZIP: {e}")
+
+            # Scan extracted files and populate attack_files table
+            extract_path = Path(temp_extract_dir)
+            extracted_files = []
+
+            for file_path in extract_path.rglob('*'):
+                if file_path.is_file():
+                    # Calculate SHA256
+                    sha256_hash = hashlib.sha256()
+                    with open(file_path, 'rb') as f:
+                        for chunk in iter(lambda: f.read(8192), b''):
+                            sha256_hash.update(chunk)
+
+                    # Get relative path
+                    rel_path = file_path.relative_to(extract_path)
+
+                    # Construct object key for future reference
+                    # In a real implementation, these might be uploaded back to MinIO
+                    file_object_key = f"attacks/{attack_submission_id}/{rel_path}"
+
+                    extracted_files.append({
+                        "filename": str(rel_path),
+                        "sha256": sha256_hash.hexdigest(),
+                        "byte_size": file_path.stat().st_size,
+                        "object_key": file_object_key,
+                        "is_malware": True  # Default assumption for attack samples
+                    })
+
+            logger.info(f"Found {len(extracted_files)} files in attack ZIP")
+
+            # Insert files into database
+            if extracted_files:
+                inserted_count = insert_attack_files(
+                    attack_submission_id, extracted_files)
+                logger.info(
+                    f"Inserted {inserted_count} attack files into database")
+
+            # Mark attack as validated
+            mark_attack_validated(attack_submission_id)
+            logger.info(f"Attack {attack_submission_id} marked as validated")
+
+        finally:
+            # Cleanup temporary files
+            if os.path.exists(temp_zip.name):
+                os.unlink(temp_zip.name)
+            if temp_extract_dir and os.path.exists(temp_extract_dir):
+                import shutil
+                shutil.rmtree(temp_extract_dir)
+
+        # Initialize Redis client
+        # Use a temporary worker ID for API-side operations
+        temp_worker_id = f"attack_job_{job_id}"
+        registry = WorkerRegistry()
+
+        # Query all validated defenses (O(n))
+        validated_defenses = get_all_validated_defenses()
+        logger.info(f"Found {len(validated_defenses)} validated defenses")
+
+        enqueued_count = 0
+        new_jobs_count = 0
+
+        for defense_id in validated_defenses:
+            # Check if evaluation already in progress (avoid duplicates)
+            if is_evaluation_in_progress(defense_id, attack_submission_id):
+                logger.info(
+                    f"Evaluation already in progress for defense {defense_id}, skipping")
+                continue
+
+            # Try to mark as queued using Redis atomic operation
+            # Generate a placeholder job_id for tracking
+            placeholder_job_id = f"attack-{attack_submission_id}-defense-{defense_id}"
+            if not registry.mark_evaluation_queued(defense_id, attack_submission_id, placeholder_job_id):
+                logger.info(
+                    f"Evaluation already marked for defense {defense_id}, skipping")
+                continue
+
+            # Find open workers for this defense (per Attack Scenario step 3.ii)
+            open_workers = registry.get_open_workers_for_defense(defense_id)
+
+            if open_workers:
+                # Add attack to existing worker's queue
+                worker_id = open_workers[0]  # Use first available worker
+                registry.add_attack_to_queue(worker_id, attack_submission_id)
+                logger.info(
+                    f"Added attack {attack_submission_id} to worker {worker_id} queue")
+                enqueued_count += 1
+            else:
+                # No open workers, enqueue new defense job
+                new_job_id = _insert_job(
+                    job_type="defense",
+                    status="queued",
+                    defense_submission_id=defense_id
+                )
+
+                # Enqueue Celery task
+                run_defense_job.apply_async(
+                    kwargs={
+                        "job_id": new_job_id,
+                        "defense_submission_id": defense_id
+                    }
+                )
+
+                logger.info(
+                    f"Enqueued new defense job {new_job_id} for defense {defense_id}")
+                new_jobs_count += 1
+
+        logger.info(
+            f"Attack job complete: enqueued to {enqueued_count} workers, "
+            f"created {new_jobs_count} new defense jobs"
+        )
+
         set_job_status(job_id=job_id, status="done")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
+        logger.exception(f"Attack job {job_id} failed: {exc}")
         set_job_status(job_id=job_id, status="failed", error=str(exc))
         raise
