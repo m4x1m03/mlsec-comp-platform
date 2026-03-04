@@ -31,12 +31,12 @@ from schemas.submissions import (
     SubmissionResponse,
 )
 
-router = APIRouter()
+router = APIRouter(prefix="/submissions", tags=["submissions"])
 logger = logging.getLogger(__name__)
 
 
 @router.post(
-    "/submissions/defense/docker",
+    "/defense/docker",
     response_model=SubmissionResponse,
     status_code=201,
 )
@@ -126,7 +126,7 @@ def create_defense_docker(
 
 
 @router.post(
-    "/submissions/defense/github",
+    "/defense/github",
     response_model=SubmissionResponse,
     status_code=201,
 )
@@ -216,7 +216,7 @@ def create_defense_github(
 
 
 @router.post(
-    "/submissions/defense/zip",
+    "/defense/zip",
     response_model=SubmissionResponse,
     status_code=201,
 )
@@ -329,7 +329,7 @@ async def create_defense_zip(
 
 
 @router.post(
-    "/submissions/attack/zip",
+    "/attack/zip",
     response_model=SubmissionResponse,
     status_code=201,
 )

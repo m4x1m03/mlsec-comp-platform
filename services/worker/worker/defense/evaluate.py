@@ -45,6 +45,7 @@ def evaluate_defense_with_redis(
     registry = WorkerRegistry()
 
     # Initialize MinIO client
+    # TODO: Get rid of defaults
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
     minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
@@ -68,7 +69,7 @@ def evaluate_defense_with_redis(
 
     # Track evaluation runs (defense-attack pairs)
     evaluation_runs = {}  # attack_submission_id -> run_id
-    
+
     # Track consecutive empty polls for queue closure
     empty_poll_count = 0
 
@@ -81,16 +82,17 @@ def evaluate_defense_with_redis(
             # No attacks in queue, increment empty poll counter
             empty_poll_count += 1
             logger.debug(f"Empty poll {empty_poll_count}/{max_empty_polls}")
-            
+
             if empty_poll_count >= max_empty_polls:
                 # Queue exhausted, close and exit
-                logger.info(f"Queue exhausted after {empty_poll_count} empty polls, closing")
+                logger.info(
+                    f"Queue exhausted after {empty_poll_count} empty polls, closing")
                 registry.close_queue(worker_id)
                 break
-            
+
             # Continue polling
             continue
-        
+
         # Reset empty poll counter when we get an attack
         empty_poll_count = 0
 
@@ -124,7 +126,7 @@ def evaluate_defense_with_redis(
                 sample_bytes = response.read()
                 response.close()
                 response.release_conn()
-            except Exception as e:
+            except Exception as e:  # TODO: Consider what to do when failing to download from MinIO
                 logger.error(
                     f"Failed to download {object_key} from MinIO: {e}")
                 upsert_evaluation(
