@@ -44,8 +44,11 @@ def build_from_zip_archive(
     temp_extract_dir = None
 
     try:
-        # Get MinIO config
+        # Get MinIO config (try both top-level and worker.minio, probably change this for simplicity later)
         minio_config = config.get('minio', {})
+        if not minio_config:
+            minio_config = config.get('worker', {}).get('minio', {})
+
         endpoint = minio_config.get('endpoint', 'minio:9000')
         access_key = minio_config.get('access_key', 'minioadmin')
         secret_key = minio_config.get('secret_key', 'minioadmin')
