@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from typing import Iterable
 
 from fastapi import Depends, HTTPException, Request, status
@@ -47,6 +47,30 @@ def _is_from_trusted_proxy(host: str | None, trusted_proxy_hosts: Iterable[str])
     return any(_hosts_match(host, trusted) for trusted in trusted_proxy_hosts)
 
 
+def _is_in_allowed_hosts(host: str | None, allowed_hosts: Iterable[str]) -> bool:
+    if host is None:
+        return False
+    return any(_hosts_match(host, allowed) for allowed in allowed_hosts)
+
+
+def _is_in_allowed_networks(host: str | None, allowed_networks: Iterable[str]) -> bool:
+    if host is None:
+        return False
+    normalized = host.strip().lower()
+    try:
+        host_ip = ip_address(normalized)
+    except ValueError:
+        return False
+
+    for network in allowed_networks:
+        try:
+            if host_ip in ip_network(network, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _get_effective_client_host(request: Request) -> str | None:
     settings = get_settings()
     direct_host = request.client.host if request.client is not None else None
@@ -70,6 +94,10 @@ def require_localhost_request(request: Request) -> None:
 
     client_host = _get_effective_client_host(request)
     if _is_loopback_host(client_host):
+        return
+    if _is_in_allowed_hosts(client_host, settings.admin_allowed_hosts):
+        return
+    if _is_in_allowed_networks(client_host, settings.admin_allowed_networks):
         return
 
     raise HTTPException(

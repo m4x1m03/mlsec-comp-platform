@@ -147,6 +147,50 @@ def test_admin_overview_allows_forwarded_local_client_from_trusted_proxy(db_sess
     assert resp.status_code == 200
 
 
+def test_admin_overview_allows_configured_admin_allowed_hosts(db_session, monkeypatch):
+    admin_user_id = _create_user(db_session, is_admin=True)
+    access_token = _create_session_token(db_session, user_id=admin_user_id)
+
+    monkeypatch.setenv("ADMIN_ALLOWED_HOSTS", '["203.0.113.10"]')
+    get_settings.cache_clear()
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app, client=("203.0.113.10", 50000)) as remote_client:
+            resp = remote_client.get("/admin/overview", headers={"Authorization": f"Bearer {access_token}"})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        get_settings.cache_clear()
+
+    assert resp.status_code == 200
+
+
+def test_admin_overview_allows_configured_admin_allowed_networks(db_session, monkeypatch):
+    admin_user_id = _create_user(db_session, is_admin=True)
+    access_token = _create_session_token(db_session, user_id=admin_user_id)
+
+    monkeypatch.setenv("ADMIN_ALLOWED_NETWORKS", '["203.0.113.0/24"]')
+    get_settings.cache_clear()
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(app, client=("203.0.113.77", 50000)) as remote_client:
+            resp = remote_client.get("/admin/overview", headers={"Authorization": f"Bearer {access_token}"})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        get_settings.cache_clear()
+
+    assert resp.status_code == 200
+
+
 def test_admin_overview_returns_system_counts_for_local_admin(client, db_session):
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
