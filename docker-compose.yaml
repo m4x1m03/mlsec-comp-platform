@@ -91,6 +91,7 @@ services:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
       REDIS_URL: redis://redis:6379/0
+      ADMIN_ALLOWED_HOSTS: '["172.20.0.1"]' # TODO: make this a YAML config thing
     ports:
       - "8000:8000"
     volumes:
