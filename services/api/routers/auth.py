@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -7,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.auth import AuthenticatedUser, create_session, get_authenticated_user, revoke_session_by_id
 from core.database import get_db
+from core.settings import get_settings
 from schemas.auth import (
     REQUIRED_REGISTRATION_FIELDS,
     AuthenticatedUserResponse,
@@ -35,8 +38,41 @@ def _to_user_response(
     )
 
 
+def _set_session_cookie(response: Response, *, access_token: str, expires_at: datetime) -> None:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    max_age_seconds = max(int((expires_at - now).total_seconds()), 0)
+    response.set_cookie(
+        key=settings.auth_session_cookie_name,
+        value=access_token,
+        max_age=max_age_seconds,
+        expires=expires_at,
+        path=settings.auth_session_cookie_path,
+        domain=settings.auth_session_cookie_domain,
+        secure=settings.auth_session_cookie_secure,
+        httponly=settings.auth_session_cookie_httponly,
+        samesite=settings.auth_session_cookie_samesite,
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    settings = get_settings()
+    response.delete_cookie(
+        key=settings.auth_session_cookie_name,
+        path=settings.auth_session_cookie_path,
+        domain=settings.auth_session_cookie_domain,
+        secure=settings.auth_session_cookie_secure,
+        httponly=settings.auth_session_cookie_httponly,
+        samesite=settings.auth_session_cookie_samesite,
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
-def login(req: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def login(
+    req: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
     row = (
         db.execute(
             text(
@@ -75,12 +111,11 @@ def login(req: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
         )
 
     session_token = create_session(db, user_id=row["id"])
+    _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
     return LoginResponse(
         authenticated=True,
         requires_registration=False,
-        access_token=session_token.access_token,
-        token_type="bearer",
         expires_at=session_token.expires_at,
         user=_to_user_response(
             user_id=row["id"],
@@ -92,7 +127,11 @@ def login(req: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
 
 
 @router.post("/register", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
-def register(req: RegisterRequest, db: Session = Depends(get_db)) -> SessionResponse:
+def register(
+    req: RegisterRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SessionResponse:
     existing_email = (
         db.execute(
             text(
@@ -167,9 +206,9 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)) -> SessionResp
         db.rollback()
         raise
 
+    _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
+
     return SessionResponse(
-        access_token=session_token.access_token,
-        token_type="bearer",
         expires_at=session_token.expires_at,
         user=_to_user_response(
             user_id=user_row["id"],
@@ -182,11 +221,14 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)) -> SessionResp
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    response: Response,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ) -> Response:
     revoke_session_by_id(db, session_id=current_user.session_id, commit=True)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_session_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.get("/me", response_model=SessionInfoResponse)

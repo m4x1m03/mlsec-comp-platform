@@ -15,6 +15,8 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from core.settings import get_settings
+
 
 class _FakeAsyncResult:
     def __init__(self, task_id: str):
@@ -64,6 +66,10 @@ def _create_session_token(db_session, *, user_id: str) -> str:
     return token
 
 
+def _set_auth_cookie(client, access_token: str) -> None:
+    client.cookies.set(get_settings().auth_session_cookie_name, access_token)
+
+
 def _create_submission(db_session, *, user_id: str, submission_type: str) -> str:
     row = db_session.execute(
         text(
@@ -99,6 +105,7 @@ def test_enqueue_defense_job_inserts_job_and_publishes(client, db_session, monke
 
     user_id = _create_user(db_session)
     access_token = _create_session_token(db_session, user_id=user_id)
+    _set_auth_cookie(client, access_token)
     defense_submission_id = _create_submission(db_session, user_id=user_id, submission_type="defense")
 
     resp = client.post(
@@ -108,7 +115,6 @@ def test_enqueue_defense_job_inserts_job_and_publishes(client, db_session, monke
             "scope": None,
             "include_behavior_different": None,
         },
-        headers={"Authorization": f"Bearer {access_token}"},
     )
 
     assert resp.status_code == 200
@@ -146,12 +152,12 @@ def test_enqueue_attack_job_inserts_job_and_publishes(client, db_session, monkey
 
     user_id = _create_user(db_session)
     access_token = _create_session_token(db_session, user_id=user_id)
+    _set_auth_cookie(client, access_token)
     attack_submission_id = _create_submission(db_session, user_id=user_id, submission_type="attack")
 
     resp = client.post(
         "/queue/attack",
         json={"attack_submission_id": attack_submission_id},
-        headers={"Authorization": f"Bearer {access_token}"},
     )
 
     assert resp.status_code == 200

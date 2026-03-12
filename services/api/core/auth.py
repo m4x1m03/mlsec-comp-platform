@@ -6,15 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.settings import get_settings
 
-_bearer_scheme = HTTPBearer(auto_error=False)
+SESSION_COOKIE_ALIAS = get_settings().auth_session_cookie_name
 
 
 @dataclass(frozen=True)
@@ -52,12 +51,31 @@ def _unauthorized(detail: str = "Not authenticated") -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": "Session"},
     )
 
 
 def generate_session_token() -> str:
     return secrets.token_urlsafe(48)
+
+
+def _extract_session_token(
+    request: Request,
+    session_cookie: str | None,
+) -> str | None:
+    settings = get_settings()
+    cookie_token = session_cookie or request.cookies.get(settings.auth_session_cookie_name)
+    if cookie_token:
+        return cookie_token
+
+    # Keep bearer support for non-browser clients and test tooling.
+    authorization = request.headers.get("Authorization")
+    if authorization:
+        scheme, _, credentials = authorization.partition(" ")
+        if scheme.lower() == "bearer" and credentials:
+            return credentials
+
+    return None
 
 
 def create_session(
@@ -169,10 +187,12 @@ def _maybe_renew_session(
 
 
 def get_authenticated_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+    request: Request,
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_ALIAS),
     db: Session = Depends(get_db),
 ) -> AuthenticatedUser:
-    if credentials is None or credentials.scheme.lower() != "bearer":
+    access_token = _extract_session_token(request, session_cookie)
+    if access_token is None:
         raise _unauthorized()
 
     row = (
@@ -195,7 +215,7 @@ def get_authenticated_user(
                   AND u.disabled_at IS NULL
                 """
             ),
-            {"token_hash": _hash_token(credentials.credentials)},
+            {"token_hash": _hash_token(access_token)},
         )
         .mappings()
         .fetchone()

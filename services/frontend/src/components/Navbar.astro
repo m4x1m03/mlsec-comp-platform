@@ -1,6 +1,12 @@
 ---
 // src/components/Navbar.astro
+import LoginModal from './LoginModal.astro';
+import Logout from './Logout.astro'
 const currentPath = Astro.url.pathname;
+import { getSession } from '../lib/auth';
+import Account from './Account.astro';
+
+const session = await getSession(Astro.request);
 ---
 
 <nav class="bg-primary shadow-lg flex items-center justify-around py-4">
@@ -34,4 +40,14 @@ const currentPath = Astro.url.pathname;
       Leaderboard
     </a>
   </div>
-</nav>
+
+  <Account session={session}>
+    <LoginModal slot="modal" />
+    <Logout slot="logout" />
+  </Account>
+
+<script>
+  document.getElementById('open-login-btn')!.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('open-login-modal'));
+  });
+</script>

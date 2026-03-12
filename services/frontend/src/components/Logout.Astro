@@ -1,0 +1,20 @@
+---
+
+---
+<button id="logout-btn" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-red-500 hover:bg-red-50 hover:text-red-600 transition-all duration-150 cursor-pointer bg-transparent border border-transparent hover:border-red-100">
+  <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+    <path fill-rule="evenodd" d="M3 4.25A2.25 2.25 0 015.25 2h5.5A2.25 2.25 0 0113 4.25v2a.75.75 0 01-1.5 0v-2a.75.75 0 00-.75-.75h-5.5a.75.75 0 00-.75.75v11.5c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75v-2a.75.75 0 011.5 0v2A2.25 2.25 0 0110.75 18h-5.5A2.25 2.25 0 013 15.75V4.25z" clip-rule="evenodd" />
+    <path fill-rule="evenodd" d="M19 10a.75.75 0 00-.75-.75H8.704l1.048-1.076a.75.75 0 10-1.004-1.116l-2.5 2.25a.75.75 0 000 1.116l2.5 2.25a.75.75 0 101.004-1.116l-1.048-1.058h9.546A.75.75 0 0019 10z" clip-rule="evenodd" />
+  </svg>
+  Sign out
+</button>
+
+<script>
+  document.getElementById('logout-btn')!.addEventListener('click', async () => {
+    const res = await fetch('/auth/logout', { method: 'POST' });
+
+    if (res.ok) {
+      window.location.href = '/';
+    }
+  });
+</script>

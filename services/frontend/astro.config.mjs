@@ -7,11 +7,13 @@ import tailwind from '@astrojs/tailwind';
 
 // https://astro.build/config
 export default defineConfig({
+  output: 'server',
   integrations: [react(), tailwind()],
   vite: {
     server: {
       proxy: {
         '/health': 'http://127.0.0.1:8000',
+        '/auth': 'http://127.0.0.1:8000',
       },
     },
   },
