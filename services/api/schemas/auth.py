@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from datetime import datetime
 from uuid import UUID
@@ -23,6 +24,10 @@ def _normalize_username(value: str) -> str:
     if not _USERNAME_PATTERN.fullmatch(username):
         raise ValueError("Username must match [A-Za-z0-9_.-]{3,32}")
     return username
+
+# Prevent HTML/JS interpretation if legacy or bypassed values exist in DB.
+def _escape_username_for_response(value: str) -> str:
+    return html.escape(value, quote=True)
 
 
 class LoginRequest(BaseModel):
@@ -58,6 +63,12 @@ class AuthenticatedUserResponse(BaseModel):
     email: str
     username: str
     is_admin: bool
+
+    @field_validator("username")
+    @classmethod
+    def sanitize_username(cls, value: str) -> str:
+        # Prevent HTML/JS interpretation if legacy or bypassed values exist in DB.
+        return _escape_username_for_response(value)
 
 
 class SessionResponse(BaseModel):
