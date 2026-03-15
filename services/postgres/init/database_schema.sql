@@ -149,7 +149,24 @@ ON attack_files(attack_submission_id);
 
 
 --------------------------------------------------
--- ACTIVE SUBMISSIONS 
+-- TEMPLATE FILE REPORTS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS template_file_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    filename TEXT NOT NULL,      -- relative path within the attack template
+    sha256 TEXT NOT NULL,
+    byte_size BIGINT NOT NULL,
+    tlsh_hash TEXT,              -- NULL if file is too small for TLSH (<50 bytes)
+
+    evaluated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(filename)
+);
+
+
+--------------------------------------------------
+-- ACTIVE SUBMISSIONS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS active_submissions (
     user_id UUID NOT NULL

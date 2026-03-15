@@ -391,6 +391,117 @@ def get_attack_submission_source(attack_submission_id: str) -> dict:
         }
 
 
+def mark_attack_failed(attack_submission_id: str, error: str) -> None:
+    """
+    Mark attack submission as failed validation or evaluation.
+
+    Args:
+        attack_submission_id: Attack submission UUID
+        error: Human-readable error message
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE submissions
+                SET status = 'failed',
+                    is_functional = FALSE,
+                    functional_error = :error
+                WHERE id = :id
+            """),
+            {"id": attack_submission_id, "error": error}
+        )
+
+
+def get_template_reports() -> list[dict]:
+    """
+    Fetch all template file reports from the database.
+
+    Returns:
+        List of dicts with keys: filename, sha256, byte_size, tlsh_hash
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT filename, sha256, byte_size, tlsh_hash
+                FROM template_file_reports
+                ORDER BY filename
+            """)
+        ).fetchall()
+        return [
+            {
+                "filename": row[0],
+                "sha256": row[1],
+                "byte_size": row[2],
+                "tlsh_hash": row[3],
+            }
+            for row in result
+        ]
+
+
+def upsert_template_report(
+    filename: str,
+    sha256: str,
+    byte_size: int,
+    tlsh_hash: str | None,
+) -> None:
+    """
+    Insert or update a template file report.
+
+    Args:
+        filename: Relative path within the attack template
+        sha256: SHA-256 hex digest of the file
+        byte_size: File size in bytes
+        tlsh_hash: TLSH hash string, or None if file is too small
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO template_file_reports (filename, sha256, byte_size, tlsh_hash)
+                VALUES (:filename, :sha256, :byte_size, :tlsh_hash)
+                ON CONFLICT (filename) DO UPDATE
+                    SET sha256 = EXCLUDED.sha256,
+                        byte_size = EXCLUDED.byte_size,
+                        tlsh_hash = EXCLUDED.tlsh_hash,
+                        evaluated_at = CURRENT_TIMESTAMP
+            """),
+            {
+                "filename": filename,
+                "sha256": sha256,
+                "byte_size": byte_size,
+                "tlsh_hash": tlsh_hash,
+            }
+        )
+
+
+def update_attack_file_behavior(
+    file_id: str,
+    behavior_status: str,
+    report_ref: str | None,
+) -> None:
+    """
+    Update the behavior_status and behavior_report_ref for an attack file.
+
+    Args:
+        file_id: UUID of the attack_files row
+        behavior_status: One of 'unknown', 'same', 'different', 'error'
+        report_ref: JSON string with TLSH hash and similarity score (may be None)
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE attack_files
+                SET behavior_status = :status,
+                    behavior_report_ref = :report_ref
+                WHERE id = :id
+            """),
+            {"id": file_id, "status": behavior_status, "report_ref": report_ref}
+        )
+
+
 def insert_attack_files(attack_submission_id: str, files: list[dict]) -> int:
     """
     Bulk insert attack files into attack_files table.
