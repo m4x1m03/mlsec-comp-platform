@@ -261,14 +261,6 @@ def validate_heuristic(
     """
     logger.info(f"Heuristic validation (stub) for {image_name}")
 
-    # Placeholder for future heuristic validation
-    # Could include:
-    # - Timing analysis
-    # - Memory usage patterns
-    # - CPU usage patterns
-    # - Network behavior (if allowed)
-    # - File system activity
-
     return {}
 
 

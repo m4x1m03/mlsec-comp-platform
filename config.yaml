@@ -24,4 +24,4 @@ worker:
     # Cleanup settings
     cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
   minio:
-    bucket_name: "defense-submissions"
+    bucket_name: "mlsec-submissions"
