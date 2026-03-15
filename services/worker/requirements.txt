@@ -1,3 +1,13 @@
 celery>=5.3,<6
 SQLAlchemy>=2.0,<3
 psycopg2-binary>=2.9,<3
+docker>=7.0,<8
+requests>=2.31,<3
+websockets>=12.0,<13
+PyYAML>=6.0,<7
+pydantic>=2.0,<3
+GitPython>=3.1.40,<4
+minio>=7.2.0,<8
+redis>=5.0.0,<6
+pytest>=8,<10
+pytest-mock>=3.12,<4

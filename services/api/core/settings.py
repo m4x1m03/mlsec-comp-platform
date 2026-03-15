@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     celery_broker_url: str | None = None
     celery_default_queue: str = "mlsec"
 
+    # MinIO object storage
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_secure: bool = False
+    minio_bucket_name: str = "defense-submissions"
+
+    # File upload limits
+    max_file_size_mb: int = 512
+
     auth_session_ttl_minutes: int = 720
     auth_session_renew_on_validation: bool = True
     auth_session_renew_threshold_minutes: int = 60

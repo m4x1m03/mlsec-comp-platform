@@ -27,9 +27,11 @@ pnpm-debug.log*
 .idea/
 
 # python
+.venv
 __pycache__/
 *.pyc
 .pytest_cache/
 
 # development
 .dev/
+.artifacts/

@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 
 CREATE INDEX idx_submissions_user ON submissions(user_id);
 CREATE INDEX idx_submissions_type ON submissions(submission_type);
+CREATE INDEX idx_submissions_status_type ON submissions(status, submission_type);
 
 
 --------------------------------------------------
@@ -84,14 +85,25 @@ CREATE TABLE IF NOT EXISTS defense_submission_details (
     submission_id UUID PRIMARY KEY
         REFERENCES submissions(id) ON DELETE CASCADE,
 
-    source_type TEXT NOT NULL, -- docker | github | zip
+    source_type TEXT NOT NULL CHECK (
+        source_type IN ('docker', 'github', 'zip')
+    ),
 
     docker_image TEXT,
     git_repo TEXT,
 
     object_key TEXT, -- MinIO/S3 location
-    sha256 TEXT
+    sha256 TEXT,
+
+    -- Ensure exactly one source field is populated based on source_type
+    CONSTRAINT check_source_fields CHECK (
+        (source_type = 'docker' AND docker_image IS NOT NULL AND git_repo IS NULL AND object_key IS NULL) OR
+        (source_type = 'github' AND git_repo IS NOT NULL AND docker_image IS NULL AND object_key IS NULL) OR
+        (source_type = 'zip' AND object_key IS NOT NULL AND docker_image IS NULL AND git_repo IS NULL)
+    )
 );
+
+CREATE INDEX idx_defense_details_source_type ON defense_submission_details(source_type);
 
 
 --------------------------------------------------
@@ -180,6 +192,11 @@ CREATE TABLE IF NOT EXISTS evaluation_runs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Indexes for evaluation_runs queries
+CREATE INDEX idx_evaluation_runs_defense_attack 
+ON evaluation_runs(defense_submission_id, attack_submission_id);
+CREATE INDEX idx_evaluation_runs_status 
+ON evaluation_runs(status);
 
 
 --------------------------------------------------
