@@ -1,6 +1,7 @@
 import pytest
-from sqlalchemy import create_engine # type: ignore
-from sqlalchemy import event
+from pathlib import Path
+from sqlalchemy import create_engine  # type: ignore
+from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
@@ -17,9 +18,33 @@ TestingSessionLocal = sessionmaker(bind=engine)
 # Create tables once per test session
 @pytest.fixture(scope="session", autouse=True)
 def setup_database():
-    Base.metadata.create_all(bind=engine)
+    # Execute SQL schema file since project uses raw SQL, not ORM models
+    schema_path = Path(__file__).parent.parent.parent.parent / \
+        "services" / "postgres" / "init" / "database_schema.sql"
+
+    with engine.connect() as conn:
+        # Drop and recreate schema to ensure clean state
+        conn.execute(text("""
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+        """))
+        conn.commit()
+
+        # Load and execute schema
+        with open(schema_path, "r") as f:
+            schema_sql = f.read()
+        conn.execute(text(schema_sql))
+        conn.commit()
+
     yield
-    Base.metadata.drop_all(bind=engine)
+
+    # Drop all tables on teardown
+    with engine.connect() as conn:
+        conn.execute(text("""
+            DROP SCHEMA IF EXISTS public CASCADE;
+            CREATE SCHEMA public;
+        """))
+        conn.commit()
 
 
 # Provide a new database session for each test
@@ -64,3 +89,93 @@ def client(db_session):
 
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture()
+def fake_redis():
+    """Provide fake Redis client for testing without external dependency."""
+
+    class FakeRedis:
+        """Minimal Redis mock for API tests."""
+
+        def __init__(self):
+            self.hashes = {}  # key -> {field: value}
+            self.sets = {}  # key -> set()
+            self.lists = {}  # key -> list()
+            self.data = {}  # key -> value
+            self.expiry = {}  # key -> expiration timestamp
+
+        def hgetall(self, key):
+            return self.hashes.get(key, {}).copy()
+
+        def hset(self, key, field=None, value=None, mapping=None):
+            if key not in self.hashes:
+                self.hashes[key] = {}
+            if mapping:
+                self.hashes[key].update({str(k): str(v)
+                                        for k, v in mapping.items()})
+                return len(mapping)
+            elif field is not None:
+                self.hashes[key][str(field)] = str(value)
+                return 1
+            return 0
+
+        def smembers(self, key):
+            return self.sets.get(key, set()).copy()
+
+        def sadd(self, key, *members):
+            if key not in self.sets:
+                self.sets[key] = set()
+            initial_size = len(self.sets[key])
+            self.sets[key].update(str(m) for m in members)
+            return len(self.sets[key]) - initial_size
+
+        def rpush(self, key, *values):
+            if key not in self.lists:
+                self.lists[key] = []
+            self.lists[key].extend(str(v) for v in values)
+            return len(self.lists[key])
+
+        def setnx(self, key, value):
+            if key in self.data:
+                return False
+            self.data[key] = str(value)
+            return True
+
+        def expire(self, key, seconds):
+            import time
+            exists = (key in self.data or key in self.hashes or
+                      key in self.sets or key in self.lists)
+            if exists:
+                self.expiry[key] = time.time() + seconds
+                return True
+            return False
+
+        def exists(self, *keys):
+            count = 0
+            for key in keys:
+                if (key in self.data or key in self.hashes or
+                        key in self.sets or key in self.lists):
+                    count += 1
+            return count
+
+        def delete(self, *keys):
+            deleted = 0
+            for key in keys:
+                if key in self.data:
+                    del self.data[key]
+                    deleted += 1
+                if key in self.hashes:
+                    del self.hashes[key]
+                    deleted += 1
+                if key in self.sets:
+                    del self.sets[key]
+                    deleted += 1
+                if key in self.lists:
+                    del self.lists[key]
+                    deleted += 1
+                if key in self.expiry:
+                    del self.expiry[key]
+            return deleted
+
+    return FakeRedis()
