@@ -45,7 +45,17 @@ class SourceConfig(BaseModel):
 
 class AttackConfig(BaseModel):
     """Configuration for attack validation and evaluation."""
-    minimum_attack_similarity: int = 50  # 0–100; 0 = skip evaluation
+    # Whether to run similarity evaluation at all.
+    # False = skip evaluation, accept all attacks that pass validation.
+    check_similarity: bool = True
+
+    # Only meaningful when check_similarity=True.
+    # True  = reject attack if avg similarity < minimum_attack_similarity.
+    # False = log similarity score but accept regardless of the result.
+    reject_dissimilar_attacks: bool = True
+
+    minimum_attack_similarity: int = 50  # 0–100 threshold
+
     template_path: str = "/app/attack-template"
     max_zip_size_mb: int = 100
     sandbox_backend: str = "virustotal"  # "virustotal" | "local"
