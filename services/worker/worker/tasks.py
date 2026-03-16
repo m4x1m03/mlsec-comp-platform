@@ -29,11 +29,21 @@ from worker.db import (
     is_evaluation_in_progress,
     mark_attack_validated,
     get_attack_submission_source,
-    insert_attack_files
+    insert_attack_files,
+    get_template_reports,
+    mark_attack_failed,
 )
 from worker.redis_client import WorkerRegistry
 from worker.defense.validation import validate_functional
 from worker.defense.evaluate import evaluate_defense_with_redis
+from worker.attack.validation import (
+    AttackValidationError,
+    validate_functional as validate_attack_functional,
+    validate_heuristic,
+    _inner_filename,
+)
+from worker.attack.sandbox import get_sandbox_backend
+from worker.attack.sandbox.base import SandboxUnavailableError
 
 logger = get_task_logger(__name__)
 
@@ -402,6 +412,25 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
                 bucket_name, zip_object_key, temp_zip.name)
             logger.info(f"Downloaded to {temp_zip.name}")
 
+            # Functional validation (ZIP structure, password, safety)
+            attack_cfg = config.worker.attack
+            try:
+                validate_attack_functional(
+                    temp_zip.name,
+                    attack_cfg.template_path,
+                    attack_cfg.max_zip_size_mb,
+                )
+            except AttackValidationError as e:
+                error_msg = str(e)
+                logger.warning(
+                    "Attack %s failed functional validation: %s",
+                    attack_submission_id,
+                    error_msg,
+                )
+                mark_attack_failed(attack_submission_id, error_msg)
+                set_job_status(job_id=job_id, status="failed", error=error_msg)
+                return
+
             # Extract ZIP with password "infected"
             temp_extract_dir = tempfile.mkdtemp(
                 prefix=f"attack_{attack_submission_id}_extract_"
@@ -422,6 +451,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
             # Scan extracted files and populate attack_files table
             extract_path = Path(temp_extract_dir)
             extracted_files = []
+            submission_files: list[tuple[str, str]] = []
 
             for file_path in extract_path.rglob('*'):
                 if file_path.is_file():
@@ -433,6 +463,10 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
 
                     # Get relative path
                     rel_path = file_path.relative_to(extract_path)
+
+                    # Inner filename (strips top-level wrapping folder)
+                    inner_name = _inner_filename(file_path, extract_path)
+                    submission_files.append((inner_name, str(file_path)))
 
                     # Construct object key for future reference
                     # In a real implementation, these might be uploaded back to MinIO
@@ -454,6 +488,62 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
                     attack_submission_id, extracted_files)
                 logger.info(
                     f"Inserted {inserted_count} attack files into database")
+
+            # Heuristic validation (behavioral similarity against template)
+            if attack_cfg.check_similarity:
+                template_reports_list = get_template_reports()
+                if not template_reports_list:
+                    logger.warning(
+                        "No template reports available — skipping heuristic "
+                        "validation for attack %s.",
+                        attack_submission_id,
+                    )
+                else:
+                    template_reports = {
+                        r["filename"]: r for r in template_reports_list
+                    }
+                    sandbox = get_sandbox_backend(attack_cfg)
+                    try:
+                        avg_similarity = validate_heuristic(
+                            submission_files, sandbox, template_reports
+                        )
+                    except SandboxUnavailableError as e:
+                        error_msg = str(e)
+                        logger.error(
+                            "Sandbox unavailable during heuristic validation "
+                            "for attack %s: %s",
+                            attack_submission_id,
+                            error_msg,
+                        )
+                        mark_attack_failed(attack_submission_id, error_msg)
+                        raise
+
+                    if (
+                        attack_cfg.reject_dissimilar_attacks
+                        and avg_similarity < attack_cfg.minimum_attack_similarity
+                    ):
+                        error_msg = (
+                            f"Behavioral similarity {avg_similarity:.1f}% is below "
+                            f"the minimum threshold of "
+                            f"{attack_cfg.minimum_attack_similarity}%."
+                        )
+                        logger.warning(
+                            "Attack %s rejected: %s",
+                            attack_submission_id,
+                            error_msg,
+                        )
+                        mark_attack_failed(attack_submission_id, error_msg)
+                        set_job_status(
+                            job_id=job_id, status="failed", error=error_msg
+                        )
+                        return
+                    elif not attack_cfg.reject_dissimilar_attacks:
+                        logger.info(
+                            "Attack %s heuristic similarity=%.1f%% "
+                            "(reject_dissimilar_attacks=False, accepting).",
+                            attack_submission_id,
+                            avg_similarity,
+                        )
 
             # Mark attack as validated
             mark_attack_validated(attack_submission_id)
