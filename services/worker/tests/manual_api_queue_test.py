@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, text
 # Configuration - Use test database
 API_URL = "http://localhost:8000"
 DATABASE_URL = "postgresql://postgres:password123@localhost:5432/mlsec"
+SESSION_COOKIE_NAME = os.getenv("AUTH_SESSION_COOKIE_NAME", "mlsec_session")
 
 @pytest.fixture(scope="function")
 def api_auth_setup():
@@ -26,8 +27,9 @@ def api_auth_setup():
     assert response.status_code == 201, f"Registration failed: {response.status_code} {response.text}"
     
     auth_data = response.json()
-    token = auth_data["access_token"]
     user_id = auth_data["user"]["id"]
+    token = response.cookies.get(SESSION_COOKIE_NAME)
+    assert token, f"Missing {SESSION_COOKIE_NAME} cookie in register response"
     
     # Create a defense submission in the database
     engine = create_engine(DATABASE_URL)
@@ -97,8 +99,11 @@ if __name__ == "__main__":
             exit(1)
         
         auth_data = response.json()
-        token = auth_data["access_token"]
         user_id = auth_data["user"]["id"]
+        token = response.cookies.get(SESSION_COOKIE_NAME)
+        if not token:
+            print(f"Missing {SESSION_COOKIE_NAME} cookie in register response")
+            exit(1)
         print(f"User registered successfully. Token: {token[:20]}...")
         
         # Create a defense submission in database
