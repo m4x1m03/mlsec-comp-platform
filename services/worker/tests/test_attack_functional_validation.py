@@ -11,7 +11,7 @@ from worker.attack.validation import (
     AttackValidationError,
     _get_template_inner_structure,
     _strip_common_prefix,
-    run_all_validations,
+    validate_functional,
     validate_zip_openable,
     validate_zip_password,
     validate_zip_safety,
@@ -335,28 +335,28 @@ def test_validate_zip_structure_empty_template_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# run_all_validations
+# validate_functional
 # ---------------------------------------------------------------------------
 
-def test_run_all_validations_passing(tmp_path, template_dir):
+def test_validate_functional_passing(tmp_path, template_dir):
     """A well-formed ZIP passes all checks."""
     zip_path = _make_zip(tmp_path, {
         "samples/a.exe": b"data",
         "samples/b.exe": b"data",
         "samples/c.exe": b"data",
     })
-    run_all_validations(str(zip_path), str(template_dir), max_uncompressed_mb=10)
+    validate_functional(str(zip_path), str(template_dir), max_uncompressed_mb=10)
 
 
-def test_run_all_validations_fails_on_corrupt_zip(tmp_path, template_dir):
+def test_validate_functional_fails_on_corrupt_zip(tmp_path, template_dir):
     """Corrupt ZIP fails at the openable check (first check)."""
     bad = tmp_path / "bad.zip"
     bad.write_bytes(b"not a zip")
     with pytest.raises(AttackValidationError):
-        run_all_validations(str(bad), str(template_dir), max_uncompressed_mb=10)
+        validate_functional(str(bad), str(template_dir), max_uncompressed_mb=10)
 
 
-def test_run_all_validations_fails_on_wrong_password(tmp_path, template_dir, monkeypatch):
+def test_validate_functional_fails_on_wrong_password(tmp_path, template_dir, monkeypatch):
     """Wrong-password ZIP fails at the password check."""
     zip_path = _make_zip(tmp_path, {
         "samples/a.exe": b"",
@@ -370,20 +370,20 @@ def test_run_all_validations_fails_on_wrong_password(tmp_path, template_dir, mon
     monkeypatch.setattr(zipfile.ZipFile, "read", fake_read)
 
     with pytest.raises(AttackValidationError, match="password"):
-        run_all_validations(str(zip_path), str(template_dir), max_uncompressed_mb=10)
+        validate_functional(str(zip_path), str(template_dir), max_uncompressed_mb=10)
 
 
-def test_run_all_validations_fails_on_bad_structure(tmp_path, template_dir):
+def test_validate_functional_fails_on_bad_structure(tmp_path, template_dir):
     """Wrong file structure fails at the structure check."""
     zip_path = _make_zip(tmp_path, {
         "samples/a.exe": b"",
         # missing b.exe and c.exe
     })
     with pytest.raises(AttackValidationError, match="missing"):
-        run_all_validations(str(zip_path), str(template_dir), max_uncompressed_mb=10)
+        validate_functional(str(zip_path), str(template_dir), max_uncompressed_mb=10)
 
 
-def test_run_all_validations_fails_on_size(tmp_path, template_dir):
+def test_validate_functional_fails_on_size(tmp_path, template_dir):
     """Oversized ZIP fails at the safety check."""
     zip_path = _make_zip(tmp_path, {
         "samples/a.exe": b"x" * (2 * 1024 * 1024),
@@ -391,4 +391,4 @@ def test_run_all_validations_fails_on_size(tmp_path, template_dir):
         "samples/c.exe": b"",
     })
     with pytest.raises(AttackValidationError, match="exceeds"):
-        run_all_validations(str(zip_path), str(template_dir), max_uncompressed_mb=1)
+        validate_functional(str(zip_path), str(template_dir), max_uncompressed_mb=1)
