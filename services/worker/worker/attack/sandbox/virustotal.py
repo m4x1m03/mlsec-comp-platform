@@ -3,14 +3,10 @@
 Uploads a file to VirusTotal, polls until the analysis is complete, fetches
 the behavioral sandbox report, extracts a normalised ``behavioral_signals``
 dict, and returns a :class:`~base.SandboxReport`.
-
-Similarity scores are derived entirely from behavioral signals — no
-file-content hashing is performed.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from pathlib import Path
@@ -19,6 +15,8 @@ from typing import Any
 import requests
 
 from .base import SandboxBackend, SandboxReport, SandboxUnavailableError
+
+_PURE_WIN_PATH_SEP = "\\"
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +128,8 @@ class VirusTotalBackend(SandboxBackend):
                 f"Unexpected VT upload response format: {exc}"
             ) from exc
 
-        logger.info("Uploaded %s to VirusTotal; analysis ID: %s", path.name, analysis_id)
+        logger.info("Uploaded %s to VirusTotal; analysis ID: %s",
+                    path.name, analysis_id)
         return analysis_id
 
     def _poll_until_complete(self, analysis_id: str) -> str:
@@ -208,7 +207,8 @@ class VirusTotalBackend(SandboxBackend):
             ) from exc
 
         if not reports:
-            logger.warning("No behavioral reports available for sha256=%s", sha256)
+            logger.warning(
+                "No behavioral reports available for sha256=%s", sha256)
             return {}
 
         # Pick the first report that has at least one populated signal field
@@ -249,7 +249,7 @@ def _extract_signals(attrs: dict[str, Any]) -> tuple[dict | None, str | None]:
         attrs: The ``attributes`` dict from a single VT behavioral report entry.
 
     Returns:
-        ``(behavioral_signals, behash)`` — both may be ``None`` if the report
+        ``(behavioral_signals, behash)`` both may be ``None`` if the report
         is empty.
     """
     if not attrs:
@@ -257,29 +257,33 @@ def _extract_signals(attrs: dict[str, Any]) -> tuple[dict | None, str | None]:
 
     signals: dict[str, list[str]] = {}
 
-    # Simple list fields — values are already strings
+    # Simple list fields values are already strings
     for field_name in _LIST_FIELDS:
         raw = attrs.get(field_name) or []
         if raw:
-            # For modules_loaded keep only the basename to avoid path churn
+            # For modules_loaded keep only the basename to avoid path churn.
+            # VT paths are always Windows-style (backslash separators), so we
+            # split on "\" directly rather than using pathlib.Path, which
+            # behaves differently on Linux/macOS hosts.
             if field_name == "modules_loaded":
-                signals[field_name] = [Path(v).name for v in raw]
+                signals[field_name] = [
+                    v.split(_PURE_WIN_PATH_SEP)[-1] for v in raw]
             else:
                 signals[field_name] = list(raw)
 
-    # registry_keys_set is a list of {key, value} dicts — keep only key names
+    # registry_keys_set is a list of {key, value} dicts keep only key names
     reg_keys = attrs.get("registry_keys_set") or []
     if reg_keys:
         signals["registry_keys_set"] = [
             entry["key"] for entry in reg_keys if isinstance(entry, dict) and "key" in entry
         ]
 
-    # registry_keys_opened — plain list of strings
+    # registry_keys_opened plain list of strings
     reg_opened = attrs.get("registry_keys_opened") or []
     if reg_opened:
         signals["registry_keys_opened"] = list(reg_opened)
 
-    # files_dropped — keep SHA-256 hashes of dropped files
+    # files_dropped keep SHA-256 hashes of dropped files
     dropped = attrs.get("files_dropped") or []
     if dropped:
         signals["files_dropped"] = [
@@ -288,7 +292,7 @@ def _extract_signals(attrs: dict[str, Any]) -> tuple[dict | None, str | None]:
             if isinstance(entry, dict) and "sha256" in entry
         ]
 
-    # ip_traffic — normalise to "ip:port" strings
+    # ip_traffic normalise to "ip:port" strings
     ip_traffic = attrs.get("ip_traffic") or []
     if ip_traffic:
         signals["ip_traffic"] = [
