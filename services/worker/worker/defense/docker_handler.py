@@ -66,6 +66,15 @@ def pull_and_resolve_docker_image(image_reference: str) -> str:
 
     try:
         client = docker.from_env()
+        
+        # Check if it exists locally first
+        try:
+            client.images.get(image_name)
+            logger.info(f"Image {image_name} found locally, skipping pull")
+            return image_name
+        except docker.errors.ImageNotFound:
+            pass
+
         logger.info(f"Pulling Docker image: {image_name}")
 
         # Pull the image

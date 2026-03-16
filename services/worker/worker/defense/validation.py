@@ -180,24 +180,18 @@ def _validate_post_endpoint(container_url: str, config: dict) -> None:
         # Fallback: minimal PE signature
         probe_data = b"MZ" + b"\x00" * 4094
 
-    # Get gateway config
-    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
-    gateway_secret = os.getenv("GATEWAY_SECRET", "")
-
     # Get timeout from config
     worker_config = config.get('worker', {})
     eval_config = worker_config.get('evaluation', {})
     timeout = eval_config.get('requests_timeout_seconds', 5)
 
-    # Send POST request through gateway
+    # Send POST request direct to container (via gateway NAT)
     try:
         response = requests.post(
-            gateway_url,
+            container_url,
             data=probe_data,
             headers={
-                "Content-Type": "application/octet-stream",
-                "X-Target-Url": container_url,
-                "X-Gateway-Auth": gateway_secret
+                "Content-Type": "application/octet-stream"
             },
             timeout=timeout
         )

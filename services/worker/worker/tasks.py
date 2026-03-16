@@ -222,23 +222,31 @@ def run_defense_job(
 
         logger.info(f"Container {container.id[:12]} successfully spun up")
 
-        # Wait for container to be ready
+        # Get student container IP
+        container.reload()
+        student_ip = container.attrs['NetworkSettings']['Networks'][network_name]['IPAddress']
+        
+        gateway_port = registry.lease_gateway_port(job_id=job_id)
+        
+        # Setup iptables rules on gateway
+        logger.info(f"Setting up iptables rules on gateway: port {gateway_port} -> {student_ip}:8080")
+        gateway_container = client.containers.get("mlsec-gateway")
+        
+        gateway_container.exec_run(f"iptables -t nat -A PREROUTING -p tcp --dport {gateway_port} -j DNAT --to-destination {student_ip}:8080")
+        gateway_container.exec_run(f"iptables -t nat -A POSTROUTING -d {student_ip} -p tcp --dport 8080 -j MASQUERADE")
+        gateway_container.exec_run(f"iptables -A FORWARD -p tcp -d {student_ip} --dport 8080 -j ACCEPT")
+
         logger.info("Waiting for defense to be ready...")
-        url = f"http://{container.name}:8080/"
+        url = f"http://mlsec-gateway:{gateway_port}/"
         container_timeout = config.worker.defense_job.container_timeout
         start_wait = time.time()
         container_ready = False
 
         while (time.time() - start_wait) < container_timeout:
             try:
-                headers = {
-                    "X-Target-Url": url,
-                    "X-Gateway-Auth": os.getenv("GATEWAY_SECRET", "")
-                }
-                gateway_url = os.getenv(
-                    "GATEWAY_URL", "http://mlsec-gateway:8080/")
+                gateway_url = url
                 response = requests.get(
-                    gateway_url, headers=headers, timeout=2)
+                    gateway_url, timeout=2)
                 if response.status_code == 502:
                     time.sleep(1)
                     continue
@@ -329,6 +337,18 @@ def run_defense_job(
             try:
                 client = docker.from_env()
                 gateway_container = client.containers.get("mlsec-gateway")
+                
+                # Cleanup iptables rules (TODO: Implement orphaned rules reaper incase Celery worker dies)
+                try:
+                    if 'student_ip' in locals() and 'gateway_port' in locals():
+                        gateway_container.exec_run(f"iptables -t nat -D PREROUTING -p tcp --dport {gateway_port} -j DNAT --to-destination {student_ip}:8080")
+                        gateway_container.exec_run(f"iptables -t nat -D POSTROUTING -d {student_ip} -p tcp --dport 8080 -j MASQUERADE")
+                        gateway_container.exec_run(f"iptables -D FORWARD -p tcp -d {student_ip} --dport 8080 -j ACCEPT")
+                        registry.release_gateway_port(gateway_port)
+                        #logger.info(f"Successfully cleaned iptables rules for job {job_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup iptables rules for job {job_id}: {e}")
+
                 network.disconnect(gateway_container, force=True)
             except Exception as e:
                 logger.warning(

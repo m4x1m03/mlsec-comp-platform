@@ -64,9 +64,6 @@ def evaluate_defense_with_redis(
     timeout = eval_config.get('requests_timeout_seconds', 5)
     max_empty_polls = eval_config.get('max_empty_polls', 3)
 
-    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
-    gateway_secret = os.getenv("GATEWAY_SECRET", "")
-
     # Track evaluation runs (defense-attack pairs)
     evaluation_runs = {}  # attack_submission_id -> run_id
 
@@ -147,12 +144,10 @@ def evaluate_defense_with_redis(
             for retry in range(max_retries):
                 try:
                     response = requests.post(
-                        gateway_url,
+                        container_url,
                         data=sample_bytes,
                         headers={
-                            "Content-Type": "application/octet-stream",
-                            "X-Target-Url": container_url,
-                            "X-Gateway-Auth": gateway_secret
+                            "Content-Type": "application/octet-stream"
                         },
                         timeout=timeout
                     )

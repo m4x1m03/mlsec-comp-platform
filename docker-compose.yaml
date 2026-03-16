@@ -39,12 +39,12 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"  # API
-      - "9001:9001"  # Console UI
+      - "9000:9000" # API
+      - "9001:9001" # Console UI
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: [ "CMD", "mc", "ready", "local" ]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -74,7 +74,7 @@ services:
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -106,15 +106,15 @@ services:
       - minio
 
   # Gateway to control traffic for student containers
-  eval-gateway:
+  mlsec-gateway:
     build:
       context: ./services/gateway
       dockerfile: Dockerfile
     container_name: mlsec-gateway
-    environment:
-      GATEWAY_SECRET: welovemarcus
-    ports:
-      - "8080:8080"
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     networks:
       - backend_net
 
@@ -130,8 +130,6 @@ services:
       CELERY_DEFAULT_QUEUE: mlsec
       REDIS_URL: redis://redis:6379/0
       API_WS_URL: ws://host.docker.internal:8765/ws/eval/samples # Temporary WebSocket to Simulate FastAPI
-      GATEWAY_SECRET: welovemarcus
-      GATEWAY_URL: http://mlsec-gateway:8080
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
