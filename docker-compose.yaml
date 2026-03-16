@@ -129,13 +129,10 @@ services:
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
       CELERY_DEFAULT_QUEUE: mlsec
       REDIS_URL: redis://redis:6379/0
-      API_WS_URL: ws://host.docker.internal:8765/ws/eval/samples # Temporary WebSocket to Simulate FastAPI
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
-    extra_hosts:
-      - "host.docker.internal:host-gateway" # Also Temporary for WebSocket Simulation
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
