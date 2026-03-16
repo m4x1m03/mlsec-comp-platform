@@ -294,7 +294,7 @@ def run_defense_job(
             config=config_dict
         )
 
-        # Grab container logs
+        # Grab container logs (Remove in production)
         try:
             container_logs = container.logs().decode('utf-8')
             if container_logs:
