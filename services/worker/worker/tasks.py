@@ -189,9 +189,24 @@ def run_defense_job(
 
         logger.info(f"Defense image ready: {image_name}")
 
-        # Create isolated network
+        gateway_port = registry.lease_gateway_port(job_id=job_id)
+
+        # Create network with unique subnet to avoid exhaustion
+        port_offset = gateway_port - 10000
+        x = port_offset // 32
+        y = (port_offset % 32) * 8
+        subnet = f"10.50.{x}.{y}/29"
+        
+        ipam_config = docker.types.IPAMConfig(
+            pool_configs=[docker.types.IPAMPool(subnet=subnet)]
+        )
+
         client = docker.from_env()
-        network = client.networks.create(network_name, internal=True)
+        network = client.networks.create(
+            network_name, 
+            internal=True,
+            ipam=ipam_config
+        )
         gateway_container = client.containers.get("mlsec-gateway")
         network.connect(gateway_container)
 
@@ -225,8 +240,6 @@ def run_defense_job(
         # Get student container IP
         container.reload()
         student_ip = container.attrs['NetworkSettings']['Networks'][network_name]['IPAddress']
-        
-        gateway_port = registry.lease_gateway_port(job_id=job_id)
         
         # Setup iptables rules on gateway
         logger.info(f"Setting up iptables rules on gateway: port {gateway_port} -> {student_ip}:8080")

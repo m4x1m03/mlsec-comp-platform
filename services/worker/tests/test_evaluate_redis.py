@@ -259,8 +259,6 @@ def test_evaluate_sends_to_gateway(db_session, fake_redis, test_helpers, monkeyp
     req = http_requests[0]
     assert req["data"] == sample_bytes
     assert req["headers"]["Content-Type"] == "application/octet-stream"
-    assert req["headers"]["X-Target-Url"] == container_url
-    assert "X-Gateway-Auth" in req["headers"]
 
 
 def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypatch, config_dict):

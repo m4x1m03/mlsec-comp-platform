@@ -116,7 +116,7 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     networks:
-      - backend_net
+      - defense_net
 
   # Placeholder worker container (Celery wiring added in a later step. Unless we want to have persistent workers?)
   worker:
@@ -143,6 +143,7 @@ services:
       - "${DOCKER_GID:-999}" # Allows Worker container to interact with Docker Engine
     networks:
       - backend_net
+      - defense_net
     depends_on:
       - postgres
       - rabbitmq
@@ -174,6 +175,9 @@ networks:
   # TODO: Secure communication network for evaluation end.
   backend_net:
     name: backend_net
+    driver: bridge
+  defense_net:
+    name: defense_net
     driver: bridge
 volumes:
   # TODO: Establish volumes for postgres, minio, rabbitmq
