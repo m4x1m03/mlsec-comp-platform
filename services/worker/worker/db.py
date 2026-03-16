@@ -418,13 +418,14 @@ def get_template_reports() -> list[dict]:
     Fetch all template file reports from the database.
 
     Returns:
-        List of dicts with keys: filename, sha256, byte_size, tlsh_hash
+        List of dicts with keys: filename, sha256, sandbox_report_ref, behash,
+        behavioral_signals
     """
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT filename, sha256, byte_size, tlsh_hash
+                SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
                 FROM template_file_reports
                 ORDER BY filename
             """)
@@ -433,8 +434,9 @@ def get_template_reports() -> list[dict]:
             {
                 "filename": row[0],
                 "sha256": row[1],
-                "byte_size": row[2],
-                "tlsh_hash": row[3],
+                "sandbox_report_ref": row[2],
+                "behash": row[3],
+                "behavioral_signals": row[4],
             }
             for row in result
         ]
@@ -443,8 +445,9 @@ def get_template_reports() -> list[dict]:
 def upsert_template_report(
     filename: str,
     sha256: str,
-    byte_size: int,
-    tlsh_hash: str | None,
+    sandbox_report_ref: str | None,
+    behash: str | None,
+    behavioral_signals: dict | None,
 ) -> None:
     """
     Insert or update a template file report.
@@ -452,26 +455,31 @@ def upsert_template_report(
     Args:
         filename: Relative path within the attack template
         sha256: SHA-256 hex digest of the file
-        byte_size: File size in bytes
-        tlsh_hash: TLSH hash string, or None if file is too small
+        sandbox_report_ref: Backend-specific analysis ID (e.g. VT analysis ID)
+        behash: VT behavioral hash, or None if analysis has not completed
+        behavioral_signals: Extracted behavioral indicators dict, or None
     """
+    import json
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO template_file_reports (filename, sha256, byte_size, tlsh_hash)
-                VALUES (:filename, :sha256, :byte_size, :tlsh_hash)
+                INSERT INTO template_file_reports
+                    (filename, sha256, sandbox_report_ref, behash, behavioral_signals)
+                VALUES (:filename, :sha256, :report_ref, :behash, CAST(:signals AS jsonb))
                 ON CONFLICT (filename) DO UPDATE
-                    SET sha256 = EXCLUDED.sha256,
-                        byte_size = EXCLUDED.byte_size,
-                        tlsh_hash = EXCLUDED.tlsh_hash,
-                        evaluated_at = CURRENT_TIMESTAMP
+                    SET sha256              = EXCLUDED.sha256,
+                        sandbox_report_ref  = EXCLUDED.sandbox_report_ref,
+                        behash              = EXCLUDED.behash,
+                        behavioral_signals  = EXCLUDED.behavioral_signals,
+                        evaluated_at        = CURRENT_TIMESTAMP
             """),
             {
                 "filename": filename,
                 "sha256": sha256,
-                "byte_size": byte_size,
-                "tlsh_hash": tlsh_hash,
+                "report_ref": sandbox_report_ref,
+                "behash": behash,
+                "signals": json.dumps(behavioral_signals) if behavioral_signals is not None else None,
             }
         )
 
