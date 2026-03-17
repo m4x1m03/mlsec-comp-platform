@@ -85,7 +85,7 @@ def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkey
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock HTTP requests
     mock_http_response = Mock()
@@ -155,7 +155,7 @@ def test_evaluate_downloads_from_minio(db_session, fake_redis, test_helpers, mon
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock HTTP
     mock_http_response = Mock()
@@ -219,7 +219,7 @@ def test_evaluate_sends_to_gateway(db_session, fake_redis, test_helpers, monkeyp
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Track HTTP requests
     http_requests = []
@@ -297,7 +297,7 @@ def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypa
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock HTTP to return predictions
     http_call_count = [0]
@@ -405,7 +405,7 @@ def test_evaluate_updates_heartbeat(db_session, fake_redis, test_helpers, monkey
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock HTTP
     mock_http_response = Mock()
@@ -468,7 +468,7 @@ def test_evaluate_handles_minio_error(db_session, fake_redis, test_helpers, monk
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock pop to return attack once then None
     monkeypatch.setattr(
@@ -535,7 +535,7 @@ def test_evaluate_handles_gateway_timeout(db_session, fake_redis, test_helpers, 
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock HTTP to raise Timeout
     import requests
@@ -610,7 +610,7 @@ def test_evaluate_handles_invalid_response(db_session, fake_redis, test_helpers,
     def fake_minio_init(*args, **kwargs):
         return mock_minio
 
-    monkeypatch.setattr("worker.defense.evaluate.Minio", fake_minio_init)
+    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
 
     # Mock HTTP to return invalid prediction
     def fake_post(*args, **kwargs):

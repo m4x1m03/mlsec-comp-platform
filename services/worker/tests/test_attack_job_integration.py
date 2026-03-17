@@ -90,8 +90,7 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
 
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -176,8 +175,7 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
             zf.writestr("sample2.exe", b"fake_content_2")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -245,8 +243,7 @@ def test_attack_job_skips_in_progress_evaluations(db_session, fake_redis, test_h
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -313,8 +310,7 @@ def test_attack_job_uses_redis_atomic_marking(db_session, fake_redis, test_helpe
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -376,8 +372,7 @@ def test_attack_job_handles_multiple_workers_same_defense(db_session, fake_redis
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -465,8 +460,7 @@ def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpe
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -503,8 +497,7 @@ def test_attack_job_error_handling(db_session, fake_redis, test_helpers, monkeyp
 
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     def fake_init(self):
         raise RuntimeError("Redis connection failed")
@@ -566,8 +559,7 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *args,
-                        **kwargs: mock_minio_client)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -616,7 +608,7 @@ def _common_setup(db_session, fake_redis, test_helpers, monkeypatch):
 
     mock_minio = Mock()
     mock_minio.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.Minio", lambda *a, **kw: mock_minio)
+    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio)
 
     # Silence defense-job enqueuing
     monkeypatch.setattr(tasks_mod.run_defense_job, "apply_async", lambda kw: None)

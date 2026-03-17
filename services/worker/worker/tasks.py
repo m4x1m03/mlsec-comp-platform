@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 import hashlib
 from pathlib import Path
-from minio import Minio
+from worker.minio_client import get_minio_client, get_bucket_name
 
 from worker.celery_app import celery_app
 from worker.config import get_config
@@ -379,21 +379,8 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
         logger.info(f"Attack ZIP object key: {zip_object_key}")
 
         # Initialize MinIO client
-        # TODO: Dont store defaults
-        config_dict = config.model_dump()
-        minio_config = config_dict.get('worker', {}).get('minio', {})
-        endpoint = minio_config.get('endpoint', 'minio:9000')
-        access_key = minio_config.get('access_key', 'minioadmin')
-        secret_key = minio_config.get('secret_key', 'minioadmin')
-        bucket_name = minio_config.get('bucket_name', 'defense-submissions')
-        secure = minio_config.get('secure', False)
-
-        minio_client = Minio(
-            endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure
-        )
+        minio_client = get_minio_client()
+        bucket_name = get_bucket_name()
 
         # Download ZIP to temporary file
         # TODO: Store as individual files instead of zips, maybe?
@@ -471,7 +458,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
 
                     # Construct object key for future reference
                     # In a real implementation, these might be uploaded back to MinIO
-                    file_object_key = f"attacks/{attack_submission_id}/{rel_path}"
+                    file_object_key = f"attack/{attack_submission_id}/{rel_path}"
 
                     extracted_files.append({
                         "filename": str(rel_path),

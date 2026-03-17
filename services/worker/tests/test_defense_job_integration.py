@@ -766,12 +766,12 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
     mock_minio_client_eval.get_object.return_value = mock_minio_response
 
     monkeypatch.setattr(
-        "worker.tasks.Minio",
-        lambda *args, **kwargs: Mock(fget_object=Mock())
+        "worker.tasks.get_minio_client",
+        lambda: Mock(fget_object=Mock())
     )
     monkeypatch.setattr(
-        "worker.defense.evaluate.Minio",
-        lambda *args, **kwargs: mock_minio_client_eval
+        "worker.defense.evaluate.get_minio_client",
+        lambda: mock_minio_client_eval
     )
 
     # Mock requests.post for evaluation
@@ -870,12 +870,12 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
     mock_minio_client_eval.get_object.return_value = mock_minio_response
 
     monkeypatch.setattr(
-        "worker.tasks.Minio",
-        lambda *args, **kwargs: Mock(fget_object=Mock())
+        "worker.tasks.get_minio_client",
+        lambda: Mock(fget_object=Mock())
     )
     monkeypatch.setattr(
-        "worker.defense.evaluate.Minio",
-        lambda *args, **kwargs: mock_minio_client_eval
+        "worker.defense.evaluate.get_minio_client",
+        lambda: mock_minio_client_eval
     )
 
     # Mock requests.post for evaluation
@@ -980,8 +980,8 @@ def test_defense_job_cleanup_on_container_stop_failure(db_session, fake_redis, t
     mock_minio_client_eval.get_object.return_value = mock_minio_response
 
     monkeypatch.setattr(
-        "worker.defense.evaluate.Minio",
-        lambda *args, **kwargs: mock_minio_client_eval
+        "worker.defense.evaluate.get_minio_client",
+        lambda: mock_minio_client_eval
     )
 
     # Mock requests.post for evaluation
@@ -1102,8 +1102,8 @@ def test_defense_job_respects_cleanup_config(db_session, fake_redis, test_helper
     mock_minio_client_eval.get_object.return_value = mock_minio_response
 
     monkeypatch.setattr(
-        "worker.defense.evaluate.Minio",
-        lambda *args, **kwargs: mock_minio_client_eval
+        "worker.defense.evaluate.get_minio_client",
+        lambda: mock_minio_client_eval
     )
 
     # Mock requests.post for evaluation
