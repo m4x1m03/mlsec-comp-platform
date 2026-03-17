@@ -58,11 +58,10 @@ class AttackConfig(BaseModel):
 
     template_path: str = "/app/attack-template"
     max_zip_size_mb: int = 100
-    sandbox_backend: str = "virustotal"  # "virustotal" | "local" | "replay" (remove "replay" after demo)
+    sandbox_backend: str = "virustotal"  # "virustotal" | "local"
     virustotal_api_key: str = Field(
         default_factory=lambda: os.getenv("VIRUSTOTAL_API_KEY", "")
     )
-    replay_reports_dir: str = ""  # ! DEMO ONLY — remove after demo
 
 
 class MinIOConfig(BaseModel):

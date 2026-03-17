@@ -13,7 +13,6 @@ from worker.attack.sandbox import (
     SandboxReport,
     SandboxUnavailableError,
     LocalSandboxBackend,
-    ReplaySandboxBackend,
     VirusTotalBackend,
     get_sandbox_backend,
 )
@@ -410,72 +409,3 @@ def test_factory_unknown_backend_raises():
     with pytest.raises(ValueError, match="unknown_sandbox"):
         get_sandbox_backend(cfg)
 
-
-# ---------------------------------------------------------------------------
-# ReplaySandboxBackend
-# ---------------------------------------------------------------------------
-
-def _write_report(directory: Path, sha256: str, name: str = "file", **overrides) -> None:
-    """Write a minimal ``*_report.json`` fixture into *directory*."""
-    data = {
-        "name": name,
-        "sha256": sha256,
-        "behash": overrides.get("behash", "abc123"),
-        "report_ref": overrides.get("report_ref", "analysis-id"),
-        "behavioral_signals": overrides.get("behavioral_signals", {"tags": ["FOO"]}),
-    }
-    (directory / f"{name}_report.json").write_text(json.dumps(data))
-
-
-def test_replay_missing_dir_raises():
-    with pytest.raises(SandboxUnavailableError, match="not found"):
-        ReplaySandboxBackend("/nonexistent/path/reports")
-
-
-def test_replay_empty_dir_raises(tmp_path):
-    with pytest.raises(SandboxUnavailableError, match="No valid report files"):
-        ReplaySandboxBackend(str(tmp_path))
-
-
-def test_replay_known_sha256_returns_report(tmp_path):
-    sha = "a" * 64
-    _write_report(tmp_path, sha, name="sample", behash="beef", behavioral_signals={"tags": ["T1"]})
-    backend = ReplaySandboxBackend(str(tmp_path))
-
-    # Write a file whose SHA-256 we control via patching
-    f = tmp_path / "sample.exe"
-    f.write_bytes(b"x")
-
-    with patch("worker.attack.sandbox.replay._sha256_file", return_value=sha):
-        report = backend.analyze_file(str(f))
-
-    assert report.behash == "beef"
-    assert report.behavioral_signals == {"tags": ["T1"]}
-
-
-def test_replay_unknown_sha256_raises(tmp_path):
-    sha = "a" * 64
-    _write_report(tmp_path, sha, name="known")
-    backend = ReplaySandboxBackend(str(tmp_path))
-
-    f = tmp_path / "unknown.exe"
-    f.write_bytes(b"y")
-
-    with patch("worker.attack.sandbox.replay._sha256_file", return_value="b" * 64):
-        with pytest.raises(SandboxUnavailableError, match="No saved report"):
-            backend.analyze_file(str(f))
-
-
-def test_replay_loads_multiple_reports(tmp_path):
-    for i, sha in enumerate(["aa" * 32, "bb" * 32, "cc" * 32]):
-        _write_report(tmp_path, sha, name=f"file{i}")
-    backend = ReplaySandboxBackend(str(tmp_path))
-    assert len(backend._index) == 3
-
-
-def test_factory_returns_replay(tmp_path):
-    sha = "d" * 64
-    _write_report(tmp_path, sha, name="t")
-    cfg = AttackConfig(sandbox_backend="replay", replay_reports_dir=str(tmp_path))
-    backend = get_sandbox_backend(cfg)
-    assert isinstance(backend, ReplaySandboxBackend)

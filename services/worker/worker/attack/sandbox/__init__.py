@@ -6,14 +6,12 @@ Public API:
 - :class:`SandboxReport` - result dataclass
 - :exc:`SandboxUnavailableError` - transient backend failure
 - :class:`LocalSandboxBackend` - stub (not yet implemented)
-- :class:`ReplaySandboxBackend` - offline replay of pre-collected reports  # ! DEMO ONLY
 - :class:`VirusTotalBackend` - fully implemented VT backend
 - :func:`get_sandbox_backend` - factory function
 """
 
 from .base import SandboxBackend, SandboxReport, SandboxUnavailableError
 from .local import LocalSandboxBackend
-from .replay import ReplaySandboxBackend  # ! DEMO ONLY
 from .virustotal import VirusTotalBackend
 
 
@@ -35,10 +33,6 @@ def get_sandbox_backend(config) -> SandboxBackend:
     if backend == "local":
         return LocalSandboxBackend()
 
-    # ! DEMO ONLY — remove this block after the demo
-    if backend == "replay":
-        return ReplaySandboxBackend(config.replay_reports_dir)
-
     if backend == "virustotal":
         if not config.virustotal_api_key:
             raise ValueError(
@@ -48,7 +42,6 @@ def get_sandbox_backend(config) -> SandboxBackend:
 
     raise ValueError(
         f"Unknown sandbox_backend: {backend!r}. "
-        # ! DEMO ONLY: remove ", 'replay'" when cleaning up
         "Valid options: 'virustotal', 'local'."
     )
 
@@ -58,7 +51,6 @@ __all__ = [
     "SandboxReport",
     "SandboxUnavailableError",
     "LocalSandboxBackend",
-    "ReplaySandboxBackend",  # ! DEMO ONLY
     "VirusTotalBackend",
     "get_sandbox_backend",
 ]
