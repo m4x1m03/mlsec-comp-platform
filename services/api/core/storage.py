@@ -10,7 +10,7 @@ from typing import BinaryIO
 from minio import Minio
 from minio.error import S3Error
 
-from .settings import get_settings
+from .config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def get_minio_client() -> Minio:
     """Singleton MinIO client factory."""
-    settings = get_settings()
+    cfg = get_config().minio
     return Minio(
-        endpoint=settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=settings.minio_secure,
+        endpoint=cfg.endpoint,
+        access_key=cfg.access_key,
+        secret_key=cfg.secret_key,
+        secure=cfg.secure,
     )
 
 
@@ -32,9 +32,8 @@ def ensure_bucket_exists() -> None:
     Create bucket if it doesn't exist. Called on startup.
     Sets public-read policy for downloads.
     """
-    settings = get_settings()
     client = get_minio_client()
-    bucket_name = settings.minio_bucket_name
+    bucket_name = get_config().minio.bucket_name
 
     try:
         if not client.bucket_exists(bucket_name):
@@ -65,12 +64,11 @@ def upload_defense_zip(
     Raises:
         S3Error: If upload fails
     """
-    settings = get_settings()
     client = get_minio_client()
-    bucket_name = settings.minio_bucket_name
+    bucket_name = get_config().minio.bucket_name
 
     # Generate object key
-    object_key = f"defense-zips/{user_id}/{submission_id}.zip"
+    object_key = f"defense/{user_id}/{submission_id}.zip"
 
     # Calculate SHA256 while reading file
     hasher = hashlib.sha256()
@@ -124,12 +122,11 @@ def upload_attack_zip(
     Raises:
         S3Error: If upload fails
     """
-    settings = get_settings()
     client = get_minio_client()
-    bucket_name = settings.minio_bucket_name
+    bucket_name = get_config().minio.bucket_name
 
     # Generate object key
-    object_key = f"attack-zips/{user_id}/{submission_id}.zip"
+    object_key = f"attack/{user_id}/{submission_id}.zip"
 
     # Calculate SHA256 while reading file
     hasher = hashlib.sha256()
@@ -176,9 +173,8 @@ def delete_object(object_key: str) -> None:
     Raises:
         S3Error: If deletion fails
     """
-    settings = get_settings()
     client = get_minio_client()
-    bucket_name = settings.minio_bucket_name
+    bucket_name = get_config().minio.bucket_name
 
     try:
         logger.info(f"Deleting object from MinIO: {object_key}")

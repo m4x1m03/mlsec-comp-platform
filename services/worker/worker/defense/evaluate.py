@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import time
 import requests
-from minio import Minio
 from celery.utils.log import get_task_logger
 from ..db import (
     ensure_evaluation_run,
@@ -13,6 +12,7 @@ from ..db import (
     get_attack_files
 )
 from ..redis_client import WorkerRegistry
+from ..minio_client import get_minio_client, get_bucket_name
 
 logger = get_task_logger(__name__)
 
@@ -45,18 +45,8 @@ def evaluate_defense_with_redis(
     registry = WorkerRegistry()
 
     # Initialize MinIO client
-    # TODO: Get rid of defaults
-    minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
-    minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-    minio_bucket = os.getenv("MINIO_BUCKET", "mlsec-submissions")
-
-    minio_client = Minio(
-        minio_endpoint,
-        access_key=minio_access_key,
-        secret_key=minio_secret_key,
-        secure=False  # TODO: Enable TLS in production
-    )
+    minio_client = get_minio_client()
+    minio_bucket = get_bucket_name()
 
     # Get config values
     worker_config = config.get('worker', {})

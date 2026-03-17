@@ -25,3 +25,12 @@ worker:
     cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
   minio:
     bucket_name: "mlsec-submissions"
+  attack:
+    check_similarity: true           # false = skip evaluation, accept all validated attacks
+    reject_dissimilar_attacks: true  # only applies when check_similarity=true
+                                     #   true  = reject if score < minimum_attack_similarity
+                                     #   false = log score but accept regardless
+    minimum_attack_similarity: 50    # 0–100 threshold (used when check_similarity=true)
+    template_path: "/app/attack-template"
+    max_zip_size_mb: 100
+    sandbox_backend: "virustotal"    # "virustotal" | "local"

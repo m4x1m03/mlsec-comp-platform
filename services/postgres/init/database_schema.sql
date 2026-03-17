@@ -149,7 +149,25 @@ ON attack_files(attack_submission_id);
 
 
 --------------------------------------------------
--- ACTIVE SUBMISSIONS 
+-- TEMPLATE FILE REPORTS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS template_file_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    filename TEXT NOT NULL,           -- relative path within the attack template
+    sha256 TEXT NOT NULL,
+    sandbox_report_ref TEXT,          -- backend-specific analysis ID (e.g. VT analysis ID)
+    behash TEXT,                      -- VT behavioral hash; NULL until analysis completes
+    behavioral_signals JSONB,         -- extracted behavioral indicators; NULL until analysis completes
+
+    evaluated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(filename)
+);
+
+
+--------------------------------------------------
+-- ACTIVE SUBMISSIONS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS active_submissions (
     user_id UUID NOT NULL
