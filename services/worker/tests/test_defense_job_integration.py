@@ -15,6 +15,21 @@ class FakeContainer:
     def __init__(self, container_id="abc123def456"):
         self.id = container_id
         self.name = f"eval_defense_{container_id}"
+        self.attrs = {
+            'NetworkSettings': {
+                'Networks': {}
+            }
+        }
+
+    def reload(self):
+        """Mock reload to populate network info."""
+        class DefaultDict(dict):
+            def __getitem__(self, key):
+                if key not in self:
+                    return {'IPAddress': '10.50.0.2'}
+                return super().__getitem__(key)
+        
+        self.attrs['NetworkSettings']['Networks'] = DefaultDict()
 
     def stop(self, timeout=2):
         pass

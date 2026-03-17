@@ -177,27 +177,39 @@ def _validate_post_endpoint(container_url: str, config: dict) -> None:
         with open(probe_path, "rb") as f:
             probe_data = f.read(4096)
     else:
-        # Fallback: minimal PE signature
-        probe_data = b"MZ" + b"\x00" * 4094
-
-    # Get gateway config
-    gateway_url = os.getenv("GATEWAY_URL", "http://mlsec-gateway:8080/")
-    gateway_secret = os.getenv("GATEWAY_SECRET", "")
+        # Fallback: Realistic benign PE stub
+        probe_data = (
+            b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00"
+            b"\xb8\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x00\x00\x00"
+            b"\x0e\x1f\xba\x0e\x00\xb4\x09\xcd\x21\xb8\x01\x4c\xcd\x21\x54\x68"
+            b"\x69\x73\x20\x70\x72\x6f\x67\x72\x61\x6d\x20\x63\x61\x6e\x6e\x6f"
+            b"\x74\x20\x62\x65\x20\x72\x75\x6e\x20\x69\x6e\x20\x44\x4f\x53\x20"
+            b"\x6d\x6f\x64\x65\x2e\x0d\x0d\x0a\x24\x00\x00\x00\x00\x00\x00\x00"
+            b"PE\x00\x00\x4c\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            b"\xe0\x00\x02\x01\x0b\x01\x02\x1e\x00\x02\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x00\x00\x00\x10\x00\x00\x00\x20\x00\x00\x00\x00\x00\x00"
+            b"\x00\x00\x40\x00\x00\x10\x00\x00\x00\x02\x00\x00\x04\x00\x00\x00"
+            b"\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x30\x00\x00"
+            b"\x00\x02\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x10\x00"
+            b"\x00\x10\x00\x00\x00\x00\x10\x00\x00\x10\x00\x00\x00\x00\x00\x00"
+            b"\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        )
+        probe_data += b"\x00" * (4096 - len(probe_data))
 
     # Get timeout from config
     worker_config = config.get('worker', {})
     eval_config = worker_config.get('evaluation', {})
     timeout = eval_config.get('requests_timeout_seconds', 5)
 
-    # Send POST request through gateway
+    # Send POST request direct to container (via gateway NAT)
     try:
         response = requests.post(
-            gateway_url,
+            container_url,
             data=probe_data,
             headers={
-                "Content-Type": "application/octet-stream",
-                "X-Target-Url": container_url,
-                "X-Gateway-Auth": gateway_secret
+                "Content-Type": "application/octet-stream"
             },
             timeout=timeout
         )

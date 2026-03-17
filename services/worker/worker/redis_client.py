@@ -172,3 +172,15 @@ class WorkerRegistry:
             self.client.expire(key, 86400)
 
         return bool(result)
+
+    def lease_gateway_port(self, job_id: str) -> int:
+        """Lease an available gateway port from the range 10000-20000."""
+        for port in range(10000, 20000):
+            if self.client.setnx(f"gateway:port:{port}", str(job_id)):
+                self.client.expire(f"gateway:port:{port}", 3600)  # 1 hour lease
+                return port
+        raise RuntimeError("No available gateway ports")
+
+    def release_gateway_port(self, port: int) -> None:
+        """Release a gateway port."""
+        self.client.delete(f"gateway:port:{port}")
