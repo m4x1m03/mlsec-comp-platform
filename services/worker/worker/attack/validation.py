@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import hashlib
 import zipfile
+
+import pyzipper
 from pathlib import Path, PurePosixPath
 
 import logging
@@ -143,19 +145,24 @@ def validate_zip_openable(zip_path: str) -> None:
 def validate_zip_password(zip_path: str) -> None:
     """Check that the ZIP can be read using the password ``infected``.
 
-    Unencrypted ZIPs are accepted Python's zipfile silently ignores
-    the password for unencrypted entries.  Only ZIPs encrypted with a
-    *different* password are rejected.
+    Accepts both unencrypted ZIPs (password silently ignored) and ZIPs
+    encrypted with AES or ZipCrypto using the password ``infected``.
+    Only ZIPs encrypted with a *different* password are rejected.
+
+    Uses ``pyzipper.AESZipFile`` so that AES-256 encrypted ZIPs (the format
+    produced by most modern ZIP tools) are handled correctly alongside the
+    legacy ZipCrypto format.
 
     Raises:
         AttackValidationError: If the password is wrong or extraction fails.
     """
     try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
+        with pyzipper.AESZipFile(zip_path, "r") as zf:
+            zf.setpassword(b"infected")
             for entry in zf.infolist():
                 if entry.filename.endswith("/"):
                     continue
-                zf.read(entry.filename, pwd=b"infected")
+                zf.read(entry.filename)
     except RuntimeError as exc:
         msg = str(exc).lower()
         if "password" in msg or "bad password" in msg:

@@ -438,9 +438,10 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
             logger.info(f"Extracting ZIP to {temp_extract_dir}")
 
             try:
-                with zipfile.ZipFile(temp_zip.name, 'r') as zf:
-                    # Try extracting with password "infected"
-                    zf.extractall(temp_extract_dir, pwd=b'infected')
+                import pyzipper
+                with pyzipper.AESZipFile(temp_zip.name, 'r') as zf:
+                    zf.setpassword(b'infected')
+                    zf.extractall(temp_extract_dir)
                 logger.info("Successfully extracted attack ZIP")
             except RuntimeError as e:
                 if "password" in str(e).lower():

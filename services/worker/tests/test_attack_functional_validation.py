@@ -149,16 +149,17 @@ def test_validate_zip_password_unencrypted_passes(tmp_path):
     validate_zip_password(str(zip_path))  # no exception
 
 
-def test_validate_zip_password_wrong_password_rejected(tmp_path, monkeypatch):
-    """A ZIP encrypted with the wrong password raises AttackValidationError."""
-    zip_path = _make_zip(tmp_path, {"file.exe": b"data"})
-
-    original_read = zipfile.ZipFile.read
-
-    def fake_read(self, name, pwd=None):
-        raise RuntimeError(f"Bad password for file {name!r}")
-
-    monkeypatch.setattr(zipfile.ZipFile, "read", fake_read)
+def test_validate_zip_password_wrong_password_rejected(tmp_path):
+    """An AES-encrypted ZIP with the wrong password raises AttackValidationError."""
+    import pyzipper
+    zip_path = tmp_path / "wrong_pw.zip"
+    with pyzipper.AESZipFile(
+        zip_path, "w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
+    ) as zf:
+        zf.setpassword(b"wrongpassword")
+        zf.writestr("file.exe", b"data")
 
     with pytest.raises(AttackValidationError, match="password"):
         validate_zip_password(str(zip_path))
@@ -356,18 +357,19 @@ def test_validate_functional_fails_on_corrupt_zip(tmp_path, template_dir):
         validate_functional(str(bad), str(template_dir), max_uncompressed_mb=10)
 
 
-def test_validate_functional_fails_on_wrong_password(tmp_path, template_dir, monkeypatch):
-    """Wrong-password ZIP fails at the password check."""
-    zip_path = _make_zip(tmp_path, {
-        "samples/a.exe": b"",
-        "samples/b.exe": b"",
-        "samples/c.exe": b"",
-    })
-
-    def fake_read(self, name, pwd=None):
-        raise RuntimeError(f"Bad password for file {name!r}")
-
-    monkeypatch.setattr(zipfile.ZipFile, "read", fake_read)
+def test_validate_functional_fails_on_wrong_password(tmp_path, template_dir):
+    """AES-encrypted ZIP with the wrong password fails at the password check."""
+    import pyzipper
+    zip_path = tmp_path / "wrong_pw.zip"
+    with pyzipper.AESZipFile(
+        zip_path, "w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
+    ) as zf:
+        zf.setpassword(b"wrongpassword")
+        zf.writestr("samples/a.exe", b"")
+        zf.writestr("samples/b.exe", b"")
+        zf.writestr("samples/c.exe", b"")
 
     with pytest.raises(AttackValidationError, match="password"):
         validate_functional(str(zip_path), str(template_dir), max_uncompressed_mb=10)

@@ -95,6 +95,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
+      MINIO_BUCKET_NAME: "mlsec-submissions"
     ports:
       - "8000:8000"
     networks:
