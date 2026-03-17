@@ -38,10 +38,42 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r services/api/requirements-dev.txt
+          pip install pytest-cov
 
       - name: Run API pytest suite
         working-directory: services/api
-        run: pytest -v
+        run: pytest -v --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      - name: Add API coverage summary
+        if: success()
+        working-directory: services/api
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          path = Path("coverage.xml")
+          if not path.exists():
+              raise SystemExit("coverage.xml not found")
+
+          root = ET.parse(path).getroot()
+          rate = root.get("line-rate")
+          if rate is None:
+              raise SystemExit("line-rate not found in coverage.xml")
+
+          percent = float(rate) * 100
+          summary = f"### API Coverage\n\nLine coverage: {percent:.2f}%\n"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(summary)
+          PY
+
+      - name: Upload API coverage artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage
+          path: services/api/coverage.xml
 
       - name: Stop Docker Compose services
         if: always()
