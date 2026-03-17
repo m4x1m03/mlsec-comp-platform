@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_secure: bool = False
-    minio_bucket_name: str = "defense-submissions"
+    minio_bucket_name: str = "mlsec-submissions"
 
     # File upload limits
     max_file_size_mb: int = 512
