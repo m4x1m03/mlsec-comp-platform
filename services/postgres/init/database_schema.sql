@@ -246,6 +246,42 @@ CREATE TABLE IF NOT EXISTS evaluation_pair_scores (
     UNIQUE(defense_submission_id, attack_submission_id)
 );
 
+-- Indexes to speed leaderboard aggregation by submission
+CREATE INDEX IF NOT EXISTS idx_eval_pair_scores_attack
+ON evaluation_pair_scores(attack_submission_id);
+
+-- Notify API when leaderboard-relevant scores change
+CREATE OR REPLACE FUNCTION notify_leaderboard_change()
+RETURNS trigger AS $$
+DECLARE
+    payload json;
+BEGIN
+    IF (TG_OP = 'DELETE') THEN
+        payload = json_build_object(
+            'table', TG_TABLE_NAME,
+            'op', TG_OP,
+            'defense_submission_id', OLD.defense_submission_id,
+            'attack_submission_id', OLD.attack_submission_id
+        );
+    ELSE
+        payload = json_build_object(
+            'table', TG_TABLE_NAME,
+            'op', TG_OP,
+            'defense_submission_id', NEW.defense_submission_id,
+            'attack_submission_id', NEW.attack_submission_id
+        );
+    END IF;
+
+    PERFORM pg_notify('leaderboard_changes', payload::text);
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_leaderboard_scores_notify ON evaluation_pair_scores;
+CREATE TRIGGER trg_leaderboard_scores_notify
+AFTER INSERT OR UPDATE OR DELETE ON evaluation_pair_scores
+FOR EACH ROW EXECUTE FUNCTION notify_leaderboard_change();
+
 
 --------------------------------------------------
 -- JOBS 

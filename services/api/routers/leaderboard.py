@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from core.database import get_db
+from core.database import SessionLocal, get_database_url, get_db
+from core.leaderboard_stream import LeaderboardStream, should_enable_leaderboard_stream
 from schemas.leaderboard import (
     LeaderboardEntry,
     LeaderboardPairEntry,
@@ -39,6 +40,12 @@ _PAIR_SORT_COLUMNS = {
     "defense_username": "defense_username",
     "attack_username": "attack_username",
 }
+
+_DEFAULT_SORT = "avg_score"
+_DEFAULT_ORDER = "desc"
+_DEFAULT_SCOPE: Literal["all", "active"] = "all"
+_DEFAULT_INCLUDE_UNSCORED = False
+_DEFAULT_STATUSES: list[str] | None = None
 
 
 def _normalize_order(order: str) -> str:
@@ -186,6 +193,55 @@ def _get_leaderboard(
     )
 
 
+def _compute_leaderboard_snapshot() -> dict:
+    """Compute the default leaderboard snapshot for websocket clients."""
+    with SessionLocal() as db:
+        defense = _get_leaderboard(
+            db=db,
+            submission_type="defense",
+            limit=50,
+            offset=0,
+            sort=_DEFAULT_SORT,
+            order=_DEFAULT_ORDER,
+            scope=_DEFAULT_SCOPE,
+            include_unscored=_DEFAULT_INCLUDE_UNSCORED,
+            statuses=_DEFAULT_STATUSES,
+        )
+        attack = _get_leaderboard(
+            db=db,
+            submission_type="attack",
+            limit=50,
+            offset=0,
+            sort=_DEFAULT_SORT,
+            order=_DEFAULT_ORDER,
+            scope=_DEFAULT_SCOPE,
+            include_unscored=_DEFAULT_INCLUDE_UNSCORED,
+            statuses=_DEFAULT_STATUSES,
+        )
+
+    return {
+        "type": "leaderboard_snapshot",
+        "defense": defense.model_dump(),
+        "attack": attack.model_dump(),
+    }
+
+
+_leaderboard_stream = LeaderboardStream(
+    database_url=get_database_url(),
+    compute_snapshot=_compute_leaderboard_snapshot,
+)
+
+
+def start_leaderboard_stream(*, loop) -> None:
+    if should_enable_leaderboard_stream():
+        _leaderboard_stream.start(loop=loop)
+
+
+def stop_leaderboard_stream() -> None:
+    if should_enable_leaderboard_stream():
+        _leaderboard_stream.stop()
+
+
 @router.get("/defense", response_model=LeaderboardResponse)
 def leaderboard_defense(
     limit: int = Query(50, ge=1, le=200),
@@ -220,7 +276,7 @@ def leaderboard_attack(
     include_unscored: bool = Query(False),
     statuses: list[str] | None = Query(None),
     db: Session = Depends(get_db),
-) -> LeaderboardResponse:
+    ) -> LeaderboardResponse:
     return _get_leaderboard(
         db=db,
         submission_type="attack",
@@ -232,6 +288,17 @@ def leaderboard_attack(
         include_unscored=include_unscored,
         statuses=statuses,
     )
+
+
+@router.websocket("/ws")
+async def leaderboard_ws(websocket: WebSocket) -> None:
+    await _leaderboard_stream.connect(websocket)
+    try:
+        while True:
+            # Keep the connection open; ignore incoming payloads for now.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        _leaderboard_stream.disconnect(websocket)
 
 
 @router.get("/pairs", response_model=LeaderboardPairsResponse)
