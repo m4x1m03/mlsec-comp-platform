@@ -184,7 +184,15 @@ class LeaderboardStream:
             return
 
         snapshot = self._build_snapshot()
-        asyncio.run_coroutine_threadsafe(self._manager.broadcast(snapshot), self._loop)
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is self._loop:
+            self._loop.create_task(self._manager.broadcast(snapshot))
+        else:
+            asyncio.run_coroutine_threadsafe(self._manager.broadcast(snapshot), self._loop)
 
 
 def should_enable_leaderboard_stream() -> bool:
