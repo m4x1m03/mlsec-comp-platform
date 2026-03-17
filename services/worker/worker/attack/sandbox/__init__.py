@@ -2,12 +2,12 @@
 
 Public API:
 
-- :class:`SandboxBackend` — abstract base class
-- :class:`SandboxReport` — result dataclass
-- :exc:`SandboxUnavailableError` — transient backend failure
-- :class:`LocalSandboxBackend` — stub (not yet implemented)
-- :class:`VirusTotalBackend` — fully implemented VT backend
-- :func:`get_sandbox_backend` — factory function
+- :class:`SandboxBackend` - abstract base class
+- :class:`SandboxReport` - result dataclass
+- :exc:`SandboxUnavailableError` - transient backend failure
+- :class:`LocalSandboxBackend` - stub (not yet implemented)
+- :class:`VirusTotalBackend` - fully implemented VT backend
+- :func:`get_sandbox_backend` - factory function
 """
 
 from .base import SandboxBackend, SandboxReport, SandboxUnavailableError
