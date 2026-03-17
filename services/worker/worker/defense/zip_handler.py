@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 import docker
-from minio import Minio
+from ..minio_client import get_minio_client, get_bucket_name
 from celery.utils.log import get_task_logger
 from .validation import validate_dockerfile_safety, validate_build_context
 
@@ -44,29 +44,12 @@ def build_from_zip_archive(
     temp_extract_dir = None
 
     try:
-        # Get MinIO config (try both top-level and worker.minio, probably change this for simplicity later)
-        minio_config = config.get('minio', {})
-        if not minio_config:
-            minio_config = config.get('worker', {}).get('minio', {})
-
-        endpoint = minio_config.get('endpoint', 'minio:9000')
-        access_key = minio_config.get('access_key', 'minioadmin')
-        secret_key = minio_config.get('secret_key', 'minioadmin')
-        # Try both 'bucket' and 'bucket_name' for compatibility
-        bucket_name = minio_config.get('bucket_name') or minio_config.get(
-            'bucket', 'mlsec-submissions')
-        secure = minio_config.get('secure', False)
-
         # Initialize MinIO client if not provided
         if minio_client is None:
-            client = Minio(
-                endpoint,
-                access_key=access_key,
-                secret_key=secret_key,
-                secure=secure
-            )
+            client = get_minio_client()
         else:
             client = minio_client
+        bucket_name = get_bucket_name()
 
         # Download ZIP to temporary file
         temp_zip = tempfile.NamedTemporaryFile(
