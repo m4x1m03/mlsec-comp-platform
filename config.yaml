@@ -7,6 +7,7 @@ worker:
     max_uncompressed_size_mb: 1024
   evaluation:
     requests_timeout_seconds: 5
+    batch_size: 4
   source:
     # Resource limits
     max_zip_size_mb: 512
