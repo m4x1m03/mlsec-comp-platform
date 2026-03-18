@@ -19,5 +19,5 @@ COPY . /app
 # RUN useradd --create-home --uid 10001 appuser
 # USER appuser
 
-CMD ["celery", "-A", "worker.celery_app:celery_app", "worker", "--loglevel=INFO"]
+CMD ["celery", "-A", "worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
 

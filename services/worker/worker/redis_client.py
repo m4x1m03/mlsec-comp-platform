@@ -30,19 +30,19 @@ class WorkerRegistry:
     def __init__(self):
         self.client = get_redis_client()
 
-    def register(self, worker_id: str, defense_submission_id: str, job_id: str) -> None:
+    def register(self, worker_id: str, defense_submission_ids: list[str], job_id: str) -> None:
         """
         Register worker with OPEN queue state.
 
         Args:
-            worker_id: Unique worker identifier (e.g., "{defense_id}:{job_id}")
-            defense_submission_id: Defense submission UUID
+            worker_id: Unique worker identifier
+            defense_submission_ids: List of defense submission UUIDs
             job_id: Job UUID
         """
-        logger.info(f"Registering worker {worker_id} with Redis")
+        logger.info(f"Registering worker {worker_id} with Redis for {len(defense_submission_ids)} defenses")
 
         self.client.hset(f"worker:{worker_id}:metadata", mapping={
-            "defense_submission_id": str(defense_submission_id),
+            "defense_submission_ids": ",".join(map(str, defense_submission_ids)),
             "job_id": str(job_id),
             "started_at": str(time.time()),
             "queue_state": "OPEN",
@@ -143,8 +143,11 @@ class WorkerRegistry:
 
         for worker_id in all_workers:
             metadata = self.client.hgetall(f"worker:{worker_id}:metadata")
+            
+            defense_ids_str = metadata.get("defense_submission_ids", "")
+            defense_ids = defense_ids_str.split(",") if defense_ids_str else []
 
-            if (metadata.get("defense_submission_id") == str(defense_id) and
+            if (str(defense_id) in defense_ids and
                     metadata.get("queue_state") == "OPEN"):
                 open_workers.append(worker_id)
 

@@ -116,12 +116,11 @@ services:
     networks:
       - defense_net
 
-  # Placeholder worker container (Celery wiring added in a later step. Unless we want to have persistent workers?)
+  # Worker Container (Celery)
   worker:
     build:
       context: ./services/worker
       dockerfile: Dockerfile
-    container_name: mlsec-worker
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
@@ -134,6 +133,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
+      - worker_cache:/app/cache
     group_add:
       - "${DOCKER_GID:-999}" # Allows Worker container to interact with Docker Engine
     networks:
@@ -162,9 +162,17 @@ services:
       - backend_net
     depends_on:
       - api
-  # TODO: Adminer (Nice to have, not necessary)
-  # adminer:
 
+  # Adminer (Can remove in production if we dont need it)
+  adminer:
+    image: adminer:latest
+    container_name: mlsec-adminer
+    ports:
+      - "8081:8080"
+    networks:
+      - backend_net
+    depends_on:
+      - postgres
 
 networks:
   # TODO: Secure communication network for evaluation end.
@@ -181,5 +189,6 @@ volumes:
   rabbitmqdata:
   redisdata:
   miniodata:
+  worker_cache:
 
 

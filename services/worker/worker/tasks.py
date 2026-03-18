@@ -13,8 +13,10 @@ import json
 import tempfile
 import zipfile
 import hashlib
+import asyncio
 from pathlib import Path
 from worker.minio_client import get_minio_client, get_bucket_name
+from worker.cache_handler import get_sample_path
 
 from worker.celery_app import celery_app
 from worker.config import get_config
@@ -35,7 +37,7 @@ from worker.db import (
 )
 from worker.redis_client import WorkerRegistry
 from worker.defense.validation import validate_functional
-from worker.defense.evaluate import evaluate_defense_with_redis
+from worker.defense.evaluate import evaluate_defense_with_redis, evaluate_defenses_async
 from worker.attack.validation import (
     AttackValidationError,
     validate_functional as validate_attack_functional,
@@ -62,9 +64,9 @@ log_config = LogConfig(
 def _insert_job(
     job_type: str,
     status: str,
-    defense_submission_id: str = None,
-    attack_submission_id: str = None,
-    user_id: str = None
+    defense_submission_ids: list[str] | None = None,
+    attack_submission_id: str | None = None,
+    user_id: str | None = None
 ) -> str:
     """
     Insert new job into database and return job_id.
@@ -73,7 +75,7 @@ def _insert_job(
     Args:
         job_type: 'defense' or 'attack'
         status: Initial job status ('queued')
-        defense_submission_id: For defense jobs
+        defense_submission_ids: For defense jobs
         attack_submission_id: For attack jobs
         user_id: User who requested the job (optional)
 
@@ -86,10 +88,12 @@ def _insert_job(
     job_id = str(uuid.uuid4())
     payload = {}
 
-    if defense_submission_id:
-        payload['defense_submission_id'] = defense_submission_id
-    if attack_submission_id:
+    if defense_submission_ids:
+        payload['defense_submission_ids'] = defense_submission_ids
+    elif attack_submission_id:
         payload['attack_submission_id'] = attack_submission_id
+    else:
+        logger.warning(f"Creating job {job_id} of type {job_type} without any submission IDs")
 
     engine = get_engine()
     with engine.begin() as conn:
@@ -110,6 +114,231 @@ def _insert_job(
     return job_id
 
 
+@celery_app.task(name="worker.tasks.run_batch_defense_job", bind=True)
+def run_batch_defense_job(
+    self,
+    *,
+    job_id: str,
+    defense_submission_ids: list[str],
+) -> None:
+    """
+    Defense evaluation and attack validation job for a batch of defenses.
+    Does the following:
+    1. Register worker with Redis
+    2. Populate shared attack queue for all defenses in batch
+    3. For each defense: check validation, build/pull image, and start container
+    4. Wait for all containers to be ready
+    5. Perform functional validation (if needed) for all containers
+    6. Broadcast attack samples (from MinIO/Cache) to all containers based on Redis queue
+    7. Unregister worker and perform per-defense resource cleanup
+    """
+    logger.info(
+        f"Starting batch defense job {job_id} for submissions {defense_submission_ids}"
+    )
+
+    # Generate worker ID
+    worker_id = f"worker_{job_id}_{int(time.time())}"
+
+    # Initialize Redis client
+    registry = WorkerRegistry()
+
+    # We now manage multiple containers/networks
+    defense_contexts = []
+    client = docker.from_env()
+
+    try:
+        set_job_status(job_id=job_id, status="running")
+
+        # Register worker with Redis for all defenses in batch
+        registry.register(worker_id, defense_submission_ids, job_id)
+        logger.info(f"Registered worker {worker_id} with Redis for {len(defense_submission_ids)} defenses")
+
+        # Query unevaluated attacks and populate queue for all defenses in batch
+        all_unevaluated_attacks = set()
+        for defense_submission_id in defense_submission_ids:
+            all_unevaluated_attacks.update(get_unevaluated_attacks(defense_submission_id))
+        
+        logger.info(f"Found {len(all_unevaluated_attacks)} unique unevaluated attacks for batch")
+        for attack_id in all_unevaluated_attacks:
+            registry.add_attack_to_queue(worker_id, attack_id)
+
+        # Build/Pull images for each defense
+        # Convert config to dict for defense module functions
+        config_dict = config.model_dump()
+        logger.info(f"Preparing batch of {len(defense_submission_ids)} defenses for job {job_id}")
+        for defense_submission_id in defense_submission_ids:
+            # Check if defense needs validation
+            needs_validation = check_if_needs_validation(defense_submission_id)
+            # Get defense source information
+            source_type, source_data = get_defense_submission_source(defense_submission_id)
+            
+            image_name = None
+            # Build/pull defense image from source
+            if source_type == "docker":
+                from worker.defense.docker_handler import pull_and_resolve_docker_image
+                image_name = pull_and_resolve_docker_image(
+                    source_data["docker_image"]
+                )
+            elif source_type == "github":
+                from worker.defense.github_handler import build_from_github_repo
+                image_name = build_from_github_repo(
+                    source_data["git_repo"], 
+                    defense_submission_id, 
+                    config_dict
+                )
+            elif source_type == "zip":
+                from worker.defense.zip_handler import build_from_zip_archive
+                image_name = build_from_zip_archive(
+                    source_data["object_key"], 
+                    defense_submission_id, 
+                    config_dict
+                )
+            
+            gateway_port = registry.lease_gateway_port(job_id=job_id)
+            
+            # Create network with unique subnet to avoid exhaustion
+            network_name = f"eval_net_{job_id}_{defense_submission_id[:8]}"
+            port_offset = gateway_port - 10000
+            x = port_offset // 32
+            y = (port_offset % 32) * 8
+            subnet = f"10.50.{x}.{y}/29"
+            ipam_config = docker.types.IPAMConfig(
+                pool_configs=[docker.types.IPAMPool(subnet=subnet)]
+            )
+            
+            network = client.networks.create(
+                network_name, 
+                internal=True, 
+                ipam=ipam_config
+            )
+            gateway_container = client.containers.get("mlsec-gateway")
+            network.connect(gateway_container)
+            
+            # Start defense container
+            container_name = f"eval_defense_{job_id}_{defense_submission_id[:8]}"
+            
+            container = client.containers.run(
+                image_name,
+                name=container_name,
+                detach=True,
+                network=network_name,
+                mem_limit=config.worker.defense_job.mem_limit,
+                nano_cpus=config.worker.defense_job.nano_cpus,
+                pids_limit=config.worker.defense_job.pids_limit,
+                read_only=True,
+                privileged=False,
+                user='1000:1000',
+                cap_drop=['ALL'],
+                security_opt=["no-new-privileges:true"],
+                tmpfs={
+                    '/tmp': 'size=64M',
+                    '/run': 'size=16M',
+                    '/var/tmp': 'size=16M'
+                },
+                log_config=log_config
+            )
+            
+            container.reload()
+            # Get student container IP
+            student_ip = container.attrs['NetworkSettings']['Networks'][network_name]['IPAddress']
+            
+            # Setup iptables rules on gateway
+            gateway_container.exec_run(f"iptables -t nat -A PREROUTING -p tcp --dport {gateway_port} -j DNAT --to-destination {student_ip}:8080")
+            gateway_container.exec_run(f"iptables -t nat -A POSTROUTING -d {student_ip} -p tcp --dport 8080 -j MASQUERADE")
+            gateway_container.exec_run(f"iptables -A FORWARD -p tcp -d {student_ip} --dport 8080 -j ACCEPT")
+            
+            url = f"http://mlsec-gateway:{gateway_port}/"
+            
+            defense_contexts.append({
+                "defense_submission_id": defense_submission_id,
+                "container": container,
+                "network": network,
+                "gateway_port": gateway_port,
+                "student_ip": student_ip,
+                "url": url,
+                "needs_validation": needs_validation,
+                "image_name": image_name,
+                "source_type": source_type
+            })
+        
+        # Wait for all containers to be ready
+        for ctx in defense_contexts:
+            container_timeout = config.worker.defense_job.container_timeout
+            start_wait = time.time()
+            container_ready = False
+            while (time.time() - start_wait) < container_timeout:
+                try:
+                    res = requests.get(ctx["url"], timeout=2)
+                    if res.status_code != 502:
+                        container_ready = True; break
+                except: pass
+                time.sleep(1)
+            if not container_ready: raise ValueError(f"Defense {ctx['defense_submission_id']} failed to start")
+
+            # Validate if needed
+            if ctx["needs_validation"]:
+                try:
+                    validate_functional(ctx["image_name"], ctx["url"], config_dict)
+                    mark_defense_validated(ctx["defense_submission_id"])
+                    logger.info(f"Functional validation PASSED for defense {ctx['defense_submission_id']}")
+                except Exception as e:
+                    logger.error(f"Functional validation FAILED for {ctx['defense_submission_id']}: {e}")
+                    mark_defense_failed(ctx["defense_submission_id"], str(e))
+                    raise ValueError(f"Validation failed for {ctx['defense_submission_id']}: {e}")
+
+        # Run async evaluation (Send samples to all containers)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(evaluate_defenses_async(
+            worker_id=worker_id,
+            defense_contexts=defense_contexts,
+            config=config_dict
+        ))
+
+        set_job_status(job_id=job_id, status="done")
+
+    except Exception as exc:
+        logger.exception(f"Batch job {job_id} failed: {exc}")
+        set_job_status(job_id=job_id, status="failed", error=str(exc))
+        raise
+    finally:
+        logger.info(f"Cleaning up resources for batch job {job_id}")
+        # Unregister worker from Redis
+        registry.unregister(worker_id)
+        for ctx in defense_contexts:
+            try:
+                # Cleanup container
+                ctx["container"].stop(timeout=2)
+                ctx["container"].remove()
+            except Exception as e:
+                logger.debug(f"Failed to remove container for defense {ctx.get('defense_submission_id')}: {e}")
+            
+            try:
+                gateway_container = client.containers.get("mlsec-gateway")
+                # Cleanup iptables rules (TODO: Implement orphaned rules reaper incase Celery worker dies)
+                gateway_container.exec_run(f"iptables -t nat -D PREROUTING -p tcp --dport {ctx['gateway_port']} -j DNAT --to-destination {ctx['student_ip']}:8080")
+                gateway_container.exec_run(f"iptables -t nat -D POSTROUTING -d {ctx['student_ip']} -p tcp --dport 8080 -j MASQUERADE")
+                gateway_container.exec_run(f"iptables -D FORWARD -p tcp -d {ctx['student_ip']} --dport 8080 -j ACCEPT")
+                registry.release_gateway_port(ctx["gateway_port"])
+            except Exception as e:
+                logger.warning(f"Failed to cleanup iptables or release port for defense {ctx.get('defense_submission_id')}: {e}")
+            
+            try:
+                # Cleanup network
+                ctx["network"].disconnect(client.containers.get("mlsec-gateway"), force=True)
+                ctx["network"].remove()
+            except Exception as e:
+                logger.warning(f"Failed to remove network for defense {ctx.get('defense_submission_id')}: {e}")
+
+            if ctx.get("image_name") and ctx.get("source_type") in ['github', 'zip']:
+                if config_dict.get('worker', {}).get('source', {}).get('cleanup_built_images', True):
+                    try: 
+                        # Cleanup built image (GitHub/ZIP sources only)
+                        logger.info(f"Removing built image {ctx['image_name']}")
+                        client.images.remove(ctx["image_name"], force=True)
+                    except Exception as e:
+                        logger.debug(f"Failed to remove image {ctx['image_name']}: {e}")
+
+
 @celery_app.task(name="worker.tasks.run_defense_job", bind=True)
 def run_defense_job(
     self,
@@ -120,267 +349,9 @@ def run_defense_job(
     include_behavior_different: bool | None = None,
 ) -> None:
     """
-    Defense evaluation job with Redis-based work distribution.
-
-    Does the following:
-    1. Register worker with Redis
-    2. Query unevaluated attacks and populate INTERNAL_QUEUE
-    3. Check if defense needs validation
-    4. Build/pull defense from source (Docker/GitHub/ZIP)
-    5. Validate defense
-    6. Evaluate against attacks from Redis queue
-    7. Unregister and cleanup
+    Wrapper for run_batch_defense_job to maintain compatibility. (Can remove later if not needed)
     """
-    logger.info(
-        f"Starting defense job {job_id} for submission {defense_submission_id}"
-    )
-
-    # Generate worker ID
-    worker_id = f"worker_{job_id}_{int(time.time())}"
-
-    # Initialize Redis client
-    registry = WorkerRegistry()
-
-    container = None
-    network = None
-    network_name = f"eval_net_{job_id}"
-    source_type = None
-    image_name = None
-
-    try:
-        set_job_status(job_id=job_id, status="running")
-
-        # Register worker with Redis
-        registry.register(worker_id, defense_submission_id, job_id)
-        logger.info(f"Registered worker {worker_id} with Redis")
-
-        # Query unevaluated attacks and populate queue
-        unevaluated_attacks = get_unevaluated_attacks(defense_submission_id)
-        logger.info(f"Found {len(unevaluated_attacks)} unevaluated attacks")
-
-        for attack_id in unevaluated_attacks:
-            registry.add_attack_to_queue(worker_id, attack_id)
-
-        logger.info(
-            f"Populated INTERNAL_QUEUE with {len(unevaluated_attacks)} attacks")
-
-        # Check if defense needs validation
-        needs_validation = check_if_needs_validation(defense_submission_id)
-
-        # Get defense source information
-        source_type, source_data = get_defense_submission_source(
-            defense_submission_id)
-        logger.info(f"Defense source type: {source_type}")
-
-        # Build/pull defense image from source
-        # Convert config to dict for defense module functions
-        config_dict = config.model_dump()
-
-        if source_type == "docker":
-            from worker.defense.docker_handler import pull_and_resolve_docker_image
-            image_name = pull_and_resolve_docker_image(
-                source_data["docker_image"])
-        elif source_type == "github":
-            from worker.defense.github_handler import build_from_github_repo
-            image_name = build_from_github_repo(
-                source_data["git_repo"],
-                defense_submission_id,
-                config_dict
-            )
-        elif source_type == "zip":
-            from worker.defense.zip_handler import build_from_zip_archive
-            image_name = build_from_zip_archive(
-                source_data["object_key"],
-                defense_submission_id,
-                config_dict
-            )
-        else:
-            raise ValueError(f"Unsupported source type: {source_type}")
-
-        logger.info(f"Defense image ready: {image_name}")
-
-        gateway_port = registry.lease_gateway_port(job_id=job_id)
-
-        # Create network with unique subnet to avoid exhaustion
-        port_offset = gateway_port - 10000
-        x = port_offset // 32
-        y = (port_offset % 32) * 8
-        subnet = f"10.50.{x}.{y}/29"
-        
-        ipam_config = docker.types.IPAMConfig(
-            pool_configs=[docker.types.IPAMPool(subnet=subnet)]
-        )
-
-        client = docker.from_env()
-        network = client.networks.create(
-            network_name, 
-            internal=True,
-            ipam=ipam_config
-        )
-        gateway_container = client.containers.get("mlsec-gateway")
-        network.connect(gateway_container)
-
-        # Start defense container
-        logger.info(
-            f"Starting container from image: {image_name} on network {network_name}")
-        container_name = f"eval_defense_{job_id}"
-        container = client.containers.run(
-            image_name,
-            name=container_name,
-            detach=True,
-            network=network_name,
-            mem_limit=config.worker.defense_job.mem_limit,
-            nano_cpus=config.worker.defense_job.nano_cpus,
-            pids_limit=config.worker.defense_job.pids_limit,
-            read_only=True,
-            privileged=False,
-            user='1000:1000',
-            cap_drop=['ALL'],
-            security_opt=["no-new-privileges:true"],
-            tmpfs={
-                '/tmp': 'size=64M',
-                '/run': 'size=16M',
-                '/var/tmp': 'size=16M'
-            },
-            log_config=log_config
-        )
-
-        logger.info(f"Container {container.id[:12]} successfully spun up")
-
-        # Get student container IP
-        container.reload()
-        student_ip = container.attrs['NetworkSettings']['Networks'][network_name]['IPAddress']
-        
-        # Setup iptables rules on gateway
-        logger.info(f"Setting up iptables rules on gateway: port {gateway_port} -> {student_ip}:8080")
-        gateway_container = client.containers.get("mlsec-gateway")
-        
-        gateway_container.exec_run(f"iptables -t nat -A PREROUTING -p tcp --dport {gateway_port} -j DNAT --to-destination {student_ip}:8080")
-        gateway_container.exec_run(f"iptables -t nat -A POSTROUTING -d {student_ip} -p tcp --dport 8080 -j MASQUERADE")
-        gateway_container.exec_run(f"iptables -A FORWARD -p tcp -d {student_ip} --dport 8080 -j ACCEPT")
-
-        logger.info("Waiting for defense to be ready...")
-        url = f"http://mlsec-gateway:{gateway_port}/"
-        container_timeout = config.worker.defense_job.container_timeout
-        start_wait = time.time()
-        container_ready = False
-
-        while (time.time() - start_wait) < container_timeout:
-            try:
-                gateway_url = url
-                response = requests.get(
-                    gateway_url, timeout=2)
-                if response.status_code == 502:
-                    time.sleep(1)
-                    continue
-                container_ready = True
-                logger.info(
-                    f"Defense ready after {int(time.time() - start_wait)}s")
-                break
-            except requests.exceptions.RequestException:
-                # Only sleep if we have time remaining
-                if (time.time() - start_wait + 1) < container_timeout:
-                    time.sleep(1)
-
-        if not container_ready:
-            raise ValueError(
-                f"Defense container failed to start within {container_timeout}s")
-
-        # Validate defense if needed
-        if needs_validation:
-            try:
-                validate_functional(image_name, url, config_dict)
-                mark_defense_validated(defense_submission_id)
-                logger.info("Defense validation successful")
-            except Exception as e:
-                mark_defense_failed(defense_submission_id, str(e))
-                raise ValueError(f"Defense validation failed: {e}")
-
-        # Evaluate defense with Redis-based queue
-        evaluate_defense_with_redis(
-            worker_id=worker_id,
-            defense_submission_id=defense_submission_id,
-            container_url=url,
-            config=config_dict
-        )
-
-        # Grab container logs (Remove in production)
-        try:
-            container_logs = container.logs().decode('utf-8')
-            if container_logs:
-                logger.info(
-                    f"Container logs for job {job_id}:\n{container_logs}")
-        except Exception as log_exc:
-            logger.warning(
-                f"Failed to fetch logs for container {container.id[:12]}: {log_exc}")
-
-        set_job_status(job_id=job_id, status="done")
-        logger.info(f"Job {job_id} successfully finished")
-
-    except Exception as exc:
-        logger.exception(f"Job {job_id} failed with error: {exc}")
-        set_job_status(job_id=job_id, status="failed", error=str(exc))
-        raise
-    finally:
-        # Unregister worker from Redis
-        try:
-            registry.unregister(worker_id)
-            logger.info(f"Unregistered worker {worker_id} from Redis")
-        except Exception as e:
-            logger.warning(f"Failed to unregister worker {worker_id}: {e}")
-
-        # Cleanup container
-        if container:
-            logger.info(f"Cleaning up container {container.id[:12]}")
-            try:
-                container.stop(timeout=2)
-                container.remove()
-            except Exception as cleanup_err:
-                logger.warning(
-                    f"Failed to cleanup container {container.id[:12]}: {cleanup_err}")
-
-        # Cleanup built image (GitHub/ZIP sources only)
-        if image_name and source_type in ['github', 'zip']:
-            cleanup_enabled = config_dict.get('worker', {}).get(
-                'source', {}).get('cleanup_built_images', True)
-            if cleanup_enabled:
-                logger.info(f"Cleaning up built image {image_name}")
-                try:
-                    client = docker.from_env()
-                    client.images.remove(image_name, force=True)
-                    logger.info(f"Removed image {image_name}")
-                except docker.errors.ImageNotFound:
-                    logger.debug(f"Image {image_name} already removed")
-                except docker.errors.APIError as e:
-                    logger.warning(f"Failed to remove image {image_name}: {e}")
-
-        # Cleanup network
-        if network:
-            logger.info(f"Cleaning up network {network_name}")
-            try:
-                client = docker.from_env()
-                gateway_container = client.containers.get("mlsec-gateway")
-                
-                # Cleanup iptables rules (TODO: Implement orphaned rules reaper incase Celery worker dies)
-                try:
-                    if 'student_ip' in locals() and 'gateway_port' in locals():
-                        gateway_container.exec_run(f"iptables -t nat -D PREROUTING -p tcp --dport {gateway_port} -j DNAT --to-destination {student_ip}:8080")
-                        gateway_container.exec_run(f"iptables -t nat -D POSTROUTING -d {student_ip} -p tcp --dport 8080 -j MASQUERADE")
-                        gateway_container.exec_run(f"iptables -D FORWARD -p tcp -d {student_ip} --dport 8080 -j ACCEPT")
-                        registry.release_gateway_port(gateway_port)
-                        #logger.info(f"Successfully cleaned iptables rules for job {job_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup iptables rules for job {job_id}: {e}")
-
-                network.disconnect(gateway_container, force=True)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to disconnect gateway from network {network_name}: {e}")
-            try:
-                network.remove()
-            except Exception as e:
-                logger.warning(f"Failed to remove network {network_name}: {e}")
-
+    return run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_submission_id])
 
 @celery_app.task(name="worker.tasks.run_attack_job")
 def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
@@ -616,23 +587,32 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
                     f"Added attack {attack_submission_id} to worker {worker_id} queue")
                 enqueued_count += 1
             else:
-                # No open workers, enqueue new defense job
+                # Collect defenses that need new jobs
+                if 'remaining_defenses' not in locals():
+                    remaining_defenses = []
+                remaining_defenses.append(defense_id)
+                logger.debug(f"Defense {defense_id} needs a new worker/batch job")
+
+        # Batch remaining defenses
+        if 'remaining_defenses' in locals() and remaining_defenses:
+            batch_size = config.worker.evaluation.batch_size
+            for i in range(0, len(remaining_defenses), batch_size):
+                batch = remaining_defenses[i:i + batch_size]
                 new_job_id = _insert_job(
                     job_type="defense",
                     status="queued",
-                    defense_submission_id=defense_id
+                    defense_submission_ids=batch
                 )
 
-                # Enqueue Celery task
-                run_defense_job.apply_async(
+                run_batch_defense_job.apply_async(
                     kwargs={
                         "job_id": new_job_id,
-                        "defense_submission_id": defense_id
+                        "defense_submission_ids": batch
                     }
                 )
 
                 logger.info(
-                    f"Enqueued new defense job {new_job_id} for defense {defense_id}")
+                    f"Enqueued new batch defense job {new_job_id} for defenses {batch}")
                 new_jobs_count += 1
 
         logger.info(

@@ -21,6 +21,7 @@ class DefenseJobConfig(BaseModel):
 class EvaluationConfig(BaseModel):
     requests_timeout_seconds: int = 5
     max_empty_polls: int = 3  # Close queue after N consecutive empty polls
+    batch_size: int = 4
 
 
 class SourceConfig(BaseModel):

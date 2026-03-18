@@ -79,6 +79,22 @@ def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: s
         return str(result)
 
 
+def set_evaluation_run_status(evaluation_run_id: str, status: str) -> None:
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE evaluation_runs 
+                SET status = :status,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                """
+            ),
+            {"status": status, "id": evaluation_run_id},
+        )
+
+
 def upsert_evaluation(
     *,
     evaluation_run_id: str,
