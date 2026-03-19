@@ -20,11 +20,11 @@ def test_register_worker(fake_redis, monkeypatch):
     job_id = "job-uuid-456"
 
     # Register worker
-    registry.register(worker_id, defense_id, job_id)
+    registry.register(worker_id, [defense_id], job_id)
 
     # Verify metadata HASH created
     metadata = fake_redis.hgetall(f"worker:{worker_id}:metadata")
-    assert metadata["defense_submission_id"] == defense_id
+    assert metadata["defense_submission_ids"] == defense_id
     assert metadata["job_id"] == job_id
     assert metadata["queue_state"] == "OPEN"
     assert "started_at" in metadata

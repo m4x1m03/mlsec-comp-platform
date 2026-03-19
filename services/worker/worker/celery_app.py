@@ -48,8 +48,9 @@ def on_worker_ready(**_) -> None:  # type: ignore[no-untyped-def]
 
         cfg = get_config()
         attack_cfg = cfg.worker.attack
-        sandbox = get_sandbox_backend(attack_cfg)
-        ensure_template_seeded(attack_cfg.template_path, sandbox)
+        if attack_cfg.template_path:
+            sandbox = get_sandbox_backend(attack_cfg)
+            ensure_template_seeded(attack_cfg.template_path, sandbox)
     except Exception:
         logger.exception(
             "Template seeding failed on worker startup — heuristic validation "

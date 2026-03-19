@@ -35,8 +35,11 @@ def make_pop_attack_sequence(*attacks):
     return pop_next_attack
 
 
-def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkeypatch, config_dict, tmp_path):
     """Test evaluation polls Redis queue for attacks."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
     # Monkeypatch Redis client
     from worker.redis_client import WorkerRegistry
 
@@ -56,7 +59,7 @@ def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkey
     # Populate Redis queue
     worker_id = "test_worker_1"
     registry = WorkerRegistry()
-    registry.register(worker_id, defense_id, "job_1")
+    registry.register(worker_id, [defense_id], "job_1")
     registry.add_attack_to_queue(worker_id, attack1_id)
     registry.add_attack_to_queue(worker_id, attack2_id)
 
@@ -74,31 +77,39 @@ def test_evaluate_polls_redis_queue(db_session, fake_redis, test_helpers, monkey
 
     monkeypatch.setattr(WorkerRegistry, "pop_next_attack", tracked_pop)
 
-    # Mock MinIO
-    mock_minio = Mock()
-    mock_response = Mock()
-    mock_response.read.return_value = b"fake_malware_bytes"
-    mock_response.close = Mock()
-    mock_response.release_conn = Mock()
-    mock_minio.get_object.return_value = mock_response
+    # Provide a fake cached sample file
+    fake_sample = tmp_path / "sample.exe"
+    fake_sample.write_bytes(b"fake_malware_bytes")
 
-    def fake_minio_init(*args, **kwargs):
-        return mock_minio
+    monkeypatch.setattr(
+        "worker.defense.evaluate.get_sample_path", lambda key: fake_sample)
 
-    monkeypatch.setattr("worker.defense.evaluate.get_minio_client", lambda: mock_minio)
-
-    # Mock HTTP requests
-    mock_http_response = Mock()
+    # Mock httpx async client
+    mock_http_response = MagicMock()
     mock_http_response.status_code = 200
     mock_http_response.json.return_value = {"result": 1}
 
-    monkeypatch.setattr("requests.post", lambda *args,
-                        **kwargs: mock_http_response)
+    mock_http_client = AsyncMock()
+    mock_http_client.post = AsyncMock(return_value=mock_http_response)
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return mock_http_client
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeAsyncClient)
+
+    # Skip real sleeps between empty polls
+    async def instant_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", instant_sleep)
 
     # Run evaluation (will exit after 2 attacks + None)
     container_url = "http://defense:8080/"
 
-    # This should process 2 attacks and exit when None is returned
     try:
         evaluate_defense_with_redis(
             worker_id=worker_id,

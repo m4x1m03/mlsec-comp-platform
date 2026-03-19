@@ -78,15 +78,26 @@ def test_get_template_reports_empty(db_session):
 
 def test_get_template_reports_returns_all(db_session):
     """Returns all rows from template_file_reports with correct values."""
+    template_id = db_session.execute(
+        text("""
+            INSERT INTO attack_template (object_key, sha256, file_count)
+            VALUES ('templates/test.zip', :sha, 2)
+            RETURNING id
+        """),
+        {"sha": "0" * 64},
+    ).scalar()
+    db_session.commit()
+
     db_session.execute(
         text("""
             INSERT INTO template_file_reports
-                (filename, sha256, sandbox_report_ref, behash, behavioral_signals)
+                (template_id, filename, object_key, sha256, sandbox_report_ref, behash, behavioral_signals)
             VALUES
-                ('file1', :sha1, 'vt-analysis-001', 'behash-abc', CAST(:signals AS jsonb)),
-                ('file2', :sha2, NULL, NULL, NULL)
+                (CAST(:tid AS uuid), 'file1', 'templates/file1', :sha1, 'vt-analysis-001', 'behash-abc', CAST(:signals AS jsonb)),
+                (CAST(:tid AS uuid), 'file2', 'templates/file2', :sha2, NULL, NULL, NULL)
         """),
         {
+            "tid": str(template_id),
             "sha1": "a" * 64,
             "sha2": "b" * 64,
             "signals": json.dumps(_SIGNALS),
