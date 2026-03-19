@@ -8,6 +8,10 @@ from celery.signals import worker_ready
 
 logger = logging.getLogger(__name__)
 
+# Suppress verbose HTTP request logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 def _get_env(name: str, default: str | None = None) -> str:
     value = os.getenv(name)
@@ -51,3 +55,10 @@ def on_worker_ready(**_) -> None:  # type: ignore[no-untyped-def]
             "Template seeding failed on worker startup — heuristic validation "
             "may be unavailable until the worker is restarted."
         )
+
+    # Prune orphaned evaluation networks
+    try:
+        from worker.prune_networks import prune_orphans
+        prune_orphans()
+    except Exception:
+        logger.exception("Orphaned network pruning failed on worker startup.")

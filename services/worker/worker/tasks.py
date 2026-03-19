@@ -61,6 +61,46 @@ log_config = LogConfig(
 )
 
 
+def create_eval_network(client: docker.DockerClient, network_name: str, subnet: str) -> docker.models.networks.Network:
+    """Create evaluation network and clean up overlapping networks if needed."""
+    try:
+        try:
+            existing = client.networks.get(network_name)
+            return existing
+        except docker.errors.NotFound:
+            pass
+
+        # Check for networks with the same subnet but different name (overlapping)
+        all_networks = client.networks.list()
+        for net in all_networks:
+            configs = net.attrs.get('IPAM', {}).get('Config') or []
+            if any(c.get('Subnet') == subnet for c in configs) and net.name != network_name:
+                if net.name.startswith("eval_net_"):
+                    logger.warning(f"Pruning overlapping network: {net.name} ({subnet})")
+                    try:
+                        # Disconnect all containers and remove
+                        for c_id in net.attrs.get('Containers', {}):
+                            try:
+                                net.disconnect(c_id, force=True)
+                            except:
+                                pass
+                        net.remove()
+                    except Exception as e:
+                        logger.warning(f"Failed to prune overlapping network {net.name}: {e}")
+
+        ipam_config = docker.types.IPAMConfig(
+            pool_configs=[docker.types.IPAMPool(subnet=subnet)]
+        )
+        return client.networks.create(
+            network_name,
+            internal=True,
+            ipam=ipam_config
+        )
+    except Exception as e:
+        logger.error(f"Failed to get/create network {network_name} with subnet {subnet}: {e}")
+        raise
+
+
 def _insert_job(
     job_type: str,
     status: str,
@@ -114,7 +154,14 @@ def _insert_job(
     return job_id
 
 
-@celery_app.task(name="worker.tasks.run_batch_defense_job", bind=True)
+@celery_app.task(
+    name="worker.tasks.run_batch_defense_job", 
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    max_retries=3,
+    retry_jitter=True
+)
 def run_batch_defense_job(
     self,
     *,
@@ -202,20 +249,13 @@ def run_batch_defense_job(
             x = port_offset // 32
             y = (port_offset % 32) * 8
             subnet = f"10.50.{x}.{y}/29"
-            ipam_config = docker.types.IPAMConfig(
-                pool_configs=[docker.types.IPAMPool(subnet=subnet)]
-            )
-            
-            network = client.networks.create(
-                network_name, 
-                internal=True, 
-                ipam=ipam_config
-            )
+            network = create_eval_network(client, network_name, subnet)
             gateway_container = client.containers.get("mlsec-gateway")
             network.connect(gateway_container)
             
             # Start defense container
-            container_name = f"eval_defense_{job_id}_{defense_submission_id[:8]}"
+            container_id = f"{job_id}_{defense_submission_id[:8]}"
+            container_name = f"eval_defense_{container_id}"
             
             container = client.containers.run(
                 image_name,
@@ -242,10 +282,11 @@ def run_batch_defense_job(
             # Get student container IP
             student_ip = container.attrs['NetworkSettings']['Networks'][network_name]['IPAddress']
             
-            # Setup iptables rules on gateway
-            gateway_container.exec_run(f"iptables -t nat -A PREROUTING -p tcp --dport {gateway_port} -j DNAT --to-destination {student_ip}:8080")
-            gateway_container.exec_run(f"iptables -t nat -A POSTROUTING -d {student_ip} -p tcp --dport 8080 -j MASQUERADE")
-            gateway_container.exec_run(f"iptables -A FORWARD -p tcp -d {student_ip} --dport 8080 -j ACCEPT")
+            # Setup iptables rules on gateway with ID for pruning
+            rule_id = f"eval_net_{container_id}"
+            gateway_container.exec_run(f"iptables -t nat -A PREROUTING -p tcp --dport {gateway_port} -m comment --comment {rule_id} -j DNAT --to-destination {student_ip}:8080")
+            gateway_container.exec_run(f"iptables -t nat -A POSTROUTING -d {student_ip} -p tcp --dport 8080 -m comment --comment {rule_id} -j MASQUERADE")
+            gateway_container.exec_run(f"iptables -A FORWARD -p tcp -d {student_ip} --dport 8080 -m comment --comment {rule_id} -j ACCEPT")
             
             url = f"http://mlsec-gateway:{gateway_port}/"
             
@@ -298,7 +339,9 @@ def run_batch_defense_job(
 
     except Exception as exc:
         logger.exception(f"Batch job {job_id} failed: {exc}")
-        set_job_status(job_id=job_id, status="failed", error=str(exc))
+        # Only mark as failed in DB if we've exhausted retries
+        if self.request.retries >= self.max_retries:
+            set_job_status(job_id=job_id, status="failed", error=str(exc))
         raise
     finally:
         logger.info(f"Cleaning up resources for batch job {job_id}")
@@ -313,21 +356,24 @@ def run_batch_defense_job(
                 logger.debug(f"Failed to remove container for defense {ctx.get('defense_submission_id')}: {e}")
             
             try:
-                gateway_container = client.containers.get("mlsec-gateway")
-                # Cleanup iptables rules (TODO: Implement orphaned rules reaper incase Celery worker dies)
-                gateway_container.exec_run(f"iptables -t nat -D PREROUTING -p tcp --dport {ctx['gateway_port']} -j DNAT --to-destination {ctx['student_ip']}:8080")
-                gateway_container.exec_run(f"iptables -t nat -D POSTROUTING -d {ctx['student_ip']} -p tcp --dport 8080 -j MASQUERADE")
-                gateway_container.exec_run(f"iptables -D FORWARD -p tcp -d {ctx['student_ip']} --dport 8080 -j ACCEPT")
-                registry.release_gateway_port(ctx["gateway_port"])
-            except Exception as e:
-                logger.warning(f"Failed to cleanup iptables or release port for defense {ctx.get('defense_submission_id')}: {e}")
-            
-            try:
                 # Cleanup network
                 ctx["network"].disconnect(client.containers.get("mlsec-gateway"), force=True)
                 ctx["network"].remove()
             except Exception as e:
                 logger.warning(f"Failed to remove network for defense {ctx.get('defense_submission_id')}: {e}")
+
+            try:
+                # Iptables rules cleanup
+                gateway_container = client.containers.get("mlsec-gateway")
+                rule_id = f"eval_net_{job_id}_{ctx['defense_submission_id'][:8]}"
+                gateway_container.exec_run(f"iptables -t nat -D PREROUTING -p tcp --dport {ctx['gateway_port']} -m comment --comment {rule_id} -j DNAT --to-destination {ctx['student_ip']}:8080")
+                gateway_container.exec_run(f"iptables -t nat -D POSTROUTING -d {ctx['student_ip']} -p tcp --dport 8080 -m comment --comment {rule_id} -j MASQUERADE")
+                gateway_container.exec_run(f"iptables -D FORWARD -p tcp -d {ctx['student_ip']} --dport 8080 -m comment --comment {rule_id} -j ACCEPT")
+                
+                # Release port
+                registry.release_gateway_port(ctx["gateway_port"])
+            except Exception as e:
+                logger.warning(f"Failed to cleanup iptables or release port for defense {ctx.get('defense_submission_id')}: {e}")
 
             if ctx.get("image_name") and ctx.get("source_type") in ['github', 'zip']:
                 if config_dict.get('worker', {}).get('source', {}).get('cleanup_built_images', True):
@@ -353,8 +399,15 @@ def run_defense_job(
     """
     return run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_submission_id])
 
-@celery_app.task(name="worker.tasks.run_attack_job")
-def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
+@celery_app.task(
+    name="worker.tasks.run_attack_job", 
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    max_retries=3,
+    retry_jitter=True
+)
+def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
     """
     Attack validation and defense enqueueing job.
 
@@ -623,5 +676,7 @@ def run_attack_job(*, job_id: str, attack_submission_id: str) -> None:
         set_job_status(job_id=job_id, status="done")
     except Exception as exc:
         logger.exception(f"Attack job {job_id} failed: {exc}")
-        set_job_status(job_id=job_id, status="failed", error=str(exc))
+        # Only mark as failed in DB if we've exhausted retries
+        if self.request.retries >= self.max_retries:
+            set_job_status(job_id=job_id, status="failed", error=str(exc))
         raise
