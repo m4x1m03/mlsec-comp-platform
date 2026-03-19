@@ -33,16 +33,6 @@ import SubmissionForm from "./Form.astro";
     const url = (document.getElementById("url") as HTMLInputElement)?.value.trim();
     const file = (document.getElementById("file") as HTMLInputElement)?.files?.[0];
 
-    if (!modelName) {
-      alert("Please provide a model name.");
-      return;
-    }
-
-    if (!modelVersion) {
-      alert("Please provide a model version.");
-      return;
-    }
-
     if (!url && !file) {
       alert("Please provide a link or upload a file.");
       return;
