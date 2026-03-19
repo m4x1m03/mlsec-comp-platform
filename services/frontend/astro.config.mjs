@@ -14,6 +14,8 @@ export default defineConfig({
       proxy: {
         '/health': 'http://127.0.0.1:8000',
         '/auth': 'http://127.0.0.1:8000',
+        '/defense': 'http://127.0.0.1:8000',
+        '/api': 'http://127.0.0.1:8000',
       },
     },
   },

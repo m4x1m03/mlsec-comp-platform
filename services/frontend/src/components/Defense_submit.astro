@@ -1,5 +1,6 @@
 ---
 import InputLink from "./InputLink.astro";
+import TextField from "./TextField.astro";
 import FileUpload from "./FileUpload.astro";
 import SubmissionForm from "./Form.astro";
 ---
@@ -8,7 +9,9 @@ import SubmissionForm from "./Form.astro";
   <h1 class="text-2xl font-semibold text-gray-900 pb-2">Model Submission</h1>
   <SubmissionForm button_text="Submit Model">
     <div class="flex flex-col">
-      <InputLink title="DockerHub Link:" placeholder="https://hub.docker.com/" submit_text="Submit Model"/>
+      <TextField title="Model Name" placeholder="Enter Model Name" id="model-name" required/>
+      <TextField title="Model Version" placeholder="0.0.0" id="model-version" required/>
+      <InputLink title="DockerHub/GitHub Link:" placeholder="https://hub.docker.com/" submit_text="Submit Model"/>
       <div class="flex items-center my-2">
         <div class="flex-1 border-t border-gray-300"></div>
         <span class="px-2 text-sm text-gray-500 font-medium">OR</span>
@@ -18,3 +21,89 @@ import SubmissionForm from "./Form.astro";
     </div>
   </SubmissionForm>
 </div>
+
+<script>
+  const form = document.querySelector("form");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const modelName = (document.getElementById("model-name") as HTMLInputElement)?.value.trim();
+    const modelVersion = (document.getElementById("model-version") as HTMLInputElement)?.value.trim();
+    const url = (document.getElementById("url") as HTMLInputElement)?.value.trim();
+    const file = (document.getElementById("file") as HTMLInputElement)?.files?.[0];
+
+    if (!modelName) {
+      alert("Please provide a model name.");
+      return;
+    }
+
+    if (!modelVersion) {
+      alert("Please provide a model version.");
+      return;
+    }
+
+    if (!url && !file) {
+      alert("Please provide a link or upload a file.");
+      return;
+    }
+
+    try {
+      let response: Response;
+
+      if (file) {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("version", modelVersion);
+        formData.append("display_name", modelName);
+
+        response = await fetch("/api/submissions/defense/zip", {
+          method: "POST",
+          body: formData,
+        });
+
+      } else {
+        const isGitHub = url.includes("github.com");
+        const isDocker = url.includes("hub.docker.com") || url.includes("docker.io");
+
+        if (!isGitHub && !isDocker) {
+          alert("URL must be a GitHub or DockerHub link.");
+          return;
+        }
+
+        if (isGitHub) {
+          response = await fetch("/api/submissions/defense/github", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              git_repo: url,
+              version: modelVersion,
+              display_name: modelName,
+            }),
+          });
+        } else {
+          response = await fetch("/api/submissions/defense/docker", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              docker_image: url,
+              version: modelVersion,
+              display_name: modelName,
+            }),
+          });
+        }
+      }
+
+      if (!response.ok) {
+        const error = await response.text();
+        alert(`Submission failed: ${error}`);
+        return;
+      }
+
+      alert("Model submitted successfully!");
+
+    } catch (err) {
+      alert(`Network error: ${err.message}`);
+    }
+  });
+</script>
