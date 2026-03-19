@@ -11,6 +11,7 @@ import SubmissionForm from "./Form.astro";
     <div class="flex flex-col">
       <TextField title="Model Name" placeholder="Enter Model Name" id="model-name" required/>
       <TextField title="Model Version" placeholder="0.0.0" id="model-version" required/>
+      <TextField title="Docker Hub Image:" placeholder="creator/image" id="docker-image"/>
       <InputLink title="DockerHub/GitHub Link:" placeholder="https://hub.docker.com/" submit_text="Submit Model"/>
       <div class="flex items-center my-2">
         <div class="flex-1 border-t border-gray-300"></div>
@@ -30,10 +31,11 @@ import SubmissionForm from "./Form.astro";
 
     const modelName = (document.getElementById("model-name") as HTMLInputElement)?.value.trim();
     const modelVersion = (document.getElementById("model-version") as HTMLInputElement)?.value.trim();
+    const dockerImage = (document.getElementById("docker-image") as HTMLInputElement)?.value.trim();
     const url = (document.getElementById("url") as HTMLInputElement)?.value.trim();
     const file = (document.getElementById("file") as HTMLInputElement)?.files?.[0];
 
-    if (!url && !file) {
+    if (!url && !file && !dockerImage) {
       alert("Please provide a link or upload a file.");
       return;
     }
@@ -52,36 +54,27 @@ import SubmissionForm from "./Form.astro";
           body: formData,
         });
 
+      } else if (url) {
+        response = await fetch("/api/submissions/defense/github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            git_repo: url,
+            version: modelVersion,
+            display_name: modelName,
+          }),
+        });
+
       } else {
-        const isGitHub = url.includes("github.com");
-        const isDocker = url.includes("hub.docker.com") || url.includes("docker.io");
-
-        if (!isGitHub && !isDocker) {
-          alert("URL must be a GitHub or DockerHub link.");
-          return;
-        }
-
-        if (isGitHub) {
-          response = await fetch("/api/submissions/defense/github", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              git_repo: url,
-              version: modelVersion,
-              display_name: modelName,
-            }),
-          });
-        } else {
-          response = await fetch("/api/submissions/defense/docker", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              docker_image: url,
-              version: modelVersion,
-              display_name: modelName,
-            }),
-          });
-        }
+        response = await fetch("/api/submissions/defense/docker", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            docker_image: dockerImage,
+            version: modelVersion,
+            display_name: modelName,
+          }),
+        });
       }
 
       if (!response.ok) {
