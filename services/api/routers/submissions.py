@@ -399,6 +399,26 @@ def defense_submission_history(
     )
 
 
+@router.get(
+    "/attack/history",
+    response_model=SubmissionHistoryResponse,
+)
+def attack_submission_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionHistoryResponse:
+    """Return the authenticated user's attack submission history."""
+    return _get_submission_history(
+        db=db,
+        user_id=str(current_user.user_id),
+        submission_type="attack",
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.post(
     "/attack/zip",
     response_model=SubmissionResponse,
