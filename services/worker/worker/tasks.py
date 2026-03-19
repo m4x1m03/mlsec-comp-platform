@@ -1,68 +1,25 @@
 from __future__ import annotations
 
-import docker
-from docker.types import LogConfig
 from celery.utils.log import get_task_logger
-
 import time
 import os
-import requests
 import socket
 import uuid
 import json
 import tempfile
 import zipfile
 import hashlib
-import asyncio
 from pathlib import Path
-from worker.minio_client import get_minio_client, get_bucket_name
-from worker.cache_handler import get_sample_path
 
 from worker.celery_app import celery_app
 from worker.config import get_config
-from worker.db import (
-    set_job_status,
-    get_defense_submission_source,
-    get_all_validated_defenses,
-    get_unevaluated_attacks,
-    check_if_needs_validation,
-    mark_defense_validated,
-    mark_defense_failed,
-    is_evaluation_in_progress,
-    mark_attack_validated,
-    get_attack_submission_source,
-    insert_attack_files,
-    get_template_reports,
-    mark_attack_failed,
-)
-from worker.redis_client import WorkerRegistry
-from worker.defense.validation import validate_functional
-from worker.defense.evaluate import evaluate_defense_with_redis, evaluate_defenses_async
-from worker.attack.validation import (
-    AttackValidationError,
-    validate_functional as validate_attack_functional,
-    validate_heuristic,
-    _inner_filename,
-)
-from worker.attack.sandbox import get_sandbox_backend
-from worker.attack.sandbox.base import SandboxUnavailableError
 
 logger = get_task_logger(__name__)
-
 config = get_config()
 
-# Prevents massive log files from container
-log_config = LogConfig(
-    type=LogConfig.types.JSON,
-    config={
-        'max-size': '10m',
-        'max-file': '3'
-    }
-)
-
-
-def create_eval_network(client: docker.DockerClient, network_name: str, subnet: str) -> docker.models.networks.Network:
+def create_eval_network(client, network_name: str, subnet: str):
     """Create evaluation network and clean up overlapping networks if needed."""
+    import docker
     try:
         try:
             existing = client.networks.get(network_name)
@@ -179,6 +136,31 @@ def run_batch_defense_job(
     6. Broadcast attack samples (from MinIO/Cache) to all containers based on Redis queue
     7. Unregister worker and perform per-defense resource cleanup
     """
+    from docker.types import LogConfig
+    import docker
+    import requests
+    import asyncio
+    from worker.db import (
+        set_job_status,
+        check_if_needs_validation,
+        get_defense_submission_source,
+        get_unevaluated_attacks,
+        mark_defense_validated,
+        mark_defense_failed,
+    )
+    from worker.redis_client import WorkerRegistry
+    from worker.defense.validation import validate_functional
+    from worker.defense.evaluate import evaluate_defenses_async
+
+    # Prevents massive log files from container
+    log_config = LogConfig(
+        type=LogConfig.types.JSON,
+        config={
+            'max-size': '10m',
+            'max-file': '3'
+        }
+    )
+
     logger.info(
         f"Starting batch defense job {job_id} for submissions {defense_submission_ids}"
     )
@@ -420,8 +402,30 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
        - Find open workers for defense
        - If open worker exists: add attack to worker's queue
        - If no open worker: enqueue new defense job
-
     """
+
+    from worker.db import (
+        set_job_status,
+        get_attack_submission_source,
+        mark_attack_failed,
+        insert_attack_files,
+        get_template_reports,
+        mark_attack_validated,
+        get_all_validated_defenses,
+        is_evaluation_in_progress,
+    )
+    from worker.minio_client import get_minio_client, get_bucket_name
+    from worker.attack.validation import (
+        validate_functional as validate_attack_functional,
+        validate_heuristic,
+        _inner_filename,
+        AttackValidationError,
+    )
+    from worker.attack.sandbox import get_sandbox_backend
+    from worker.attack.sandbox.base import SandboxUnavailableError
+    from worker.redis_client import WorkerRegistry
+    import shutil
+
     try:
         set_job_status(job_id=job_id, status="running")
         logger.info(

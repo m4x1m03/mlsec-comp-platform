@@ -25,13 +25,11 @@ from __future__ import annotations
 import hashlib
 import zipfile
 
-import pyzipper
 from pathlib import Path, PurePosixPath
 
 import logging
 
 from .sandbox.base import SandboxBackend, SandboxReport
-from worker.db import get_template_reports, upsert_template_report
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +155,7 @@ def validate_zip_password(zip_path: str) -> None:
         AttackValidationError: If the password is wrong or extraction fails.
     """
     try:
+        import pyzipper
         with pyzipper.AESZipFile(zip_path, "r") as zf:
             zf.setpassword(b"infected")
             for entry in zf.infolist():
@@ -333,6 +332,7 @@ def ensure_template_seeded(template_dir: str, sandbox: SandboxBackend) -> None:
         )
         return
 
+    from worker.db import get_template_reports, upsert_template_report
     existing: dict[str, dict] = {r["filename"]: r for r in get_template_reports()}
 
     for file_path in all_files:
