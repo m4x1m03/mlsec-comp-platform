@@ -7,6 +7,7 @@ import logging
 from functools import lru_cache
 from typing import BinaryIO
 
+import urllib3
 from minio import Minio
 from minio.error import S3Error
 
@@ -19,11 +20,16 @@ logger = logging.getLogger(__name__)
 def get_minio_client() -> Minio:
     """Singleton MinIO client factory."""
     cfg = get_config().minio
+    http_client = urllib3.PoolManager(
+        timeout=urllib3.Timeout(connect=5, read=30),
+        retries=urllib3.Retry(total=0),
+    )
     return Minio(
         endpoint=cfg.endpoint,
         access_key=cfg.access_key,
         secret_key=cfg.secret_key,
         secure=cfg.secure,
+        http_client=http_client,
     )
 
 
