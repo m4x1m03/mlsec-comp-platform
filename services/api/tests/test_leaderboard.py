@@ -1,3 +1,8 @@
+"""Leaderboard endpoint tests.
+
+Validates sorting and pair filtering behavior.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,6 +13,7 @@ from sqlalchemy import text
 
 
 def _create_user(db_session, *, username: str, email: str) -> str:
+    """Insert a user and return the new user id."""
     row = db_session.execute(
         text(
             """
@@ -31,6 +37,7 @@ def _create_submission(
     display_name: str,
     status: str = "ready",
 ) -> str:
+    """Insert a submission row and return its id."""
     submission_id = str(uuid4())
     db_session.execute(
         text(
@@ -60,6 +67,7 @@ def _create_pair_score(
     n_files_scored: int,
     n_files_error: int,
 ) -> None:
+    """Insert a leaderboard pair score row."""
     db_session.execute(
         text(
             """
@@ -80,6 +88,7 @@ def _create_pair_score(
 
 
 def test_leaderboard_defense_orders_by_score(client, db_session):
+    """Defense leaderboard should order entries by score."""
     user1 = _create_user(db_session, username="leader_user1", email="leader1@example.com")
     user2 = _create_user(db_session, username="leader_user2", email="leader2@example.com")
 
@@ -138,6 +147,7 @@ def test_leaderboard_defense_orders_by_score(client, db_session):
 
 
 def test_leaderboard_pairs_by_defense(client, db_session):
+    """Pair scores should be filterable by defense submission."""
     user1 = _create_user(db_session, username="pair_user1", email="pair1@example.com")
     user2 = _create_user(db_session, username="pair_user2", email="pair2@example.com")
 

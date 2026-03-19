@@ -1,3 +1,9 @@
+"""Database connectivity helpers for the API service.
+
+Defines the SQLAlchemy engine/session factory and convenience utilities for
+dependency injection and health checks.
+"""
+
 import os
 from functools import lru_cache
 
@@ -12,12 +18,14 @@ DEFAULT_DATABASE_URL = "postgresql://postgres:password123@postgres:5432/mlsec"
 
 
 def get_database_url() -> str:
+    """Resolve the database URL from settings or environment."""
     settings = get_settings()
     return settings.database_url or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
+    """Create (and cache) the SQLAlchemy Engine."""
     return create_engine(get_database_url(), pool_pre_ping=True)
 
 
@@ -27,6 +35,7 @@ Base = declarative_base()
 
 
 def get_db():
+    """Yield a database session for FastAPI dependencies."""
     db = SessionLocal()
     try:
         yield db
@@ -35,6 +44,7 @@ def get_db():
 
 
 def ping_db() -> bool:
+    """Return True when a simple database query succeeds."""
     try:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))

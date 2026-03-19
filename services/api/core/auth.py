@@ -1,3 +1,10 @@
+"""Session-based authentication helpers for the API.
+
+Provides utilities to create, validate, renew, and revoke session tokens stored
+in Postgres. The module exposes FastAPI dependencies for authenticated users and
+handles cookie/bearer token extraction.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -18,6 +25,7 @@ SESSION_COOKIE_ALIAS = get_settings().auth_session_cookie_name
 
 @dataclass(frozen=True)
 class SessionToken:
+    """Container for a newly-issued session token."""
     session_id: UUID
     access_token: str
     expires_at: datetime
@@ -25,6 +33,7 @@ class SessionToken:
 
 @dataclass(frozen=True)
 class AuthenticatedUser:
+    """Normalized authenticated user context from the database."""
     user_id: UUID
     email: str
     username: str
@@ -34,20 +43,24 @@ class AuthenticatedUser:
 
 
 def _utcnow() -> datetime:
+    """Return timezone-aware UTC datetime for consistency."""
     return datetime.now(timezone.utc)
 
 
 def _as_utc(value: datetime) -> datetime:
+    """Normalize a datetime value to UTC (assumes naive values are UTC)."""
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 
 
 def _hash_token(token: str) -> str:
+    """Hash a session token for storage and comparisons."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _unauthorized(detail: str = "Not authenticated") -> HTTPException:
+    """Create a 401 HTTPException for authentication failures."""
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
@@ -56,6 +69,7 @@ def _unauthorized(detail: str = "Not authenticated") -> HTTPException:
 
 
 def generate_session_token() -> str:
+    """Generate a cryptographically strong session token."""
     return secrets.token_urlsafe(48)
 
 
@@ -63,6 +77,7 @@ def _extract_session_token(
     request: Request,
     session_cookie: str | None,
 ) -> str | None:
+    """Extract the session token from cookie or bearer authorization."""
     settings = get_settings()
     cookie_token = session_cookie or request.cookies.get(settings.auth_session_cookie_name)
     if cookie_token:
@@ -84,6 +99,16 @@ def create_session(
     user_id: UUID,
     commit: bool = True,
 ) -> SessionToken:
+    """Create and persist a new user session.
+
+    Args:
+        db: SQLAlchemy session.
+        user_id: User UUID for the session.
+        commit: Whether to commit the transaction after insert.
+
+    Returns:
+        SessionToken containing the session id, token, and expiration.
+    """
     settings = get_settings()
     now = _utcnow()
     expires_at = now + timedelta(minutes=settings.auth_session_ttl_minutes)
@@ -124,6 +149,13 @@ def create_session(
 
 
 def revoke_session_by_id(db: Session, *, session_id: UUID, commit: bool = True) -> None:
+    """Revoke a session by id.
+
+    Args:
+        db: SQLAlchemy session.
+        session_id: Session UUID to revoke.
+        commit: Whether to commit the transaction after update.
+    """
     db.execute(
         text(
             """
@@ -147,17 +179,31 @@ def _maybe_renew_session(
     expires_at: datetime,
     now: datetime,
 ) -> datetime:
+    """Renew a session if it is within the renewal window.
+
+    Args:
+        db: SQLAlchemy session.
+        session_id: Session UUID.
+        created_at: Session creation time.
+        expires_at: Current expiration time.
+        now: Current time used for comparisons.
+
+    Returns:
+        The final expiration time (renewed or original).
+    """
     settings = get_settings()
 
     if not settings.auth_session_renew_on_validation:
         return expires_at
 
+    # Only renew sessions that are close to expiration.
     renew_threshold = timedelta(minutes=settings.auth_session_renew_threshold_minutes)
     if expires_at - now > renew_threshold:
         return expires_at
 
     renewed_expires_at = now + timedelta(minutes=settings.auth_session_ttl_minutes)
 
+    # Enforce absolute max lifetime if configured.
     if settings.auth_session_max_lifetime_minutes > 0:
         absolute_max_expires_at = created_at + timedelta(minutes=settings.auth_session_max_lifetime_minutes)
         if renewed_expires_at > absolute_max_expires_at:
@@ -191,6 +237,19 @@ def get_authenticated_user(
     session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_ALIAS),
     db: Session = Depends(get_db),
 ) -> AuthenticatedUser:
+    """Validate the incoming session and return the authenticated user.
+
+    Args:
+        request: Incoming FastAPI request.
+        session_cookie: Session cookie value (injected by FastAPI).
+        db: SQLAlchemy session dependency.
+
+    Returns:
+        AuthenticatedUser object with session metadata.
+
+    Raises:
+        HTTPException: If the session token is missing, invalid, or expired.
+    """
     access_token = _extract_session_token(request, session_cookie)
     if access_token is None:
         raise _unauthorized()

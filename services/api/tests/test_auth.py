@@ -1,3 +1,8 @@
+"""Authentication endpoint tests.
+
+Covers login, registration, session cookies, and logout flows.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,10 +15,12 @@ from core.settings import get_settings
 
 
 def _session_cookie_name() -> str:
+    """Return the configured session cookie name."""
     return get_settings().auth_session_cookie_name
 
 
 def _assert_session_cookie_flags(set_cookie_header: str) -> None:
+    """Assert expected security flags on Set-Cookie."""
     header = set_cookie_header.lower()
     assert "httponly" in header
     assert "path=/" in header
@@ -21,6 +28,7 @@ def _assert_session_cookie_flags(set_cookie_header: str) -> None:
 
 
 def test_login_unknown_email_requires_registration(client, db_session):
+    """Unknown emails should trigger registration flow."""
     resp = client.post("/auth/login", json={"email": "new-user@example.com"})
 
     assert resp.status_code == 200
@@ -33,6 +41,7 @@ def test_login_unknown_email_requires_registration(client, db_session):
 
 
 def test_register_creates_user_identity_and_session(client, db_session):
+    """Registration creates user, identity, and session records."""
     resp = client.post(
         "/auth/register",
         json={"email": "register-flow@example.com", "username": "register_user"},
@@ -94,6 +103,7 @@ def test_register_creates_user_identity_and_session(client, db_session):
 
 
 def test_login_registered_user_issues_session_token(client, db_session):
+    """Registered users should receive a valid session cookie."""
     user_row = db_session.execute(
         text(
             """
@@ -135,6 +145,7 @@ def test_login_registered_user_issues_session_token(client, db_session):
 
 
 def test_register_rejects_xss_username(client):
+    """Registration should reject usernames that fail validation."""
     resp = client.post(
         "/auth/register",
         json={"email": "xss-register@example.com", "username": "<script>alert(1)</script>"},
@@ -144,6 +155,7 @@ def test_register_rejects_xss_username(client):
 
 
 def test_me_escapes_legacy_malicious_username(client, db_session):
+    """The /me endpoint should sanitize legacy usernames."""
     user_row = db_session.execute(
         text(
             """
@@ -180,6 +192,7 @@ def test_me_escapes_legacy_malicious_username(client, db_session):
 
 
 def test_logout_revokes_session_and_blocks_reuse(client, db_session):
+    """Logout should revoke the session and clear the cookie."""
     register_resp = client.post(
         "/auth/register",
         json={"email": "logout-flow@example.com", "username": "logout_user"},

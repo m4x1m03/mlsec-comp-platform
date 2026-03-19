@@ -1,3 +1,9 @@
+"""Authentication and session management endpoints.
+
+Handles login, registration, logout, and current-session lookup, including
+cookie management and session persistence.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -30,6 +36,7 @@ def _to_user_response(
     username: str,
     is_admin: bool,
 ) -> AuthenticatedUserResponse:
+    """Convert user fields into an AuthenticatedUserResponse."""
     return AuthenticatedUserResponse(
         id=user_id,
         email=email,
@@ -39,6 +46,7 @@ def _to_user_response(
 
 
 def _set_session_cookie(response: Response, *, access_token: str, expires_at: datetime) -> None:
+    """Set the session cookie on the response with security attributes."""
     settings = get_settings()
     now = datetime.now(timezone.utc)
     max_age_seconds = max(int((expires_at - now).total_seconds()), 0)
@@ -56,6 +64,7 @@ def _set_session_cookie(response: Response, *, access_token: str, expires_at: da
 
 
 def _clear_session_cookie(response: Response) -> None:
+    """Clear the session cookie on the response."""
     settings = get_settings()
     response.delete_cookie(
         key=settings.auth_session_cookie_name,
@@ -73,6 +82,7 @@ def login(
     response: Response,
     db: Session = Depends(get_db),
 ) -> LoginResponse:
+    """Authenticate an email-only user and issue a session token."""
     row = (
         db.execute(
             text(
@@ -90,6 +100,7 @@ def login(
     )
 
     if row is None:
+        # If the email exists but is disabled, signal the user explicitly.
         disabled = db.execute(
             text(
                 """
@@ -132,6 +143,7 @@ def register(
     response: Response,
     db: Session = Depends(get_db),
 ) -> SessionResponse:
+    """Register a new user and issue a session token."""
     existing_email = (
         db.execute(
             text(
@@ -165,6 +177,7 @@ def register(
         raise HTTPException(status_code=409, detail="Username is already taken")
 
     try:
+        # Create user + identity, then issue a session in the same transaction.
         user_row = (
             db.execute(
                 text(
@@ -225,6 +238,7 @@ def logout(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ) -> Response:
+    """Revoke the current session and clear the cookie."""
     revoke_session_by_id(db, session_id=current_user.session_id, commit=True)
     _clear_session_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
@@ -233,6 +247,7 @@ def logout(
 
 @router.get("/me", response_model=SessionInfoResponse)
 def me(current_user: AuthenticatedUser = Depends(get_authenticated_user)) -> SessionInfoResponse:
+    """Return the current authenticated user's session info."""
     return SessionInfoResponse(
         session_id=current_user.session_id,
         expires_at=current_user.session_expires_at,

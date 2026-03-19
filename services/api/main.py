@@ -1,3 +1,10 @@
+"""FastAPI application entrypoint and lifecycle wiring.
+
+Creates the API app with routers and middleware, and manages startup/shutdown
+tasks such as ensuring the MinIO bucket exists and starting/stopping the
+leaderboard stream listener.
+"""
+
 import logging
 from contextlib import asynccontextmanager
 import asyncio
@@ -50,6 +57,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Create and configure the FastAPI application instance."""
     settings = get_settings()
     logging.basicConfig(level=getattr(
         logging, settings.log_level.upper(), logging.INFO))

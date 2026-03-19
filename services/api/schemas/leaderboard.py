@@ -1,3 +1,8 @@
+"""Pydantic schemas for leaderboard responses.
+
+Provides response models for leaderboard lists and pair score summaries.
+"""
+
 from __future__ import annotations
 
 import html
@@ -13,6 +18,7 @@ def _escape_username_for_response(value: str) -> str:
 
 
 class LeaderboardEntry(BaseModel):
+    """Leaderboard row aggregated across pair scores."""
     submission_id: UUID
     submission_type: str
     status: str
@@ -33,10 +39,12 @@ class LeaderboardEntry(BaseModel):
     @field_validator("username")
     @classmethod
     def sanitize_username(cls, value: str) -> str:
+        """Escape the username to prevent HTML/JS interpretation."""
         return _escape_username_for_response(value)
 
 
 class LeaderboardResponse(BaseModel):
+    """Paginated leaderboard response."""
     submission_type: str
     items: list[LeaderboardEntry]
     total: int
@@ -50,6 +58,7 @@ class LeaderboardResponse(BaseModel):
 
 
 class LeaderboardPairSubmission(BaseModel):
+    """Submission metadata nested in pair score responses."""
     submission_id: UUID
     user_id: UUID
     username: str
@@ -61,10 +70,12 @@ class LeaderboardPairSubmission(BaseModel):
     @field_validator("username")
     @classmethod
     def sanitize_username(cls, value: str) -> str:
+        """Escape the username to prevent HTML/JS interpretation."""
         return _escape_username_for_response(value)
 
 
 class LeaderboardPairEntry(BaseModel):
+    """Pair score entry describing a defense/attack matchup."""
     defense_submission_id: UUID
     attack_submission_id: UUID
     latest_evaluation_run_id: UUID | None
@@ -78,6 +89,7 @@ class LeaderboardPairEntry(BaseModel):
 
 
 class LeaderboardPairsResponse(BaseModel):
+    """Paginated response for leaderboard pair scores."""
     items: list[LeaderboardPairEntry]
     total: int
     limit: int
