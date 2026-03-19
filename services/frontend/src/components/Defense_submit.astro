@@ -1,5 +1,6 @@
 ---
 import InputLink from "./InputLink.astro";
+import TextField from "./TextField.astro";
 import FileUpload from "./FileUpload.astro";
 import SubmissionForm from "./Form.astro";
 ---
@@ -8,13 +9,130 @@ import SubmissionForm from "./Form.astro";
   <h1 class="text-2xl font-semibold text-gray-900 pb-2">Model Submission</h1>
   <SubmissionForm button_text="Submit Model">
     <div class="flex flex-col">
-      <InputLink title="DockerHub Link:" placeholder="https://hub.docker.com/" submit_text="Submit Model"/>
-      <div class="flex items-center my-2">
-        <div class="flex-1 border-t border-gray-300"></div>
-        <span class="px-2 text-sm text-gray-500 font-medium">OR</span>
-        <div class="flex-1 border-t border-gray-300"></div>
+      <TextField title="Model Name" placeholder="Model Name" id="model-name" required/>
+      <TextField title="Model Version" placeholder="0.0.0" id="model-version" required/>
+      <div class="w-full max-w-md mx-auto p-6">
+        <label
+          for="submission-select"
+          class="block text-sm font-medium text-gray-700 mb-2"
+        >Submission Type: <span class="text-red-500 ml-0.5">*</span></label>
+        <div id="submission-select">
+          <input type="radio" id="docker" name="submission-type" value="DockerHub">
+          <label for="docker" class="text-sm font-medium text-gray-700">DockerHub Image</label><br>
+          <input type="radio" id="github" name="submission-type" value="GitHub">
+          <label for="github" class="text-sm font-medium text-gray-700">GitHub Link</label><br>
+          <input type="radio" id="zip" name="submission-type" value="ZIP">
+          <label for="zip" class="text-sm font-medium text-gray-700">ZIP File</label>
+        </div>
       </div>
-      <FileUpload title="Upload Docker Image File:" subtext="Uplaod Dockerfile up to 10Mb"/>
+
+      <div id="docker-section" class="hidden">
+        <TextField title="Docker Hub Image:" placeholder="creator/image" id="docker-image"/>
+      </div>
+      <div id="github-section" class="hidden">
+        <InputLink title="GitHub Link:" placeholder="https://github.com/" submit_text="Submit Model"/>
+      </div>
+      <div id="file-section" class="hidden">
+        <FileUpload title="Upload Docker Image File:" subtext="" id="model-upload"/>
+      </div>
     </div>
   </SubmissionForm>
 </div>
+
+<script>
+  const radios = document.querySelectorAll('input[name="submission-type"]');
+  const sections: Record<string, string> = {
+    DockerHub: "docker-section",
+    GitHub: "github-section",
+    ZIP: "file-section",
+  };
+
+  function updateVisibility(selectedValue: string) {
+    Object.entries(sections).forEach(([value, sectionId]) => {
+      const el = document.getElementById(sectionId);
+      if (el) {
+        el.classList.toggle("hidden", value !== selectedValue);
+      }
+    });
+  }
+
+  radios.forEach((radio) => {
+    radio.addEventListener("change", (e) => {
+      updateVisibility((e.target as HTMLInputElement).value);
+    });
+  });
+
+  const form = document.querySelector("form");
+  if (!form) throw new Error("Form not found");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const modelName = (document.getElementById("model-name") as HTMLInputElement)?.value.trim();
+    const modelVersion = (document.getElementById("model-version") as HTMLInputElement)?.value.trim();
+    const dockerImage = (document.getElementById("docker-image") as HTMLInputElement)?.value.trim();
+    const url = (document.getElementById("url") as HTMLInputElement)?.value.trim();
+    const file = (document.getElementById("model-upload") as HTMLInputElement)?.files?.[0];
+
+    const selectedType = (document.querySelector('input[name="submission-type"]:checked') as HTMLInputElement)?.value;
+
+    if (!selectedType) {
+      alert("Please select a submission type.");
+      return;
+    }
+
+    try {
+      let response: Response;
+
+      if (selectedType === "ZIP" && file) {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("version", modelVersion);
+        formData.append("display_name", modelName);
+
+        response = await fetch("/api/submissions/defense/zip", {
+          method: "POST",
+          body: formData,
+        });
+
+      } else if (selectedType === "GitHub" && url) {
+        response = await fetch("/api/submissions/defense/github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            git_repo: url,
+            version: modelVersion,
+            display_name: modelName,
+          }),
+        });
+
+      } else if (selectedType === "DockerHub" && dockerImage) {
+        response = await fetch("/api/submissions/defense/docker", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            docker_image: dockerImage,
+            version: modelVersion,
+            display_name: modelName,
+          }),
+        });
+
+      } else {
+        alert("Please fill in the required field for your selected submission type.");
+        return;
+      }
+
+      if (!response.ok) {
+        const error = await response.text();
+        alert(`Submission failed: ${error}`);
+        return;
+      }
+
+      alert("Model submitted successfully!");
+      form.reset();
+
+    } catch (err) {
+      alert(`Network error: ${(err as Error).message}`);
+    }
+  });
+</script>
