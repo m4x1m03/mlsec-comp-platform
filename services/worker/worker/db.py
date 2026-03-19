@@ -526,6 +526,247 @@ def update_attack_file_behavior(
         )
 
 
+def get_active_template() -> dict | None:
+    """
+    Return the currently active attack template row, or None if none exists.
+
+    Returns:
+        dict with id, object_key, sha256, file_count, or None
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT id, object_key, sha256, file_count
+                FROM attack_template
+                WHERE is_active = TRUE
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            """)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": str(row[0]),
+        "object_key": row[1],
+        "sha256": row[2],
+        "file_count": row[3],
+    }
+
+
+def get_template_files(template_id: str) -> list[dict]:
+    """
+    Return all file entries for the given template.
+
+    Returns:
+        List of dicts with filename, object_key, sha256
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT filename, object_key, sha256
+                FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+                ORDER BY filename
+            """),
+            {"tid": template_id},
+        ).fetchall()
+    return [
+        {"filename": row[0], "object_key": row[1], "sha256": row[2]}
+        for row in rows
+    ]
+
+
+def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
+    """
+    Return filename-keyed behavioral reports for the given template.
+
+    Only rows with non-NULL behavioral_signals are included.
+
+    Returns:
+        dict mapping filename to {sha256, sandbox_report_ref, behash, behavioral_signals}
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
+                FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+                  AND behavioral_signals IS NOT NULL
+            """),
+            {"tid": template_id},
+        ).fetchall()
+    return {
+        row[0]: {
+            "sha256": row[1],
+            "sandbox_report_ref": row[2],
+            "behash": row[3],
+            "behavioral_signals": row[4],
+        }
+        for row in rows
+    }
+
+
+def is_template_fully_seeded(template_id: str) -> bool:
+    """
+    Return True when every template_file_reports row for this template has
+    non-NULL behavioral_signals.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        total = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+            """),
+            {"tid": template_id},
+        ).scalar() or 0
+        if total == 0:
+            return False
+        seeded = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+                  AND behavioral_signals IS NOT NULL
+            """),
+            {"tid": template_id},
+        ).scalar() or 0
+    return seeded >= total
+
+
+def get_active_heurval_set() -> dict | None:
+    """
+    Return the currently active heuristic validation sample set, or None.
+
+    Returns:
+        dict with id, malware_count, goodware_count, or None
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT id, malware_count, goodware_count
+                FROM heurval_sample_sets
+                WHERE is_active = TRUE
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            """)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": str(row[0]),
+        "malware_count": row[1],
+        "goodware_count": row[2],
+    }
+
+
+def get_heurval_samples(sample_set_id: str) -> list[dict]:
+    """
+    Return all samples belonging to the given heurval sample set.
+
+    Returns:
+        List of dicts with id, filename, object_key, sha256, is_malware
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT id, filename, object_key, sha256, is_malware
+                FROM heurval_samples
+                WHERE sample_set_id = CAST(:set_id AS uuid)
+                ORDER BY filename
+            """),
+            {"set_id": sample_set_id},
+        ).fetchall()
+    return [
+        {
+            "id": str(row[0]),
+            "filename": row[1],
+            "object_key": row[2],
+            "sha256": row[3],
+            "is_malware": row[4],
+        }
+        for row in rows
+    ]
+
+
+def upsert_heurval_result(
+    defense_submission_id: str,
+    sample_set_id: str,
+    malware_tpr: float | None,
+    malware_fpr: float | None,
+    goodware_tpr: float | None,
+    goodware_fpr: float | None,
+) -> str:
+    """
+    Insert or update a heurval_results row for a (defense, sample_set) pair.
+
+    Returns:
+        The UUID of the heurval_results row as a string
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        row_id = conn.execute(
+            text("""
+                INSERT INTO heurval_results
+                    (defense_submission_id, sample_set_id,
+                     malware_tpr, malware_fpr, goodware_tpr, goodware_fpr,
+                     computed_at)
+                VALUES
+                    (CAST(:def_id AS uuid), CAST(:set_id AS uuid),
+                     :m_tpr, :m_fpr, :g_tpr, :g_fpr,
+                     CURRENT_TIMESTAMP)
+                ON CONFLICT (defense_submission_id, sample_set_id) DO UPDATE
+                    SET malware_tpr  = EXCLUDED.malware_tpr,
+                        malware_fpr  = EXCLUDED.malware_fpr,
+                        goodware_tpr = EXCLUDED.goodware_tpr,
+                        goodware_fpr = EXCLUDED.goodware_fpr,
+                        computed_at  = CURRENT_TIMESTAMP
+                RETURNING id
+            """),
+            {
+                "def_id": defense_submission_id,
+                "set_id": sample_set_id,
+                "m_tpr": malware_tpr,
+                "m_fpr": malware_fpr,
+                "g_tpr": goodware_tpr,
+                "g_fpr": goodware_fpr,
+            },
+        ).scalar()
+    return str(row_id)
+
+
+def insert_heurval_file_result(
+    heurval_result_id: str,
+    sample_id: str,
+    model_output: int | None,
+    evaded_reason: str | None,
+    duration_ms: int | None,
+) -> None:
+    """Insert a per-sample heurval result row."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO heurval_file_results
+                    (heurval_result_id, sample_id, model_output, evaded_reason, duration_ms)
+                VALUES
+                    (CAST(:result_id AS uuid), CAST(:sample_id AS uuid),
+                     :model_output, :evaded_reason, :duration_ms)
+            """),
+            {
+                "result_id": heurval_result_id,
+                "sample_id": sample_id,
+                "model_output": model_output,
+                "evaded_reason": evaded_reason,
+                "duration_ms": duration_ms,
+            },
+        )
+
+
 def insert_attack_files(attack_submission_id: str, files: list[dict]) -> int:
     """
     Bulk insert attack files into attack_files table.

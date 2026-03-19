@@ -169,6 +169,140 @@ def upload_attack_zip(
     }
 
 
+def upload_attack_template(
+    file_content: bytes, template_id: str
+) -> dict[str, str | int]:
+    """
+    Upload attack template ZIP to MinIO.
+
+    Args:
+        file_content: Raw bytes of the ZIP file
+        template_id: UUID string used to form the object key
+
+    Returns:
+        dict with keys: object_key (str), sha256 (str), size_bytes (int)
+    """
+    from io import BytesIO
+
+    client = get_minio_client()
+    bucket_name = get_config().minio.bucket_name
+
+    object_key = f"template/{template_id}.zip"
+    hasher = hashlib.sha256()
+    hasher.update(file_content)
+    sha256_hash = hasher.hexdigest()
+    size_bytes = len(file_content)
+
+    try:
+        logger.info(f"Uploading attack template to MinIO: {object_key} ({size_bytes} bytes)")
+        client.put_object(
+            bucket_name=bucket_name,
+            object_name=object_key,
+            data=BytesIO(file_content),
+            length=size_bytes,
+            content_type="application/zip",
+        )
+        logger.info(f"Successfully uploaded {object_key} (SHA256: {sha256_hash[:16]}...)")
+    except S3Error as e:
+        logger.error(f"Failed to upload {object_key}: {e}")
+        raise
+
+    return {
+        "object_key": object_key,
+        "sha256": sha256_hash,
+        "size_bytes": size_bytes,
+    }
+
+
+def upload_heurval_sample(
+    file_content: bytes, set_id: str, label: str, filename: str
+) -> dict[str, str | int]:
+    """
+    Upload a single heuristic validation sample file to MinIO.
+
+    Args:
+        file_content: Raw bytes of the sample file
+        set_id: UUID string of the sample set
+        label: Either 'malware' or 'goodware'
+        filename: Original filename within the ZIP
+
+    Returns:
+        dict with keys: object_key (str), sha256 (str), size_bytes (int)
+    """
+    from io import BytesIO
+    import os
+
+    client = get_minio_client()
+    bucket_name = get_config().minio.bucket_name
+
+    safe_filename = os.path.basename(filename)
+    object_key = f"heurval/{set_id}/{label}/{safe_filename}"
+    hasher = hashlib.sha256()
+    hasher.update(file_content)
+    sha256_hash = hasher.hexdigest()
+    size_bytes = len(file_content)
+
+    try:
+        client.put_object(
+            bucket_name=bucket_name,
+            object_name=object_key,
+            data=BytesIO(file_content),
+            length=size_bytes,
+        )
+    except S3Error as e:
+        logger.error(f"Failed to upload {object_key}: {e}")
+        raise
+
+    return {
+        "object_key": object_key,
+        "sha256": sha256_hash,
+        "size_bytes": size_bytes,
+    }
+
+
+def upload_heurval_set_zip(
+    file_content: bytes, set_id: str
+) -> dict[str, str | int]:
+    """
+    Upload the raw heurval sample set ZIP to MinIO for archival.
+
+    Args:
+        file_content: Raw bytes of the ZIP
+        set_id: UUID string of the sample set
+
+    Returns:
+        dict with keys: object_key (str), sha256 (str), size_bytes (int)
+    """
+    from io import BytesIO
+
+    client = get_minio_client()
+    bucket_name = get_config().minio.bucket_name
+
+    object_key = f"heurval/{set_id}/samples.zip"
+    hasher = hashlib.sha256()
+    hasher.update(file_content)
+    sha256_hash = hasher.hexdigest()
+    size_bytes = len(file_content)
+
+    try:
+        client.put_object(
+            bucket_name=bucket_name,
+            object_name=object_key,
+            data=BytesIO(file_content),
+            length=size_bytes,
+            content_type="application/zip",
+        )
+    except S3Error as e:
+        logger.error(f"Failed to upload {object_key}: {e}")
+        raise
+
+    return {
+        "object_key": object_key,
+        "sha256": sha256_hash,
+        "size_bytes": size_bytes,
+    }
+
+
 def delete_object(object_key: str) -> None:
     """
     Remove object from MinIO (cleanup on submission deletion).
