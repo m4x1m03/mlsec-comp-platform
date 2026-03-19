@@ -8,7 +8,7 @@ import zipfile
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -28,11 +28,62 @@ from schemas.jobs import JobType
 from schemas.submissions import (
     CreateDefenseDockerRequest,
     CreateDefenseGitHubRequest,
+    SubmissionHistoryResponse,
     SubmissionResponse,
 )
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 logger = logging.getLogger(__name__)
+
+
+def _get_submission_history(
+    *,
+    db: Session,
+    user_id: str,
+    submission_type: str,
+    limit: int,
+    offset: int,
+) -> SubmissionHistoryResponse:
+    base_sql = """
+        FROM submissions s
+        WHERE s.user_id = :user_id
+          AND s.submission_type = :submission_type
+          AND s.deleted_at IS NULL
+    """
+
+    data_sql = f"""
+        SELECT
+            s.id AS submission_id,
+            s.submission_type AS submission_type,
+            s.status AS status,
+            s.version AS version,
+            s.display_name AS display_name,
+            s.created_at AS created_at
+        {base_sql}
+        ORDER BY s.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+
+    count_sql = f"""
+        SELECT COUNT(*)
+        {base_sql}
+    """
+
+    params = {"user_id": user_id, "submission_type": submission_type}
+    rows = db.execute(
+        text(data_sql),
+        {**params, "limit": limit, "offset": offset},
+    ).mappings().fetchall()
+
+    total = db.execute(text(count_sql), params).scalar() or 0
+    items = [dict(row) for row in rows]
+
+    return SubmissionHistoryResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(
@@ -325,6 +376,46 @@ async def create_defense_zip(
         display_name=display_name,
         created_at=created_at.isoformat() if created_at else datetime.utcnow().isoformat(),
         job_id=str(job_id),
+    )
+
+
+@router.get(
+    "/defense/history",
+    response_model=SubmissionHistoryResponse,
+)
+def defense_submission_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionHistoryResponse:
+    """Return the authenticated user's defense submission history."""
+    return _get_submission_history(
+        db=db,
+        user_id=str(current_user.user_id),
+        submission_type="defense",
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/attack/history",
+    response_model=SubmissionHistoryResponse,
+)
+def attack_submission_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionHistoryResponse:
+    """Return the authenticated user's attack submission history."""
+    return _get_submission_history(
+        db=db,
+        user_id=str(current_user.user_id),
+        submission_type="attack",
+        limit=limit,
+        offset=offset,
     )
 
 

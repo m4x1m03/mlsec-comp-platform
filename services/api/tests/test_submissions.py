@@ -37,16 +37,22 @@ class _FakeCelery:
         return _FakeAsyncResult("test-task-id")
 
 
-def _create_user(db_session) -> str:
+def _create_user(
+    db_session,
+    *,
+    username: str = "test_submission_user",
+    email: str = "test_submission@email.com",
+) -> str:
     """Create test user and return user_id."""
     row = db_session.execute(
         text(
             """
             INSERT INTO users (username, email, is_admin)
-            VALUES ('test_submission_user', 'test_submission@email.com', false)
+            VALUES (:username, :email, false)
             RETURNING id
             """
-        )
+        ),
+        {"username": username, "email": email},
     ).fetchone()
     assert row is not None
     return str(row[0])
@@ -559,3 +565,276 @@ class TestValidationHelpers:
         with pytest.raises(HTTPException) as exc:
             validate_docker_image_format("-invalid")
         assert exc.value.status_code == 400
+
+
+# ============================================================================
+# Submission History Tests
+# ============================================================================
+
+
+class TestDefenseSubmissionHistory:
+    """Test defense submission history endpoint."""
+
+    def test_history_requires_auth(self, client):
+        response = client.get("/api/submissions/defense/history")
+        assert response.status_code == 401
+
+    def test_history_returns_only_user_defense(self, client, db_session):
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        other_user_id = _create_user(
+            db_session,
+            username="other_submission_user",
+            email="other_submission@email.com",
+        )
+
+        now = datetime.now(timezone.utc)
+        older = now - timedelta(hours=1)
+
+        defense_new = str(uuid4())
+        defense_old = str(uuid4())
+        defense_deleted = str(uuid4())
+        attack_submission = str(uuid4())
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": defense_old,
+                "user_id": user_id,
+                "submission_type": "defense",
+                "version": "1.0.0",
+                "display_name": "Old Defense",
+                "status": "submitted",
+                "created_at": older,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": defense_new,
+                "user_id": user_id,
+                "submission_type": "defense",
+                "version": "1.1.0",
+                "display_name": "New Defense",
+                "status": "ready",
+                "created_at": now,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at, deleted_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at, :deleted_at)
+                """
+            ),
+            {
+                "id": defense_deleted,
+                "user_id": user_id,
+                "submission_type": "defense",
+                "version": "9.9.9",
+                "display_name": "Deleted Defense",
+                "status": "failed",
+                "created_at": now,
+                "deleted_at": now,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": attack_submission,
+                "user_id": user_id,
+                "submission_type": "attack",
+                "version": "0.0.1",
+                "display_name": "Attack",
+                "status": "submitted",
+                "created_at": now,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "user_id": other_user_id,
+                "submission_type": "defense",
+                "version": "2.0.0",
+                "display_name": "Other Defense",
+                "status": "submitted",
+                "created_at": now,
+            },
+        )
+
+        response = client.get(
+            "/api/submissions/defense/history",
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 2
+        assert payload["limit"] == 50
+        assert payload["offset"] == 0
+
+        items = payload["items"]
+        assert len(items) == 2
+        assert items[0]["submission_id"] == defense_new
+        assert items[1]["submission_id"] == defense_old
+        assert all(item["submission_type"] == "defense" for item in items)
+
+
+class TestAttackSubmissionHistory:
+    """Test attack submission history endpoint."""
+
+    def test_history_requires_auth(self, client):
+        response = client.get("/api/submissions/attack/history")
+        assert response.status_code == 401
+
+    def test_history_returns_only_user_attack(self, client, db_session):
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        other_user_id = _create_user(
+            db_session,
+            username="other_attack_user",
+            email="other_attack@email.com",
+        )
+
+        now = datetime.now(timezone.utc)
+        older = now - timedelta(hours=2)
+
+        attack_new = str(uuid4())
+        attack_old = str(uuid4())
+        attack_deleted = str(uuid4())
+        defense_submission = str(uuid4())
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": attack_old,
+                "user_id": user_id,
+                "submission_type": "attack",
+                "version": "0.1.0",
+                "display_name": "Old Attack",
+                "status": "submitted",
+                "created_at": older,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": attack_new,
+                "user_id": user_id,
+                "submission_type": "attack",
+                "version": "0.2.0",
+                "display_name": "New Attack",
+                "status": "ready",
+                "created_at": now,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at, deleted_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at, :deleted_at)
+                """
+            ),
+            {
+                "id": attack_deleted,
+                "user_id": user_id,
+                "submission_type": "attack",
+                "version": "9.9.9",
+                "display_name": "Deleted Attack",
+                "status": "failed",
+                "created_at": now,
+                "deleted_at": now,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": defense_submission,
+                "user_id": user_id,
+                "submission_type": "defense",
+                "version": "1.0.0",
+                "display_name": "Defense",
+                "status": "submitted",
+                "created_at": now,
+            },
+        )
+
+        db_session.execute(
+            text(
+                """
+                INSERT INTO submissions (id, user_id, submission_type, version, display_name, status, created_at)
+                VALUES (:id, :user_id, :submission_type, :version, :display_name, :status, :created_at)
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "user_id": other_user_id,
+                "submission_type": "attack",
+                "version": "3.0.0",
+                "display_name": "Other Attack",
+                "status": "submitted",
+                "created_at": now,
+            },
+        )
+
+        response = client.get(
+            "/api/submissions/attack/history",
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 2
+        assert payload["limit"] == 50
+        assert payload["offset"] == 0
+
+        items = payload["items"]
+        assert len(items) == 2
+        assert items[0]["submission_id"] == attack_new
+        assert items[1]["submission_id"] == attack_old
+        assert all(item["submission_type"] == "attack" for item in items)

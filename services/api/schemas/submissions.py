@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -67,3 +70,23 @@ class SubmissionDetailsResponse(BaseModel):
     user_id: str
     # Nested details added dynamically based on type
     details: dict
+
+
+class SubmissionHistoryItem(BaseModel):
+    """History item for a user's submissions."""
+
+    submission_id: UUID
+    submission_type: str
+    status: str
+    version: str
+    display_name: str | None
+    created_at: datetime
+
+
+class SubmissionHistoryResponse(BaseModel):
+    """Paginated submission history response."""
+
+    items: list[SubmissionHistoryItem]
+    total: int
+    limit: int
+    offset: int
