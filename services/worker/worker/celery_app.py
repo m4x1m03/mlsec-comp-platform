@@ -58,7 +58,7 @@ def on_worker_ready(**_) -> None:  # type: ignore[no-untyped-def]
 
     # Prune orphaned evaluation networks
     try:
-        from worker.prune_networks import prune_orphans
+        from worker.prune_orphans import prune_orphans
         prune_orphans()
     except Exception:
         logger.exception("Orphaned network pruning failed on worker startup.")
