@@ -180,28 +180,28 @@ def test_get_open_workers_for_defense(fake_redis, monkeypatch):
     # Worker 1: Target defense, OPEN
     fake_redis.sadd("workers:active", "worker-1")
     fake_redis.hset("worker:worker-1:metadata", mapping={
-        "defense_submission_id": target_defense,
+        "defense_submission_ids": target_defense,
         "queue_state": "OPEN"
     })
 
     # Worker 2: Target defense, CLOSED
     fake_redis.sadd("workers:active", "worker-2")
     fake_redis.hset("worker:worker-2:metadata", mapping={
-        "defense_submission_id": target_defense,
+        "defense_submission_ids": target_defense,
         "queue_state": "CLOSED"
     })
 
     # Worker 3: Other defense, OPEN
     fake_redis.sadd("workers:active", "worker-3")
     fake_redis.hset("worker:worker-3:metadata", mapping={
-        "defense_submission_id": other_defense,
+        "defense_submission_ids": other_defense,
         "queue_state": "OPEN"
     })
 
     # Worker 4: Target defense, OPEN
     fake_redis.sadd("workers:active", "worker-4")
     fake_redis.hset("worker:worker-4:metadata", mapping={
-        "defense_submission_id": target_defense,
+        "defense_submission_ids": target_defense,
         "queue_state": "OPEN"
     })
 

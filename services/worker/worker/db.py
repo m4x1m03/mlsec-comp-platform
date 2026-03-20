@@ -488,7 +488,11 @@ def upsert_template_report(
     behavioral_signals: dict | None,
 ) -> None:
     """
-    Insert or update a template file report.
+    Update behavioral data on an existing template file report row.
+
+    Rows are created during template upload. This function only updates
+    sandbox_report_ref, behash, and behavioral_signals on a row that
+    already exists for the given (template_id, filename) pair.
 
     Args:
         template_id: UUID of the attack_template row this report belongs to
@@ -504,15 +508,14 @@ def upsert_template_report(
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO template_file_reports
-                    (template_id, filename, sha256, sandbox_report_ref, behash, behavioral_signals)
-                VALUES (CAST(:template_id AS uuid), :filename, :sha256, :report_ref, :behash, CAST(:signals AS jsonb))
-                ON CONFLICT (template_id, filename) DO UPDATE
-                    SET sha256              = EXCLUDED.sha256,
-                        sandbox_report_ref  = EXCLUDED.sandbox_report_ref,
-                        behash              = EXCLUDED.behash,
-                        behavioral_signals  = EXCLUDED.behavioral_signals,
-                        evaluated_at        = CURRENT_TIMESTAMP
+                UPDATE template_file_reports
+                SET sha256             = :sha256,
+                    sandbox_report_ref = :report_ref,
+                    behash             = :behash,
+                    behavioral_signals = CAST(:signals AS jsonb),
+                    evaluated_at       = CURRENT_TIMESTAMP
+                WHERE template_id = CAST(:template_id AS uuid)
+                  AND filename    = :filename
             """),
             {
                 "template_id": template_id,

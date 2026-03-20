@@ -125,12 +125,22 @@ def test_get_template_reports_returns_all(db_session):
 
 def test_get_template_reports_dict_keys(db_session):
     """Each row has exactly the expected keys."""
+    template_id = db_session.execute(
+        text("""
+            INSERT INTO attack_template (object_key, sha256, file_count)
+            VALUES ('templates/test.zip', :sha, 1)
+            RETURNING id
+        """),
+        {"sha": "0" * 64},
+    ).scalar()
+    db_session.commit()
+
     db_session.execute(
         text("""
-            INSERT INTO template_file_reports (filename, sha256)
-            VALUES ('sample', :sha)
+            INSERT INTO template_file_reports (template_id, filename, object_key, sha256)
+            VALUES (CAST(:tid AS uuid), 'sample', 'templates/test/sample', :sha)
         """),
-        {"sha": "c" * 64},
+        {"tid": str(template_id), "sha": "c" * 64},
     )
     db_session.commit()
 
@@ -147,8 +157,25 @@ def test_get_template_reports_dict_keys(db_session):
 # ---------------------------------------------------------------------------
 
 def test_upsert_template_report_inserts_new_row(db_session):
-    """upsert_template_report inserts when filename does not exist."""
+    """upsert_template_report updates behavioral fields on an existing row."""
+    template_id = db_session.execute(
+        text("""
+            INSERT INTO attack_template (object_key, sha256, file_count)
+            VALUES ('templates/t1.zip', :sha, 1) RETURNING id
+        """),
+        {"sha": "d" * 64},
+    ).scalar()
+    db_session.execute(
+        text("""
+            INSERT INTO template_file_reports (template_id, filename, object_key, sha256)
+            VALUES (CAST(:tid AS uuid), '1', 'templates/t1/1', :sha)
+        """),
+        {"tid": str(template_id), "sha": "d" * 64},
+    )
+    db_session.commit()
+
     upsert_template_report(
+        template_id=str(template_id),
         filename="1",
         sha256="d" * 64,
         sandbox_report_ref="vt-001",
@@ -173,7 +200,24 @@ def test_upsert_template_report_inserts_new_row(db_session):
 
 def test_upsert_template_report_updates_existing_row(db_session):
     """upsert_template_report updates all fields when filename already exists."""
+    template_id = db_session.execute(
+        text("""
+            INSERT INTO attack_template (object_key, sha256, file_count)
+            VALUES ('templates/t2.zip', :sha, 1) RETURNING id
+        """),
+        {"sha": "e" * 64},
+    ).scalar()
+    db_session.execute(
+        text("""
+            INSERT INTO template_file_reports (template_id, filename, object_key, sha256)
+            VALUES (CAST(:tid AS uuid), '2', 'templates/t2/2', :sha)
+        """),
+        {"tid": str(template_id), "sha": "e" * 64},
+    )
+    db_session.commit()
+
     upsert_template_report(
+        template_id=str(template_id),
         filename="2",
         sha256="e" * 64,
         sandbox_report_ref="vt-old",
@@ -182,6 +226,7 @@ def test_upsert_template_report_updates_existing_row(db_session):
     )
 
     upsert_template_report(
+        template_id=str(template_id),
         filename="2",
         sha256="f" * 64,
         sandbox_report_ref="vt-new",
@@ -208,7 +253,24 @@ def test_upsert_template_report_updates_existing_row(db_session):
 
 def test_upsert_template_report_allows_null_fields(db_session):
     """upsert_template_report accepts None for all optional fields."""
+    template_id = db_session.execute(
+        text("""
+            INSERT INTO attack_template (object_key, sha256, file_count)
+            VALUES ('templates/t3.zip', :sha, 1) RETURNING id
+        """),
+        {"sha": "a" * 64},
+    ).scalar()
+    db_session.execute(
+        text("""
+            INSERT INTO template_file_reports (template_id, filename, object_key, sha256)
+            VALUES (CAST(:tid AS uuid), 'pending', 'templates/t3/pending', :sha)
+        """),
+        {"tid": str(template_id), "sha": "0" * 64},
+    )
+    db_session.commit()
+
     upsert_template_report(
+        template_id=str(template_id),
         filename="pending",
         sha256="0" * 64,
         sandbox_report_ref=None,
@@ -231,7 +293,24 @@ def test_upsert_template_report_allows_null_fields(db_session):
 
 def test_upsert_template_report_can_fill_nulls_on_update(db_session):
     """A row inserted with nulls can later be updated with real values."""
+    template_id = db_session.execute(
+        text("""
+            INSERT INTO attack_template (object_key, sha256, file_count)
+            VALUES ('templates/t4.zip', :sha, 1) RETURNING id
+        """),
+        {"sha": "b" * 64},
+    ).scalar()
+    db_session.execute(
+        text("""
+            INSERT INTO template_file_reports (template_id, filename, object_key, sha256)
+            VALUES (CAST(:tid AS uuid), 'later', 'templates/t4/later', :sha)
+        """),
+        {"tid": str(template_id), "sha": "1" * 64},
+    )
+    db_session.commit()
+
     upsert_template_report(
+        template_id=str(template_id),
         filename="later",
         sha256="1" * 64,
         sandbox_report_ref=None,
@@ -240,6 +319,7 @@ def test_upsert_template_report_can_fill_nulls_on_update(db_session):
     )
 
     upsert_template_report(
+        template_id=str(template_id),
         filename="later",
         sha256="1" * 64,
         sandbox_report_ref="vt-filled",
