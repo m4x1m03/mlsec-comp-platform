@@ -35,6 +35,7 @@ from worker.db import (
     get_active_template,
     get_template_files,
     get_template_reports_for_template,
+    is_template_fully_seeded,
     mark_attack_failed,
 )
 from worker.redis_client import WorkerRegistry
@@ -44,6 +45,7 @@ from worker.attack.validation import (
     AttackValidationError,
     validate_functional as validate_attack_functional,
     validate_heuristic,
+    ensure_template_seeded,
     _inner_filename,
 )
 from worker.attack.sandbox import get_sandbox_backend
@@ -402,7 +404,35 @@ def run_defense_job(
     return run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_submission_id])
 
 @celery_app.task(
-    name="worker.tasks.run_attack_job", 
+    name="worker.tasks.seed_attack_template",
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    max_retries=3,
+    retry_jitter=True,
+)
+def seed_attack_template(self, *, template_id: str) -> None:
+    """Submit all template files for a given template to the sandbox for seeding.
+
+    Downloads the template ZIP from MinIO, extracts individual files, and
+    calls ensure_template_seeded.  Already-seeded files are skipped.
+    """
+    logger.info("Starting behavioral seeding for template %s", template_id)
+    template_files = get_template_files(template_id)
+    if not template_files:
+        logger.warning(
+            "Template %s has no file records; nothing to seed.", template_id
+        )
+        return
+
+    attack_cfg = config.worker.attack
+    sandbox = get_sandbox_backend(attack_cfg)
+    ensure_template_seeded(template_id, template_files, sandbox)
+    logger.info("Seeding complete for template %s", template_id)
+
+
+@celery_app.task(
+    name="worker.tasks.run_attack_job",
     bind=True,
     autoretry_for=(Exception,),
     retry_backoff=True,
@@ -461,6 +491,18 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
             # Functional validation (ZIP structure, password, safety)
             attack_cfg = config.worker.attack
             active_template = get_active_template()
+
+            # Defer job if behavioral seeding is still in progress
+            if (
+                active_template is not None
+                and attack_cfg.check_similarity
+                and not is_template_fully_seeded(active_template["id"])
+            ):
+                logger.info(
+                    "Template seeding in progress, deferring attack job %s", job_id
+                )
+                raise self.retry(countdown=60)
+
             if active_template is None:
                 if attack_cfg.check_similarity:
                     error_msg = "No attack template is configured."

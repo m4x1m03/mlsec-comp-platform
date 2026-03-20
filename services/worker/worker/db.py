@@ -459,6 +459,7 @@ def get_template_reports() -> list[dict]:
 
 
 def upsert_template_report(
+    template_id: str,
     filename: str,
     sha256: str,
     sandbox_report_ref: str | None,
@@ -469,6 +470,7 @@ def upsert_template_report(
     Insert or update a template file report.
 
     Args:
+        template_id: UUID of the attack_template row this report belongs to
         filename: Relative path within the attack template
         sha256: SHA-256 hex digest of the file
         sandbox_report_ref: Backend-specific analysis ID (e.g. VT analysis ID)
@@ -481,9 +483,9 @@ def upsert_template_report(
         conn.execute(
             text("""
                 INSERT INTO template_file_reports
-                    (filename, sha256, sandbox_report_ref, behash, behavioral_signals)
-                VALUES (:filename, :sha256, :report_ref, :behash, CAST(:signals AS jsonb))
-                ON CONFLICT (filename) DO UPDATE
+                    (template_id, filename, sha256, sandbox_report_ref, behash, behavioral_signals)
+                VALUES (CAST(:template_id AS uuid), :filename, :sha256, :report_ref, :behash, CAST(:signals AS jsonb))
+                ON CONFLICT (template_id, filename) DO UPDATE
                     SET sha256              = EXCLUDED.sha256,
                         sandbox_report_ref  = EXCLUDED.sandbox_report_ref,
                         behash              = EXCLUDED.behash,
@@ -491,6 +493,7 @@ def upsert_template_report(
                         evaluated_at        = CURRENT_TIMESTAMP
             """),
             {
+                "template_id": template_id,
                 "filename": filename,
                 "sha256": sha256,
                 "report_ref": sandbox_report_ref,

@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth import AuthenticatedUser, get_authenticated_user
+from core.celery_app import get_celery
 from core.database import get_db
 from core.storage import upload_attack_template, upload_heurval_sample, upload_heurval_set_zip
 
@@ -94,6 +95,19 @@ def upload_template(
         )
 
     db.commit()
+
+    try:
+        celery = get_celery()
+        celery.send_task(
+            "worker.tasks.seed_attack_template",
+            kwargs={"template_id": template_id},
+        )
+        logger.info("Published seed_attack_template task for template %s", template_id)
+    except Exception:
+        logger.warning(
+            "Failed to publish seeding task for template %s; seeding will not run automatically.",
+            template_id,
+        )
 
     logger.info(f"Attack template uploaded: id={template_id}, files={len(relative_paths)}")
     return {

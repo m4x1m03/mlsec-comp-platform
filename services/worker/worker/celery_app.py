@@ -34,29 +34,7 @@ celery_app.autodiscover_tasks(["worker"])
 
 @worker_ready.connect
 def on_worker_ready(**_) -> None:  # type: ignore[no-untyped-def]
-    """Seed template behavioral reports on worker startup.
-
-    Runs :func:`~worker.attack.heuristic.ensure_template_seeded` so that
-    heuristic validation has pre-computed template reports available when
-    attack jobs arrive.  Errors are logged but do not prevent the worker
-    from accepting jobs (functional validation still works without them).
-    """
-    try:
-        from worker.attack.validation import ensure_template_seeded
-        from worker.attack.sandbox import get_sandbox_backend
-        from worker.config import get_config
-
-        cfg = get_config()
-        attack_cfg = cfg.worker.attack
-        if attack_cfg.template_path:
-            sandbox = get_sandbox_backend(attack_cfg)
-            ensure_template_seeded(attack_cfg.template_path, sandbox)
-    except Exception:
-        logger.exception(
-            "Template seeding failed on worker startup — heuristic validation "
-            "may be unavailable until the worker is restarted."
-        )
-
+    """Run startup tasks when the worker process is ready."""
     # Prune orphaned evaluation networks
     try:
         from worker.prune_orphans import prune_orphans
