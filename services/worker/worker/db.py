@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-from sqlalchemy import create_engine, text  # type: ignore
-from sqlalchemy.engine import Engine
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
+    from sqlalchemy import create_engine
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")
@@ -16,6 +18,7 @@ def get_engine() -> Engine:
 
 
 def set_job_status(*, job_id: str, status: str, error: str | None = None) -> None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         if error is None:
@@ -47,6 +50,7 @@ def set_job_status(*, job_id: str, status: str, error: str | None = None) -> Non
 
 
 def get_defense_docker_image(*, submission_id: str) -> str | None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         # Assuming for now that docker_image is a text field with a dockerhub link
@@ -64,6 +68,7 @@ def get_defense_docker_image(*, submission_id: str) -> str | None:
 
 
 def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: str) -> str:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         result = conn.execute(
@@ -80,6 +85,7 @@ def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: s
 
 
 def set_evaluation_run_status(evaluation_run_id: str, status: str) -> None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -104,6 +110,7 @@ def upsert_evaluation(
     duration_ms: int | None = None,
     evaded_reason: str | None = None,
 ) -> None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -140,6 +147,7 @@ def get_defense_submission_source(submission_id: str) -> tuple[str, dict]:
     Raises:
         ValueError: If submission not found or invalid source_type
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -187,6 +195,7 @@ def get_all_validated_defenses() -> list[str]:
     Returns:
         List of defense submission IDs (UUIDs as strings)
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -212,6 +221,7 @@ def get_unevaluated_attacks(defense_submission_id: str) -> list[str]:
     Returns:
         List of attack submission IDs (UUIDs as strings)
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -242,6 +252,7 @@ def check_if_needs_validation(defense_submission_id: str) -> bool:
     Returns:
         True if is_functional is NULL (not yet validated), False otherwise
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -261,6 +272,7 @@ def mark_defense_validated(defense_submission_id: str) -> None:
     Args:
         defense_submission_id: Defense submission UUID
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -282,6 +294,7 @@ def mark_defense_failed(defense_submission_id: str, error: str) -> None:
         defense_submission_id: Defense submission UUID
         error: Error message describing validation failure
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -307,6 +320,7 @@ def get_attack_files(attack_submission_id: str) -> list[dict]:
     Returns:
         List of dicts with id, object_key, filename, sha256, is_malware
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -341,6 +355,7 @@ def is_evaluation_in_progress(defense_id: str, attack_id: str) -> bool:
     Returns:
         True if evaluation is queued or running, False otherwise
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -362,6 +377,7 @@ def mark_attack_validated(attack_submission_id: str) -> None:
     Args:
         attack_submission_id: Attack submission UUID
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -387,6 +403,7 @@ def get_attack_submission_source(attack_submission_id: str) -> dict:
     Raises:
         ValueError: If submission not found or missing data
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -417,6 +434,7 @@ def mark_attack_failed(attack_submission_id: str, error: str) -> None:
         attack_submission_id: Attack submission UUID
         error: Human-readable error message
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -439,6 +457,7 @@ def get_template_reports() -> list[dict]:
         List of dicts with keys: filename, sha256, sandbox_report_ref, behash,
         behavioral_signals
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -480,6 +499,7 @@ def upsert_template_report(
         behavioral_signals: Extracted behavioral indicators dict, or None
     """
     import json
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -518,6 +538,7 @@ def update_attack_file_behavior(
         behavior_status: One of 'unknown', 'same', 'different', 'error'
         report_ref: JSON string with TLSH hash and similarity score (may be None)
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -791,6 +812,7 @@ def insert_attack_files(attack_submission_id: str, files: list[dict]) -> int:
     if not files:
         return 0
 
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         for file_info in files:

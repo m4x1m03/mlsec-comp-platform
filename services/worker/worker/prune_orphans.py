@@ -1,6 +1,4 @@
-import docker
 import logging
-from sqlalchemy import text
 from worker.db import get_engine
 
 logger = logging.getLogger(__name__)
@@ -8,6 +6,8 @@ logger = logging.getLogger(__name__)
 def prune_orphans():
     """Find and remove any orphaned evaluation resources (networks, containers, and gateway rules)."""
     try:
+        import docker
+        from sqlalchemy import text
         client = docker.from_env()
         engine = get_engine()
         

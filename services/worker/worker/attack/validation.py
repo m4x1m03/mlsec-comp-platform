@@ -25,7 +25,6 @@ from __future__ import annotations
 import hashlib
 import zipfile
 
-import pyzipper
 from pathlib import Path, PurePosixPath
 
 import logging
@@ -140,6 +139,7 @@ def validate_zip_password(zip_path: str) -> None:
         AttackValidationError: If the password is wrong or extraction fails.
     """
     try:
+        import pyzipper
         with pyzipper.AESZipFile(zip_path, "r") as zf:
             zf.setpassword(b"infected")
             for entry in zf.infolist():
