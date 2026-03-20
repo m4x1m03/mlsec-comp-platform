@@ -8,7 +8,7 @@ are outright rejections via :exc:`AttackValidationError`.
 
 **Heuristic validation** submits the extracted files to a behavioral sandbox
 and compares the resulting execution profile against the stored template
-profiles.  A similarity score (0–100) is returned; whether a low score
+profiles.  A similarity score (0-100) is returned; whether a low score
 causes rejection is controlled by config flags in the caller.
 
 Public API
@@ -31,7 +31,7 @@ from pathlib import Path, PurePosixPath
 import logging
 
 from .sandbox.base import SandboxBackend, SandboxReport
-from worker.db import get_template_reports, upsert_template_report
+from worker.db import upsert_template_report
 
 logger = logging.getLogger(__name__)
 
@@ -47,26 +47,6 @@ class AttackValidationError(Exception):
 # ===========================================================================
 # Shared internal helpers
 # ===========================================================================
-
-def _get_template_inner_structure(template_dir: str) -> set[str]:
-    """Return the set of inner file paths that a submission must contain.
-
-    Walks *template_dir*, strips the single top-level folder, and returns
-    the remaining relative paths the paths a competitor's ZIP must
-    reproduce (after stripping its own common prefix).
-    """
-    root = Path(template_dir)
-    inner: set[str] = set()
-    for file_path in root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        rel = file_path.relative_to(root)
-        parts = rel.parts
-        if len(parts) > 1:
-            inner.add("/".join(parts[1:]))
-        else:
-            inner.add(parts[0])
-    return inner
 
 
 def _strip_common_prefix(paths: list[str]) -> set[str]:
@@ -216,27 +196,25 @@ def validate_zip_safety(zip_path: str, max_uncompressed_mb: int) -> None:
         )
 
 
-def validate_zip_structure(zip_path: str, template_dir: str) -> None:
+def validate_zip_structure(zip_path: str, expected_files: set[str]) -> None:
     """Verify that the ZIP's file structure matches the attack template.
 
     Algorithm:
 
-    1. Build the *template inner structure* (paths relative to the template's
-       own top-level directory).
+    1. Receive *expected_files*, the set of inner filenames from the active template.
     2. Collect all file entries from the ZIP (directories excluded).
     3. Strip the longest common path prefix shared by all entries.
-    4. Compare the stripped set to the template inner structure.
+    4. Compare the stripped set to *expected_files*.
 
     This allows one arbitrary wrapping folder at any depth, as long as all
     files share that prefix.
 
     Raises:
-        AttackValidationError: If the structure does not match.
+        AttackValidationError: If the structure does not match or expected_files is empty.
     """
-    template_inner = _get_template_inner_structure(template_dir)
-    if not template_inner:
+    if not expected_files:
         raise AttackValidationError(
-            f"Template directory '{template_dir}' is empty or contains no files."
+            "No attack template is configured. Cannot validate ZIP structure."
         )
 
     try:
@@ -252,9 +230,9 @@ def validate_zip_structure(zip_path: str, template_dir: str) -> None:
 
     stripped = _strip_common_prefix(submission_files)
 
-    if stripped != template_inner:
-        missing = sorted(template_inner - stripped)
-        extra = sorted(stripped - template_inner)
+    if stripped != expected_files:
+        missing = sorted(expected_files - stripped)
+        extra = sorted(stripped - expected_files)
         parts: list[str] = []
         if missing:
             parts.append(f"missing: {missing[:5]}" + (" …" if len(missing) > 5 else ""))
@@ -269,16 +247,18 @@ def validate_zip_structure(zip_path: str, template_dir: str) -> None:
 
 def validate_functional(
     zip_path: str,
-    template_dir: str,
+    expected_files: set[str],
     max_uncompressed_mb: int,
 ) -> None:
     """Run all functional validation checks in order, failing fast.
 
-    Order: openable → password → safety → structure.
+    Order: openable -> password -> safety -> structure.
 
     Args:
         zip_path: Path to the downloaded attack ZIP.
-        template_dir: Path to the attack-template directory on disk.
+        expected_files: Set of inner filenames the ZIP must contain,
+            derived from the active attack template in the database.
+            An empty set causes the structure check to raise immediately.
         max_uncompressed_mb: Maximum allowed total uncompressed size.
 
     Raises:
@@ -287,7 +267,7 @@ def validate_functional(
     validate_zip_openable(zip_path)
     validate_zip_password(zip_path)
     validate_zip_safety(zip_path, max_uncompressed_mb)
-    validate_zip_structure(zip_path, template_dir)
+    validate_zip_structure(zip_path, expected_files)
 
 
 # ===========================================================================
@@ -454,7 +434,7 @@ def validate_heuristic(
 
 def validate_attack(
     zip_path: str,
-    template_dir: str,
+    expected_files: set[str],
     max_uncompressed_mb: int,
     submission_files: list[tuple[str, str]],
     sandbox: SandboxBackend,
@@ -468,7 +448,8 @@ def validate_attack(
 
     Args:
         zip_path: Path to the downloaded attack ZIP.
-        template_dir: Path to the attack-template directory on disk.
+        expected_files: Set of inner filenames the ZIP must contain,
+            derived from the active attack template in the database.
         max_uncompressed_mb: Maximum allowed total uncompressed size.
         submission_files: List of ``(inner_filename, local_path)`` tuples for
             the extracted submission files.
@@ -477,12 +458,12 @@ def validate_attack(
             inner filename.
 
     Returns:
-        Average behavioral similarity score (0.0–100.0).
+        Average behavioral similarity score (0.0-100.0).
 
     Raises:
         AttackValidationError: If functional validation fails.
         SandboxUnavailableError: If the sandbox backend fails during heuristic
             validation.
     """
-    validate_functional(zip_path, template_dir, max_uncompressed_mb)
+    validate_functional(zip_path, expected_files, max_uncompressed_mb)
     return validate_heuristic(submission_files, sandbox, template_reports)

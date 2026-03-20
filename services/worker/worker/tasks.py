@@ -32,7 +32,9 @@ from worker.db import (
     mark_attack_validated,
     get_attack_submission_source,
     insert_attack_files,
-    get_template_reports,
+    get_active_template,
+    get_template_files,
+    get_template_reports_for_template,
     mark_attack_failed,
 )
 from worker.redis_client import WorkerRegistry
@@ -458,10 +460,25 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
             # Functional validation (ZIP structure, password, safety)
             attack_cfg = config.worker.attack
+            active_template = get_active_template()
+            if active_template is None:
+                if attack_cfg.check_similarity:
+                    error_msg = "No attack template is configured."
+                    logger.warning(
+                        "Attack %s rejected: %s", attack_submission_id, error_msg
+                    )
+                    mark_attack_failed(attack_submission_id, error_msg)
+                    set_job_status(job_id=job_id, status="failed", error=error_msg)
+                    return
+                expected_files: set[str] = set()
+            else:
+                template_file_rows = get_template_files(active_template["id"])
+                expected_files = {f["filename"] for f in template_file_rows}
+
             try:
                 validate_attack_functional(
                     temp_zip.name,
-                    attack_cfg.template_path,
+                    expected_files,
                     attack_cfg.max_zip_size_mb,
                 )
             except AttackValidationError as e:
@@ -536,17 +553,19 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
             # Heuristic validation (behavioral similarity against template)
             if attack_cfg.check_similarity:
-                template_reports_list = get_template_reports()
-                if not template_reports_list:
+                if active_template is None:
+                    template_reports = {}
+                else:
+                    template_reports = get_template_reports_for_template(
+                        active_template["id"]
+                    )
+                if not template_reports:
                     logger.warning(
-                        "No template reports available — skipping heuristic "
+                        "No template reports available, skipping heuristic "
                         "validation for attack %s.",
                         attack_submission_id,
                     )
                 else:
-                    template_reports = {
-                        r["filename"]: r for r in template_reports_list
-                    }
                     sandbox = get_sandbox_backend(attack_cfg)
                     try:
                         avg_similarity = validate_heuristic(
