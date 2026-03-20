@@ -559,6 +559,7 @@ def get_active_template() -> dict | None:
     Returns:
         dict with id, object_key, sha256, file_count, or None
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         row = conn.execute(
@@ -587,6 +588,7 @@ def get_template_files(template_id: str) -> list[dict]:
     Returns:
         List of dicts with filename, object_key, sha256
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -613,6 +615,7 @@ def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
     Returns:
         dict mapping filename to {sha256, sandbox_report_ref, behash, behavioral_signals}
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -640,6 +643,7 @@ def is_template_fully_seeded(template_id: str) -> bool:
     Return True when every template_file_reports row for this template has
     non-NULL behavioral_signals.
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         total = conn.execute(
@@ -669,6 +673,7 @@ def get_active_heurval_set() -> dict | None:
     Returns:
         dict with id, malware_count, goodware_count, or None
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         row = conn.execute(
@@ -696,6 +701,7 @@ def get_heurval_samples(sample_set_id: str) -> list[dict]:
     Returns:
         List of dicts with id, filename, object_key, sha256, is_malware
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -733,6 +739,7 @@ def upsert_heurval_result(
     Returns:
         The UUID of the heurval_results row as a string
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         row_id = conn.execute(
@@ -773,6 +780,7 @@ def insert_heurval_file_result(
     duration_ms: int | None,
 ) -> None:
     """Insert a per-sample heurval result row."""
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
