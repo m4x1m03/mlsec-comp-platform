@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import Mock, MagicMock
-from io import BytesIO
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from worker.defense.evaluate import evaluate_defense_with_redis
+import pytest
+
+from worker.defense.evaluate import (
+    ContainerRestartError,
+    EvalOutcome,
+    evaluate_defense_with_redis,
+    evaluate_defenses_async,
+)
+from worker.config import EvaluationConfig
 
 
 def make_pop_attack_sequence(*attacks):
@@ -659,3 +666,217 @@ def test_evaluate_handles_invalid_response(db_session, fake_redis, test_helpers,
 
     assert result[0] is None
     assert "Invalid prediction" in result[1]
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: evaded_reason stored in evaluation_file_results
+# ---------------------------------------------------------------------------
+
+def test_time_limit_evaded_reason_stored_in_db(
+    db_session, fake_redis, test_helpers, monkeypatch, config_dict, tmp_path
+):
+    """When evaluate_sample_against_container returns evaded_reason='time_limit',
+    that value is stored in evaluation_file_results."""
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    defense_id = test_helpers.create_defense(
+        source_type="docker", docker_image="user/def:latest"
+    )
+    attack_id = test_helpers.create_attack(file_count=1)
+
+    worker_id = "test_worker_evade"
+    registry = WorkerRegistry()
+    registry.register(worker_id, [defense_id], "job_1")
+    registry.add_attack_to_queue(worker_id, attack_id)
+
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id),
+    )
+
+    fake_sample = tmp_path / "sample.exe"
+    fake_sample.write_bytes(b"MZ" + b"\x00" * 64)
+    monkeypatch.setattr(
+        "worker.defense.evaluate.get_sample_path", lambda key: str(fake_sample)
+    )
+
+    eval_cfg = EvaluationConfig(
+        defense_max_time=5000,
+        defense_max_timeout=20000,
+        defense_max_ram=1024,
+        defense_max_restarts=3,
+    )
+    mock_cfg = MagicMock()
+    mock_cfg.worker.evaluation = eval_cfg
+    monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
+
+    mock_docker = MagicMock()
+    ctx = {
+        "defense_submission_id": defense_id,
+        "url": "http://defense:8080/",
+        "container_name": "def-container-1",
+        "docker_client": mock_docker,
+    }
+
+    async def fake_sleep(_):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    timed_out_outcome = EvalOutcome(
+        model_output=0, evaded_reason="time_limit", duration_ms=50
+    )
+
+    with patch(
+        "worker.defense.evaluate.evaluate_sample_against_container",
+        new=AsyncMock(return_value=timed_out_outcome),
+    ):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                evaluate_defenses_async(worker_id, [ctx], config_dict)
+            )
+        finally:
+            loop.close()
+
+    from sqlalchemy import text
+
+    result = db_session.execute(
+        text(
+            """
+            SELECT e.evaded_reason
+            FROM evaluation_file_results e
+            JOIN attack_files af ON e.attack_file_id = af.id
+            WHERE af.attack_submission_id = CAST(:attack_id AS uuid)
+            """
+        ),
+        {"attack_id": attack_id},
+    ).fetchone()
+
+    assert result is not None
+    assert result[0] == "time_limit"
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: ContainerRestartError removes defense from batch
+# ---------------------------------------------------------------------------
+
+def test_container_restart_error_removes_defense_from_batch(
+    db_session, fake_redis, test_helpers, monkeypatch, config_dict, tmp_path
+):
+    """When ContainerRestartError is raised for one defense, that defense is
+    removed from the active batch and the remaining defenses continue."""
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    defense1_id = test_helpers.create_defense(
+        source_type="docker", docker_image="user/def1:latest"
+    )
+    defense2_id = test_helpers.create_defense(
+        source_type="docker", docker_image="user/def2:latest"
+    )
+    attack_id = test_helpers.create_attack(file_count=1)
+
+    worker_id = "test_worker_restart"
+    registry = WorkerRegistry()
+    registry.register(worker_id, [defense1_id, defense2_id], "job_2")
+    registry.add_attack_to_queue(worker_id, attack_id)
+
+    monkeypatch.setattr(
+        WorkerRegistry,
+        "pop_next_attack",
+        make_pop_attack_sequence(attack_id),
+    )
+
+    fake_sample = tmp_path / "sample.exe"
+    fake_sample.write_bytes(b"MZ" + b"\x00" * 64)
+    monkeypatch.setattr(
+        "worker.defense.evaluate.get_sample_path", lambda key: str(fake_sample)
+    )
+
+    eval_cfg = EvaluationConfig(
+        defense_max_time=5000,
+        defense_max_timeout=20000,
+        defense_max_ram=1024,
+        defense_max_restarts=3,
+    )
+    mock_cfg = MagicMock()
+    mock_cfg.worker.evaluation = eval_cfg
+    monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
+
+    failed_defenses = []
+
+    def fake_mark_failed(def_id, error):
+        failed_defenses.append(def_id)
+
+    monkeypatch.setattr("worker.defense.evaluate.mark_defense_failed", fake_mark_failed)
+
+    async def fake_sleep(_):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    ctx1 = {
+        "defense_submission_id": defense1_id,
+        "url": "http://defense1:8080/",
+        "container_name": "def-container-1",
+        "docker_client": MagicMock(),
+    }
+    ctx2 = {
+        "defense_submission_id": defense2_id,
+        "url": "http://defense2:8080/",
+        "container_name": "def-container-2",
+        "docker_client": MagicMock(),
+    }
+    defense_contexts = [ctx1, ctx2]
+
+    good_outcome = EvalOutcome(model_output=1, evaded_reason=None, duration_ms=20)
+
+    def side_effect_fn(**kwargs):
+        if kwargs.get("container_url") == ctx1["url"]:
+            raise ContainerRestartError("too many restarts")
+        return good_outcome
+
+    with patch(
+        "worker.defense.evaluate.evaluate_sample_against_container",
+        new=AsyncMock(side_effect=side_effect_fn),
+    ):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                evaluate_defenses_async(worker_id, defense_contexts, config_dict)
+            )
+        finally:
+            loop.close()
+
+    assert defense1_id in failed_defenses
+
+    from sqlalchemy import text
+
+    result = db_session.execute(
+        text(
+            """
+            SELECT e.model_output
+            FROM evaluation_file_results e
+            JOIN evaluation_runs er ON e.evaluation_run_id = er.id
+            WHERE er.defense_submission_id = CAST(:def_id AS uuid)
+            AND er.attack_submission_id = CAST(:attack_id AS uuid)
+            """
+        ),
+        {"def_id": defense2_id, "attack_id": attack_id},
+    ).fetchone()
+
+    assert result is not None
+    assert result[0] == 1

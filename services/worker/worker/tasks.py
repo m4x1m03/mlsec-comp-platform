@@ -298,13 +298,14 @@ def run_batch_defense_job(
                 "defense_submission_id": defense_submission_id,
                 "container": container,
                 "container_name": container_name,
+                "docker_client": client,
                 "network": network,
                 "gateway_port": gateway_port,
                 "student_ip": student_ip,
                 "url": url,
                 "needs_validation": needs_validation,
                 "image_name": image_name,
-                "source_type": source_type
+                "source_type": source_type,
             })
         
         # Prepare event loop for async validation and evaluation calls

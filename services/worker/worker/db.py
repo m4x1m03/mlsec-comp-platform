@@ -102,14 +102,15 @@ def upsert_evaluation(
     result: int | None = None,
     error: str | None = None,
     duration_ms: int | None = None,
+    evaded_reason: str | None = None,
 ) -> None:
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-                INSERT INTO evaluation_file_results (evaluation_run_id, attack_file_id, model_output, error, duration_ms)
-                VALUES (:run_id, :file_id, :out, :err, :dur)
+                INSERT INTO evaluation_file_results (evaluation_run_id, attack_file_id, model_output, error, duration_ms, evaded_reason)
+                VALUES (:run_id, :file_id, :out, :err, :dur, :evaded_reason)
                 """
             ),
             {
@@ -117,7 +118,8 @@ def upsert_evaluation(
                 "file_id": attack_file_id,
                 "out": result,
                 "err": error,
-                "dur": duration_ms
+                "dur": duration_ms,
+                "evaded_reason": evaded_reason,
             }
         )
 
