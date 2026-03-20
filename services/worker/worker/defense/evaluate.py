@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import os
 import time
 import asyncio
-import httpx
 import logging
+from dataclasses import dataclass
 from typing import Any
 
+import docker
+import httpx
+
+from worker.config import EvaluationConfig
 from worker.db import (
     ensure_evaluation_run,
     set_evaluation_run_status,
@@ -19,6 +22,171 @@ from worker.redis_client import WorkerRegistry
 from worker.cache_handler import get_sample_path
 
 logger = logging.getLogger(__name__)
+
+
+class ContainerRestartError(Exception):
+    """Raised when a container exceeds the maximum number of allowed restarts."""
+
+
+@dataclass
+class EvalOutcome:
+    model_output: int | None
+    evaded_reason: str | None
+    duration_ms: int
+
+
+async def evaluate_sample_against_container(
+    client: httpx.AsyncClient,
+    container_url: str,
+    docker_client: docker.DockerClient,
+    container_name: str,
+    sample_content: bytes,
+    eval_cfg: EvaluationConfig,
+    restart_count_ref: list[int],
+) -> EvalOutcome:
+    """Evaluate a single sample against a running defense container.
+
+    Enforces per-sample time and RAM limits. If the container exceeds
+    defense_max_time, the sample is classified as evaded with reason
+    'time_limit'. If the container exceeds defense_max_ram (soft monitoring
+    threshold; the Docker mem_limit in DefenseJobConfig is the hard ceiling
+    enforced by Docker), the sample is classified as evaded with reason
+    'ram_limit' and the container is restarted.
+
+    If the container is restarted more than defense_max_restarts times,
+    ContainerRestartError is raised.
+
+    Note: restart handling behavior may change in future iterations.
+
+    Args:
+        client: Shared httpx async client.
+        container_url: URL to POST sample bytes to.
+        docker_client: Docker SDK client for stats and restart operations.
+        container_name: Name of the container to monitor and restart.
+        sample_content: Raw bytes of the sample file.
+        eval_cfg: Evaluation configuration with resource limits.
+        restart_count_ref: Single-element list used as a mutable counter
+            shared across calls for the same container.
+
+    Returns:
+        EvalOutcome with model_output, evaded_reason, and duration_ms.
+
+    Raises:
+        ContainerRestartError: If restart_count_ref[0] exceeds
+            eval_cfg.defense_max_restarts.
+    """
+    start = time.monotonic()
+    evaded_reason: str | None = None
+    model_output: int | None = None
+    headers = {"Content-Type": "application/octet-stream"}
+    short_timeout = eval_cfg.defense_max_time / 1000.0
+
+    try:
+        response = await client.post(
+            container_url,
+            content=sample_content,
+            headers=headers,
+            timeout=short_timeout,
+        )
+
+        # Check container RAM usage after receiving a response.
+        # defense_max_ram is the soft monitoring threshold; the Docker
+        # mem_limit in DefenseJobConfig is the hard ceiling enforced by Docker.
+        try:
+            container = docker_client.containers.get(container_name)
+            stats = container.stats(stream=False)
+            usage_bytes = stats.get("memory_stats", {}).get("usage", 0)
+            usage_mb = usage_bytes / (1024 * 1024)
+            if usage_mb > eval_cfg.defense_max_ram:
+                evaded_reason = "ram_limit"
+                model_output = 0
+                logger.warning(
+                    "Container %s exceeded RAM soft limit (%.1f MB > %d MB); restarting.",
+                    container_name,
+                    usage_mb,
+                    eval_cfg.defense_max_ram,
+                )
+                restart_count_ref[0] += 1
+                if restart_count_ref[0] > eval_cfg.defense_max_restarts:
+                    raise ContainerRestartError(
+                        f"Container {container_name!r} exceeded maximum restarts "
+                        f"({eval_cfg.defense_max_restarts})."
+                    )
+                container.restart()
+        except ContainerRestartError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Could not read container stats for %s: %s", container_name, exc
+            )
+
+        if evaded_reason is None:
+            if response.status_code == 200:
+                try:
+                    result_json = response.json()
+                    raw = result_json.get("result")
+                    if raw in (0, 1):
+                        model_output = raw
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to parse JSON from %s: %s", container_url, exc
+                    )
+            else:
+                logger.warning(
+                    "Container %s returned HTTP %d.",
+                    container_name,
+                    response.status_code,
+                )
+
+    except httpx.TimeoutException:
+        evaded_reason = "time_limit"
+        model_output = 0
+        logger.warning(
+            "Container %s exceeded per-sample time limit (%d ms).",
+            container_name,
+            eval_cfg.defense_max_time,
+        )
+        # Try extended wait to determine whether the container is still alive.
+        extended_timeout = (
+            eval_cfg.defense_max_timeout - eval_cfg.defense_max_time
+        ) / 1000.0
+        try:
+            await client.post(
+                container_url,
+                content=sample_content,
+                headers=headers,
+                timeout=max(extended_timeout, 0.0),
+            )
+        except httpx.TimeoutException:
+            logger.warning(
+                "Container %s unresponsive after full timeout (%d ms); restarting.",
+                container_name,
+                eval_cfg.defense_max_timeout,
+            )
+            restart_count_ref[0] += 1
+            if restart_count_ref[0] > eval_cfg.defense_max_restarts:
+                raise ContainerRestartError(
+                    f"Container {container_name!r} exceeded maximum restarts "
+                    f"({eval_cfg.defense_max_restarts})."
+                )
+            try:
+                container = docker_client.containers.get(container_name)
+                container.restart()
+            except Exception as exc:
+                logger.warning(
+                    "Failed to restart container %s: %s", container_name, exc
+                )
+        except Exception as exc:
+            logger.warning(
+                "Extended wait request failed for %s: %s", container_url, exc
+            )
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    return EvalOutcome(
+        model_output=model_output,
+        evaded_reason=evaded_reason,
+        duration_ms=duration_ms,
+    )
 
 
 async def _evaluate_single_sample(
@@ -34,7 +202,7 @@ async def _evaluate_single_sample(
     success = False
     prediction = None
     error_msg = None
-    
+
     try:
         response = await client.post(
             ctx["url"],
@@ -64,7 +232,6 @@ async def _evaluate_single_sample(
                 error_msg = f"Failed to parse JSON: {e}"
 
     # Record result in database
-    # Note: upsert_evaluation is still synchronous
     upsert_evaluation(
         evaluation_run_id=run_id,
         attack_file_id=file_id,

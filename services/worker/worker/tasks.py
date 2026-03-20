@@ -39,8 +39,8 @@ from worker.db import (
     mark_attack_failed,
 )
 from worker.redis_client import WorkerRegistry
-from worker.defense.validation import validate_functional
-from worker.defense.evaluate import evaluate_defense_with_redis, evaluate_defenses_async
+from worker.defense.validation import validate_functional, validate_heuristic as validate_defense_heuristic
+from worker.defense.evaluate import evaluate_defense_with_redis, evaluate_defenses_async, ContainerRestartError
 from worker.attack.validation import (
     AttackValidationError,
     validate_functional as validate_attack_functional,
@@ -297,6 +297,7 @@ def run_batch_defense_job(
             defense_contexts.append({
                 "defense_submission_id": defense_submission_id,
                 "container": container,
+                "container_name": container_name,
                 "network": network,
                 "gateway_port": gateway_port,
                 "student_ip": student_ip,
@@ -306,6 +307,10 @@ def run_batch_defense_job(
                 "source_type": source_type
             })
         
+        # Prepare event loop for async validation and evaluation calls
+        loop = asyncio.get_event_loop()
+        heurval_cfg = config.worker.heuristic_validation
+
         # Wait for all containers to be ready
         for ctx in defense_contexts:
             container_timeout = config.worker.defense_job.container_timeout
@@ -331,8 +336,59 @@ def run_batch_defense_job(
                     mark_defense_failed(ctx["defense_submission_id"], str(e))
                     raise ValueError(f"Validation failed for {ctx['defense_submission_id']}: {e}")
 
+                if heurval_cfg.enable_heuristic_validation:
+                    try:
+                        metrics = loop.run_until_complete(validate_defense_heuristic(
+                            defense_submission_id=ctx["defense_submission_id"],
+                            container_url=ctx["url"],
+                            container_name=ctx["container_name"],
+                            docker_client=client,
+                            eval_cfg=config.worker.evaluation,
+                            heurval_cfg=heurval_cfg,
+                        ))
+                    except ContainerRestartError as e:
+                        error_msg = "Container exceeded maximum restarts during heuristic validation."
+                        logger.error(
+                            "Heuristic validation for defense %s raised ContainerRestartError: %s",
+                            ctx["defense_submission_id"],
+                            e,
+                        )
+                        mark_defense_failed(ctx["defense_submission_id"], error_msg)
+                        raise ValueError(error_msg)
+
+                    if metrics and heurval_cfg.reject_heurval_failures:
+                        fails = []
+                        if metrics.get("malware_tpr", 0.0) < heurval_cfg.heurval_malware_tpr_minimum:
+                            fails.append(
+                                f"malware_tpr {metrics['malware_tpr']:.3f} < "
+                                f"{heurval_cfg.heurval_malware_tpr_minimum}"
+                            )
+                        if metrics.get("malware_fpr", 0.0) < heurval_cfg.heurval_malware_fpr_minimum:
+                            fails.append(
+                                f"malware_fpr {metrics['malware_fpr']:.3f} < "
+                                f"{heurval_cfg.heurval_malware_fpr_minimum}"
+                            )
+                        if metrics.get("goodware_tpr", 0.0) < heurval_cfg.heurval_goodware_tpr_minimum:
+                            fails.append(
+                                f"goodware_tpr {metrics['goodware_tpr']:.3f} < "
+                                f"{heurval_cfg.heurval_goodware_tpr_minimum}"
+                            )
+                        if metrics.get("goodware_fpr", 0.0) < heurval_cfg.heurval_goodware_fpr_minimum:
+                            fails.append(
+                                f"goodware_fpr {metrics['goodware_fpr']:.3f} < "
+                                f"{heurval_cfg.heurval_goodware_fpr_minimum}"
+                            )
+                        if fails:
+                            error_msg = f"Heuristic validation failed: {'; '.join(fails)}"
+                            logger.warning(
+                                "Defense %s rejected by heuristic validation: %s",
+                                ctx["defense_submission_id"],
+                                error_msg,
+                            )
+                            mark_defense_failed(ctx["defense_submission_id"], error_msg)
+                            raise ValueError(error_msg)
+
         # Run async evaluation (Send samples to all containers)
-        loop = asyncio.get_event_loop()
         loop.run_until_complete(evaluate_defenses_async(
             worker_id=worker_id,
             defense_contexts=defense_contexts,
