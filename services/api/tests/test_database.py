@@ -1,7 +1,12 @@
+"""Basic database connectivity tests.
+
+Verifies inserts and simple queries against the test database.
+"""
+
 from sqlalchemy import text
 
-# This test verifies that we can insert a user into the database and query it back.
 def test_insert_and_query_user(db_session):
+    """Verify inserts and queries against the test database."""
     print(db_session.get_bind().engine.url)
 
 
@@ -21,8 +26,8 @@ def test_insert_and_query_user(db_session):
 
     assert user[1] == "test_user"
 
-# This test verifies that we can connect to the test database and execute a simple query.
 def test_select_users(db_session):
+    """Verify we can execute a simple SELECT query."""
 
     result = db_session.execute(text("SELECT * FROM users"))
 

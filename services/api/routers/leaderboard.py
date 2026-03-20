@@ -1,3 +1,9 @@
+"""Leaderboard endpoints and websocket streaming helpers.
+
+Provides REST endpoints for leaderboard pages and a websocket stream for
+real-time snapshots.
+"""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -49,6 +55,7 @@ _DEFAULT_STATUSES: list[str] | None = None
 
 
 def _normalize_order(order: str) -> str:
+    """Normalize and validate the order query param."""
     normalized = order.lower()
     if normalized not in {"asc", "desc"}:
         raise HTTPException(status_code=400, detail="order must be 'asc' or 'desc'")
@@ -56,6 +63,7 @@ def _normalize_order(order: str) -> str:
 
 
 def _normalize_statuses(statuses: list[str] | None) -> list[str]:
+    """Normalize status filters, defaulting to ready when unspecified."""
     if not statuses:
         return ["ready"]
     invalid = [status for status in statuses if status not in _ALLOWED_STATUSES]
@@ -65,6 +73,7 @@ def _normalize_statuses(statuses: list[str] | None) -> list[str]:
 
 
 def _resolve_sort(sort: str, mapping: dict[str, str]) -> str:
+    """Resolve a client sort key to a safe SQL column name."""
     resolved = mapping.get(sort)
     if resolved is None:
         raise HTTPException(status_code=400, detail=f"Invalid sort value: {sort}")
@@ -72,6 +81,7 @@ def _resolve_sort(sort: str, mapping: dict[str, str]) -> str:
 
 
 def _build_status_filter(statuses: list[str]) -> tuple[str, dict]:
+    """Build a SQL IN clause and parameter map for status filters."""
     if not statuses:
         return "", {}
 
@@ -97,12 +107,18 @@ def _get_leaderboard(
     include_unscored: bool,
     statuses: list[str] | None,
 ) -> LeaderboardResponse:
+    """Fetch a leaderboard page with summary metrics.
+
+    Builds SQL clauses dynamically to support filtering, sorting, and paging.
+    """
     normalized_statuses = _normalize_statuses(statuses)
     order = _normalize_order(order)
     sort_column = _resolve_sort(sort, _LEADERBOARD_SORT_COLUMNS)
 
+    # Select the correct column for defense vs attack pair joins.
     pair_column = "defense_submission_id" if submission_type == "defense" else "attack_submission_id"
 
+    # Build the WHERE clause based on requested filters.
     where_parts = [
         "s.submission_type = :submission_type",
         "s.deleted_at IS NULL",
@@ -117,6 +133,7 @@ def _get_leaderboard(
     where_clause = " AND ".join(where_parts)
     having_clause = "HAVING COUNT(eps.id) > 0" if not include_unscored else ""
 
+    # Base query used by both data and count projections.
     base_sql = f"""
         FROM submissions s
         JOIN users u ON u.id = s.user_id
@@ -233,11 +250,13 @@ _leaderboard_stream = LeaderboardStream(
 
 
 def start_leaderboard_stream(*, loop) -> None:
+    """Start the leaderboard stream if enabled by environment."""
     if should_enable_leaderboard_stream():
         _leaderboard_stream.start(loop=loop)
 
 
 def stop_leaderboard_stream() -> None:
+    """Stop the leaderboard stream if enabled by environment."""
     if should_enable_leaderboard_stream():
         _leaderboard_stream.stop()
 
@@ -253,6 +272,7 @@ def leaderboard_defense(
     statuses: list[str] | None = Query(None),
     db: Session = Depends(get_db),
 ) -> LeaderboardResponse:
+    """Return the defense leaderboard."""
     return _get_leaderboard(
         db=db,
         submission_type="defense",
@@ -277,6 +297,7 @@ def leaderboard_attack(
     statuses: list[str] | None = Query(None),
     db: Session = Depends(get_db),
     ) -> LeaderboardResponse:
+    """Return the attack leaderboard."""
     return _get_leaderboard(
         db=db,
         submission_type="attack",
@@ -292,6 +313,7 @@ def leaderboard_attack(
 
 @router.websocket("/ws")
 async def leaderboard_ws(websocket: WebSocket) -> None:
+    """Stream leaderboard snapshots over a websocket connection."""
     await _leaderboard_stream.connect(websocket)
     try:
         while True:
@@ -312,6 +334,7 @@ def leaderboard_pairs(
     order: str = Query("desc"),
     db: Session = Depends(get_db),
 ) -> LeaderboardPairsResponse:
+    """Return leaderboard pair scores filtered by defense/attack submission."""
     if defense_submission_id is None and attack_submission_id is None:
         raise HTTPException(
             status_code=400,
@@ -321,6 +344,7 @@ def leaderboard_pairs(
     order = _normalize_order(order)
     sort_column = _resolve_sort(sort, _PAIR_SORT_COLUMNS)
 
+    # Build a dynamic WHERE clause for optional filters.
     where_parts = ["d.deleted_at IS NULL", "a.deleted_at IS NULL"]
     params: dict[str, object] = {}
 
@@ -338,6 +362,7 @@ def leaderboard_pairs(
 
     where_clause = " AND ".join(where_parts)
 
+    # Base query shared between data and count queries.
     base_sql = f"""
         FROM evaluation_pair_scores eps
         JOIN submissions d ON d.id = eps.defense_submission_id
