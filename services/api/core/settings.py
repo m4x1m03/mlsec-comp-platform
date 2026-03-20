@@ -55,6 +55,7 @@ class Settings(BaseSettings):
         "http://localhost:4321",
         "http://127.0.0.1:4321",
     ]
+    cors_allow_origin_regex: str | None = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     cors_allow_methods: list[str] = ["*"]
     cors_allow_headers: list[str] = ["*"]
     cors_allow_credentials: bool = True
