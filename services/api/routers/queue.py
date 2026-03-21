@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Union
 from uuid import UUID
 
@@ -21,6 +22,7 @@ from schemas.jobs import (
 
 
 router = APIRouter(tags=["queue"])
+logger = logging.getLogger(__name__)
 
 
 def _insert_job(
@@ -53,6 +55,7 @@ def _insert_job(
         raise HTTPException(status_code=500, detail="Failed to create job")
 
     db.commit()
+    logger.info("Created job %s type=%s for user %s", row[0], job_type, requested_by_user_id)
     return row[0]
 
 
@@ -99,6 +102,7 @@ def enqueue_defense_job(
         requested_by_user_id=current_user.user_id,
     )
     celery_task_id = _publish_task(job_type=JobType.DEFENSE, job_id=job_id, payload=payload)
+    logger.info("Published defense job %s (celery=%s)", job_id, celery_task_id)
 
     return EnqueueJobResponse(job_id=job_id, status="queued", job_type=JobType.DEFENSE, celery_task_id=celery_task_id)
 
@@ -124,6 +128,7 @@ def enqueue_attack_job(
         requested_by_user_id=current_user.user_id,
     )
     celery_task_id = _publish_task(job_type=JobType.ATTACK, job_id=job_id, payload=payload)
+    logger.info("Published attack job %s (celery=%s)", job_id, celery_task_id)
 
     return EnqueueJobResponse(job_id=job_id, status="queued", job_type=JobType.ATTACK, celery_task_id=celery_task_id)
 
@@ -169,4 +174,5 @@ def dispatch_job(
         requested_by_user_id=current_user.user_id,
     )
     celery_task_id = _publish_task(job_type=job_type, job_id=job_id, payload=payload)
+    logger.info("Dispatched job %s type=%s (celery=%s)", job_id, job_type.value, celery_task_id)
     return EnqueueJobResponse(job_id=job_id, status="queued", job_type=job_type, celery_task_id=celery_task_id)

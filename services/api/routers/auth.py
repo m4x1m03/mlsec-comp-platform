@@ -7,6 +7,7 @@ cookie management and session persistence.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import text
@@ -27,6 +28,7 @@ from schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 def _to_user_response(
@@ -113,8 +115,10 @@ def login(
             {"email": req.email},
         ).fetchone()
         if disabled is not None:
+            logger.warning("Login attempt for disabled account")
             raise HTTPException(status_code=403, detail="User account is disabled")
 
+        logger.info("Login requested for unknown email")
         return LoginResponse(
             authenticated=False,
             requires_registration=True,
@@ -124,6 +128,7 @@ def login(
     session_token = create_session(db, user_id=row["id"])
     _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
+    logger.info("Login success for user %s (admin=%s)", row["id"], row["is_admin"])
     return LoginResponse(
         authenticated=True,
         requires_registration=False,
@@ -214,6 +219,7 @@ def register(
         db.commit()
     except IntegrityError:
         db.rollback()
+        logger.warning("Registration failed due to duplicate email or username")
         raise HTTPException(status_code=409, detail="Email or username is already registered") from None
     except HTTPException:
         db.rollback()
@@ -221,6 +227,7 @@ def register(
 
     _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
+    logger.info("Registered new user %s", user_row["id"])
     return SessionResponse(
         expires_at=session_token.expires_at,
         user=_to_user_response(
@@ -242,6 +249,7 @@ def logout(
     revoke_session_by_id(db, session_id=current_user.session_id, commit=True)
     _clear_session_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
+    logger.info("Logout for user %s", current_user.user_id)
     return response
 
 
