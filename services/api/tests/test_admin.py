@@ -54,6 +54,15 @@ def _create_session_token(db_session, *, user_id: str) -> str:
     return token
 
 
+def _issue_admin_action_token(client, *, access_token: str, origin: str) -> str:
+    resp = client.post(
+        "/admin/actions/token",
+        headers={"Authorization": f"Bearer {access_token}", "Origin": origin},
+    )
+    assert resp.status_code == 200
+    return resp.json()["token"]
+
+
 def _create_submission(db_session, *, user_id: str, submission_type: str) -> str:
     row = db_session.execute(
         text(
@@ -336,3 +345,83 @@ def test_admin_disable_user_requires_action_token(client, db_session):
     )
     assert reused_token_resp.status_code == 403
     assert reused_token_resp.json()["detail"] == "Invalid admin action token"
+
+
+def test_admin_users_list_returns_all_users(client, db_session):
+    admin_user_id = _create_user(db_session, is_admin=True)
+    standard_user_id = _create_user(db_session, is_admin=False)
+    access_token = _create_session_token(db_session, user_id=admin_user_id)
+
+    resp = client.get("/admin/users", headers={"Authorization": f"Bearer {access_token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] >= 2
+    ids = [item["id"] for item in body["items"]]
+    assert admin_user_id in ids
+    assert standard_user_id in ids
+
+
+def test_admin_submission_controls_close_open_and_schedule(client, db_session):
+    admin_user_id = _create_user(db_session, is_admin=True)
+    access_token = _create_session_token(db_session, user_id=admin_user_id)
+    origin = "http://localhost:14321"
+
+    status_resp = client.get(
+        "/admin/submissions/status",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert status_resp.status_code == 200
+    assert status_resp.json()["manual_closed"] is False
+
+    close_token = _issue_admin_action_token(client, access_token=access_token, origin=origin)
+    close_resp = client.post(
+        "/admin/submissions/close",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Origin": origin,
+            "X-Admin-Action": close_token,
+        },
+    )
+    assert close_resp.status_code == 200
+    assert close_resp.json()["manual_closed"] is True
+    assert close_resp.json()["is_closed"] is True
+
+    open_token = _issue_admin_action_token(client, access_token=access_token, origin=origin)
+    open_resp = client.post(
+        "/admin/submissions/open",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Origin": origin,
+            "X-Admin-Action": open_token,
+        },
+    )
+    assert open_resp.status_code == 200
+    assert open_resp.json()["manual_closed"] is False
+
+    schedule_token = _issue_admin_action_token(client, access_token=access_token, origin=origin)
+    close_at = datetime.now(timezone.utc) + timedelta(days=1)
+    schedule_resp = client.post(
+        "/admin/submissions/schedule",
+        json={"close_at": close_at.isoformat()},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Origin": origin,
+            "X-Admin-Action": schedule_token,
+        },
+    )
+    assert schedule_resp.status_code == 200
+    assert schedule_resp.json()["close_at"] is not None
+
+    clear_token = _issue_admin_action_token(client, access_token=access_token, origin=origin)
+    clear_resp = client.post(
+        "/admin/submissions/schedule",
+        json={"close_at": None},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Origin": origin,
+            "X-Admin-Action": clear_token,
+        },
+    )
+    assert clear_resp.status_code == 200
+    assert clear_resp.json()["close_at"] is None
