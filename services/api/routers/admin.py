@@ -427,7 +427,6 @@ def disable_user(
             revoked_sessions=revoked,
         )
     except HTTPException as exc:
-        db.rollback()
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -512,7 +511,6 @@ def enable_user(
             disabled_at=row["disabled_at"],
         )
     except HTTPException as exc:
-        db.rollback()
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -602,7 +600,6 @@ def set_admin_role(
             disabled_at=row["disabled_at"],
         )
     except HTTPException as exc:
-        db.rollback()
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -694,7 +691,6 @@ def revoke_user_sessions(
 
         return AdminRevokeSessionsResponse(user_id=user_row["id"], revoked_count=revoked)
     except HTTPException as exc:
-        db.rollback()
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
