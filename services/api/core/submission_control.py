@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session
 
 
 def _utcnow() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalize datetimes to UTC (assumes naive values are UTC)."""
     if value is None:
         return None
     if value.tzinfo is None:
@@ -24,12 +26,14 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 @dataclass(frozen=True)
 class SubmissionControl:
+    """Snapshot of the submission window configuration."""
     manual_closed: bool
     close_at: datetime | None
     updated_at: datetime | None
     updated_by: str | None
 
     def is_closed(self, *, now: datetime | None = None) -> bool:
+        """Return True when submissions should be treated as closed."""
         current = now or _utcnow()
         if self.manual_closed:
             return True
@@ -39,6 +43,7 @@ class SubmissionControl:
 
 
 def get_submission_control(db: Session) -> SubmissionControl:
+    """Load the current submission control state (single-row table)."""
     row = (
         db.execute(
             text(
@@ -54,6 +59,7 @@ def get_submission_control(db: Session) -> SubmissionControl:
     )
 
     if row is None:
+        # Ensure the control row exists so downstream code always has a baseline.
         db.execute(
             text(
                 """
@@ -85,6 +91,7 @@ def set_manual_closed(
     closed: bool,
     updated_by: str | None,
 ) -> SubmissionControl:
+    """Toggle the manual close flag and return the updated control state."""
     row = (
         db.execute(
             text(
@@ -122,6 +129,7 @@ def set_close_at(
     close_at: datetime | None,
     updated_by: str | None,
 ) -> SubmissionControl:
+    """Set or clear the scheduled close time and return the updated control state."""
     close_at_utc = _as_utc(close_at)
     row = (
         db.execute(
@@ -155,6 +163,7 @@ def set_close_at(
 
 
 def ensure_submissions_open(db: Session) -> None:
+    """Raise 403 when submissions are closed by admin or deadline."""
     control = get_submission_control(db)
     now = _utcnow()
     if control.manual_closed:

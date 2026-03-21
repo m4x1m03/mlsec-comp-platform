@@ -49,6 +49,7 @@ router = APIRouter(
 
 
 def _request_meta(request: Request) -> tuple[str | None, str | None]:
+    """Return client IP and user-agent for audit logging."""
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
     return client_ip, user_agent
@@ -64,6 +65,7 @@ def _log_admin_action_failure(
     target_email: str | None = None,
     metadata: dict[str, str | None] | None = None,
 ) -> None:
+    """Persist a failed admin action event with optional target metadata."""
     client_ip, user_agent = _request_meta(request)
     payload: dict[str, str | None] = dict(metadata or {})
     if target_user_id:
@@ -87,6 +89,7 @@ def get_overview(
     _: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminOverviewResponse:
+    """Return summary counts for the admin dashboard."""
     counts_row = (
         db.execute(
             text(
@@ -128,7 +131,9 @@ def get_users(
     search: str | None = Query(default=None),
     include_disabled: bool = Query(default=True),
 ) -> AdminUsersResponse:
+    """List users with last-seen and active session counts."""
     search_like = f"%{search}%" if search else None
+    # LATERAL joins let us compute per-user aggregates without duplicating rows.
     rows = (
         db.execute(
             text(
@@ -185,6 +190,7 @@ def get_users(
 def _submission_control_response(
     control,
 ) -> AdminSubmissionControlResponse:
+    """Normalize submission control state into the API response schema."""
     return AdminSubmissionControlResponse(
         manual_closed=control.manual_closed,
         close_at=control.close_at,
@@ -199,6 +205,7 @@ def get_submission_status(
     _: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminSubmissionControlResponse:
+    """Return the current submission close settings."""
     control = get_submission_control(db)
     return _submission_control_response(control)
 
@@ -209,6 +216,7 @@ def close_submissions(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminSubmissionControlResponse:
+    """Manually close submissions until reopened by an admin."""
     event_type = "admin.submissions.close"
     try:
         require_admin_origin(request, require_present=True)
@@ -247,6 +255,7 @@ def close_submissions(
 
         return _submission_control_response(control)
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -271,6 +280,7 @@ def open_submissions(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminSubmissionControlResponse:
+    """Reopen submissions that were manually closed."""
     event_type = "admin.submissions.open"
     try:
         require_admin_origin(request, require_present=True)
@@ -309,6 +319,7 @@ def open_submissions(
 
         return _submission_control_response(control)
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -334,6 +345,7 @@ def schedule_submissions_close(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminSubmissionControlResponse:
+    """Set or clear the scheduled submissions close time."""
     event_type = "admin.submissions.schedule"
     try:
         require_admin_origin(request, require_present=True)
@@ -372,6 +384,7 @@ def schedule_submissions_close(
 
         return _submission_control_response(control)
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -395,6 +408,7 @@ def schedule_submissions_close(
         )
         raise
 
+
 @router.get("/logs/jobs", response_model=AdminJobLogsResponse)
 def get_recent_jobs(
     _: AuthenticatedUser = Depends(require_admin_user),
@@ -402,6 +416,7 @@ def get_recent_jobs(
     limit: int = Query(default=50, ge=1, le=200),
     status_filter: str | None = Query(default=None),
 ) -> AdminJobLogsResponse:
+    """Return recent job records for the admin logs view."""
     rows = (
         db.execute(
             text(
@@ -437,6 +452,7 @@ def get_recent_evaluations(
     limit: int = Query(default=50, ge=1, le=200),
     status_filter: str | None = Query(default=None),
 ) -> AdminEvaluationLogsResponse:
+    """Return recent evaluation runs for the admin logs view."""
     rows = (
         db.execute(
             text(
@@ -474,6 +490,7 @@ def get_active_sessions(
     db: Session = Depends(get_db),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> AdminActiveSessionsResponse:
+    """Return currently active user sessions."""
     rows = (
         db.execute(
             text(
@@ -515,6 +532,7 @@ def get_audit_logs(
     event_type: str | None = Query(default=None),
     success: bool | None = Query(default=None),
 ) -> AdminAuditLogsResponse:
+    """Return recent audit log entries."""
     rows = (
         db.execute(
             text(
@@ -557,6 +575,7 @@ def issue_action_token(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminActionTokenResponse:
+    """Issue a short-lived token required for admin write actions."""
     require_admin_origin(request, require_present=True)
     token, expires_at = issue_admin_action_token(db, session_id=str(current_user.session_id))
     return AdminActionTokenResponse(token=token, expires_at=expires_at)
@@ -569,6 +588,7 @@ def disable_user(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserActionResponse:
+    """Disable a user account and revoke any active sessions."""
     event_type = "admin.user.disable"
     try:
         require_admin_origin(request, require_present=True)
@@ -644,6 +664,7 @@ def disable_user(
             revoked_sessions=revoked,
         )
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -671,6 +692,7 @@ def enable_user(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserActionResponse:
+    """Re-enable a previously disabled user account."""
     event_type = "admin.user.enable"
     try:
         require_admin_origin(request, require_present=True)
@@ -728,6 +750,7 @@ def enable_user(
             disabled_at=row["disabled_at"],
         )
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -756,6 +779,7 @@ def set_admin_role(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserActionResponse:
+    """Promote or demote a user to admin based on the request payload."""
     event_type = "admin.user.promote" if req.is_admin else "admin.user.demote"
     try:
         require_admin_origin(request, require_present=True)
@@ -817,6 +841,7 @@ def set_admin_role(
             disabled_at=row["disabled_at"],
         )
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,
@@ -844,6 +869,7 @@ def revoke_user_sessions(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminRevokeSessionsResponse:
+    """Revoke all active sessions for a user."""
     event_type = "admin.user.revoke_sessions"
     try:
         require_admin_origin(request, require_present=True)
@@ -908,6 +934,7 @@ def revoke_user_sessions(
 
         return AdminRevokeSessionsResponse(user_id=user_row["id"], revoked_count=revoked)
     except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
         _log_admin_action_failure(
             request=request,
             current_user=current_user,

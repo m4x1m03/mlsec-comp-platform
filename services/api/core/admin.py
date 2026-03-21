@@ -16,6 +16,7 @@ from core.settings import get_settings
 
 
 def _is_loopback_host(host: str | None) -> bool:
+    """Return True when the host resolves to a loopback address."""
     if host is None:
         return False
 
@@ -36,6 +37,7 @@ def _is_loopback_host(host: str | None) -> bool:
 
 
 def _hosts_match(left: str, right: str) -> bool:
+    """Normalize and compare hostnames or IP literals."""
     left_normalized = left.strip().lower()
     right_normalized = right.strip().lower()
     if left_normalized == right_normalized:
@@ -48,18 +50,21 @@ def _hosts_match(left: str, right: str) -> bool:
 
 
 def _is_from_trusted_proxy(host: str | None, trusted_proxy_hosts: Iterable[str]) -> bool:
+    """Return True when the direct client matches a configured proxy host."""
     if host is None:
         return False
     return any(_hosts_match(host, trusted) for trusted in trusted_proxy_hosts)
 
 
 def _is_in_allowed_hosts(host: str | None, allowed_hosts: Iterable[str]) -> bool:
+    """Return True when the host matches a configured allowlist entry."""
     if host is None:
         return False
     return any(_hosts_match(host, allowed) for allowed in allowed_hosts)
 
 
 def _is_in_allowed_networks(host: str | None, allowed_networks: Iterable[str]) -> bool:
+    """Return True when the host belongs to an allowed CIDR range."""
     if host is None:
         return False
     normalized = host.strip().lower()
@@ -78,8 +83,10 @@ def _is_in_allowed_networks(host: str | None, allowed_networks: Iterable[str]) -
 
 
 def _get_effective_client_host(request: Request) -> str | None:
+    """Derive the true client host, honoring trusted proxy headers."""
     settings = get_settings()
     direct_host = request.client.host if request.client is not None else None
+    # Only trust X-Forwarded-For when the immediate peer is a known proxy.
     if not _is_from_trusted_proxy(direct_host, settings.admin_trusted_proxy_hosts):
         return direct_host
 
@@ -94,6 +101,7 @@ def _get_effective_client_host(request: Request) -> str | None:
 
 
 def require_localhost_request(request: Request) -> None:
+    """Enforce localhost-only admin access unless allowlists override it."""
     settings = get_settings()
     if not settings.admin_localhost_only:
         return
@@ -115,6 +123,7 @@ def require_localhost_request(request: Request) -> None:
 def require_admin_user(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> AuthenticatedUser:
+    """Require that the authenticated user has admin privileges."""
     if current_user.is_admin:
         return current_user
 
@@ -125,6 +134,7 @@ def require_admin_user(
 
 
 def _hash_token(token: str) -> str:
+    """Hash a token for storage and comparison."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 

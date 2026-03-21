@@ -1,3 +1,5 @@
+"""Tests for admin endpoints, access controls, and audit logging."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,6 +15,7 @@ from main import app
 
 
 def _create_user(db_session, *, is_admin: bool) -> str:
+    """Insert a test user and return the user id."""
     suffix = uuid4().hex[:8]
     row = db_session.execute(
         text(
@@ -33,6 +36,7 @@ def _create_user(db_session, *, is_admin: bool) -> str:
 
 
 def _create_session_token(db_session, *, user_id: str) -> str:
+    """Insert a session token for the given user and return the raw token."""
     token = f"admin-test-token-{uuid4()}"
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
@@ -55,6 +59,7 @@ def _create_session_token(db_session, *, user_id: str) -> str:
 
 
 def _issue_admin_action_token(client, *, access_token: str, origin: str) -> str:
+    """Request an admin action token from the API."""
     resp = client.post(
         "/admin/actions/token",
         headers={"Authorization": f"Bearer {access_token}", "Origin": origin},
@@ -64,6 +69,7 @@ def _issue_admin_action_token(client, *, access_token: str, origin: str) -> str:
 
 
 def _create_submission(db_session, *, user_id: str, submission_type: str) -> str:
+    """Insert a test submission and return the submission id."""
     row = db_session.execute(
         text(
             """
@@ -79,6 +85,7 @@ def _create_submission(db_session, *, user_id: str, submission_type: str) -> str
 
 
 def test_admin_overview_requires_admin_role(client, db_session):
+    """Non-admin users should be blocked from the overview endpoint."""
     user_id = _create_user(db_session, is_admin=False)
     access_token = _create_session_token(db_session, user_id=user_id)
 
@@ -89,6 +96,7 @@ def test_admin_overview_requires_admin_role(client, db_session):
 
 
 def test_admin_overview_requires_localhost(db_session):
+    """Remote clients should be rejected when localhost-only mode is enabled."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
 
@@ -108,6 +116,7 @@ def test_admin_overview_requires_localhost(db_session):
 
 
 def test_admin_overview_rejects_forwarded_remote_client_from_trusted_proxy(db_session):
+    """Reject forwarded remote clients even when the proxy is trusted."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
 
@@ -133,6 +142,7 @@ def test_admin_overview_rejects_forwarded_remote_client_from_trusted_proxy(db_se
 
 
 def test_admin_overview_allows_forwarded_local_client_from_trusted_proxy(db_session):
+    """Allow forwarded localhost clients from trusted proxies."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
 
@@ -157,6 +167,7 @@ def test_admin_overview_allows_forwarded_local_client_from_trusted_proxy(db_sess
 
 
 def test_admin_overview_allows_configured_admin_allowed_hosts(db_session, monkeypatch):
+    """Allow explicit host allowlist entries."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
 
@@ -179,6 +190,7 @@ def test_admin_overview_allows_configured_admin_allowed_hosts(db_session, monkey
 
 
 def test_admin_overview_allows_configured_admin_allowed_networks(db_session, monkeypatch):
+    """Allow explicit network allowlist entries."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
 
@@ -201,6 +213,7 @@ def test_admin_overview_allows_configured_admin_allowed_networks(db_session, mon
 
 
 def test_admin_overview_returns_system_counts_for_local_admin(client, db_session):
+    """Return system counts for authenticated local admins."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
     standard_user_id = _create_user(db_session, is_admin=False)
@@ -260,6 +273,7 @@ def test_admin_overview_returns_system_counts_for_local_admin(client, db_session
 
 
 def test_admin_job_logs_support_filters(client, db_session):
+    """Allow filtering admin job logs by status."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
     now = datetime.now(timezone.utc)
@@ -294,6 +308,7 @@ def test_admin_job_logs_support_filters(client, db_session):
 
 
 def test_admin_action_token_requires_origin(client, db_session):
+    """Enforce origin requirement when issuing admin action tokens."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
 
@@ -304,6 +319,7 @@ def test_admin_action_token_requires_origin(client, db_session):
 
 
 def test_admin_disable_user_requires_action_token(client, db_session):
+    """Disabling a user should require an admin action token."""
     admin_user_id = _create_user(db_session, is_admin=True)
     target_user_id = _create_user(db_session, is_admin=False)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
@@ -348,6 +364,7 @@ def test_admin_disable_user_requires_action_token(client, db_session):
 
 
 def test_admin_users_list_returns_all_users(client, db_session):
+    """List all users, including admin metadata and session counts."""
     admin_user_id = _create_user(db_session, is_admin=True)
     standard_user_id = _create_user(db_session, is_admin=False)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
@@ -363,6 +380,7 @@ def test_admin_users_list_returns_all_users(client, db_session):
 
 
 def test_admin_submission_controls_close_open_and_schedule(client, db_session):
+    """Allow admins to close, open, and schedule submission shutdowns."""
     admin_user_id = _create_user(db_session, is_admin=True)
     access_token = _create_session_token(db_session, user_id=admin_user_id)
     origin = "http://localhost:14321"

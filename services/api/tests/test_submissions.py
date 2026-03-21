@@ -111,6 +111,7 @@ def _create_password_protected_zip() -> io.BytesIO:
 
 
 def _set_submission_control(db_session, *, manual_closed: bool, close_at: datetime | None) -> None:
+    """Upsert submission control flags for test scenarios."""
     db_session.execute(
         text(
             """
