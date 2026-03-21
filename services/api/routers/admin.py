@@ -51,6 +51,33 @@ def _request_meta(request: Request) -> tuple[str | None, str | None]:
     return client_ip, user_agent
 
 
+def _log_admin_action_failure(
+    *,
+    request: Request,
+    current_user: AuthenticatedUser,
+    event_type: str,
+    message: str,
+    target_user_id: UUID | None = None,
+    target_email: str | None = None,
+) -> None:
+    client_ip, user_agent = _request_meta(request)
+    metadata: dict[str, str] = {}
+    if target_user_id:
+        metadata["target_user_id"] = str(target_user_id)
+    if target_email:
+        metadata["target_email"] = target_email
+    log_audit_event(
+        event_type=event_type,
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=False,
+        message=message,
+        metadata=metadata or None,
+    )
+
+
 @router.get("/overview", response_model=AdminOverviewResponse)
 def get_overview(
     _: AuthenticatedUser = Depends(require_admin_user),
@@ -325,78 +352,100 @@ def disable_user(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserActionResponse:
-    require_admin_origin(request, require_present=True)
-    action_token = require_admin_action_token(
-        request,
-        db=db,
-        session_id=str(current_user.session_id),
-    )
+    event_type = "admin.user.disable"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
 
-    if user_id == current_user.user_id:
-        raise HTTPException(status_code=400, detail="Cannot disable your own account")
+        if user_id == current_user.user_id:
+            raise HTTPException(status_code=400, detail="Cannot disable your own account")
 
-    now = datetime.now(timezone.utc)
-    row = (
-        db.execute(
+        now = datetime.now(timezone.utc)
+        row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET disabled_at = COALESCE(disabled_at, :now)
+                    WHERE id = :user_id
+                    RETURNING id, email, username, is_admin, disabled_at
+                    """
+                ),
+                {"user_id": str(user_id), "now": now},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        revoked = db.execute(
             text(
                 """
-                UPDATE users
-                SET disabled_at = COALESCE(disabled_at, :now)
-                WHERE id = :user_id
-                RETURNING id, email, username, is_admin, disabled_at
+                UPDATE user_sessions
+                SET revoked_at = :now
+                WHERE user_id = :user_id
+                  AND revoked_at IS NULL
                 """
             ),
             {"user_id": str(user_id), "now": now},
+        ).rowcount
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
         )
-        .mappings()
-        .fetchone()
-    )
+        db.commit()
 
-    if row is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(row["id"]),
+                "target_email": row["email"],
+                "revoked_sessions": revoked,
+            },
+        )
 
-    revoked = db.execute(
-        text(
-            """
-            UPDATE user_sessions
-            SET revoked_at = :now
-            WHERE user_id = :user_id
-              AND revoked_at IS NULL
-            """
-        ),
-        {"user_id": str(user_id), "now": now},
-    ).rowcount
-
-    consume_admin_action_token(
-        db,
-        session_id=str(current_user.session_id),
-        token=action_token,
-    )
-    db.commit()
-
-    client_ip, user_agent = _request_meta(request)
-    log_audit_event(
-        event_type="admin.user.disable",
-        user_id=current_user.user_id,
-        email=current_user.email,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        success=True,
-        metadata={
-            "target_user_id": str(row["id"]),
-            "target_email": row["email"],
-            "revoked_sessions": revoked,
-        },
-    )
-
-    return AdminUserActionResponse(
-        user_id=row["id"],
-        email=row["email"],
-        username=row["username"],
-        is_admin=row["is_admin"],
-        disabled_at=row["disabled_at"],
-        revoked_sessions=revoked,
-    )
+        return AdminUserActionResponse(
+            user_id=row["id"],
+            email=row["email"],
+            username=row["username"],
+            is_admin=row["is_admin"],
+            disabled_at=row["disabled_at"],
+            revoked_sessions=revoked,
+        )
+    except HTTPException as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
 
 
 @router.post("/users/{user_id}/enable", response_model=AdminUserActionResponse)
@@ -406,60 +455,82 @@ def enable_user(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserActionResponse:
-    require_admin_origin(request, require_present=True)
-    action_token = require_admin_action_token(
-        request,
-        db=db,
-        session_id=str(current_user.session_id),
-    )
-
-    row = (
-        db.execute(
-            text(
-                """
-                UPDATE users
-                SET disabled_at = NULL
-                WHERE id = :user_id
-                RETURNING id, email, username, is_admin, disabled_at
-                """
-            ),
-            {"user_id": str(user_id)},
+    event_type = "admin.user.enable"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
         )
-        .mappings()
-        .fetchone()
-    )
 
-    if row is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET disabled_at = NULL
+                    WHERE id = :user_id
+                    RETURNING id, email, username, is_admin, disabled_at
+                    """
+                ),
+                {"user_id": str(user_id)},
+            )
+            .mappings()
+            .fetchone()
+        )
 
-    consume_admin_action_token(
-        db,
-        session_id=str(current_user.session_id),
-        token=action_token,
-    )
-    db.commit()
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    client_ip, user_agent = _request_meta(request)
-    log_audit_event(
-        event_type="admin.user.enable",
-        user_id=current_user.user_id,
-        email=current_user.email,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        success=True,
-        metadata={
-            "target_user_id": str(row["id"]),
-            "target_email": row["email"],
-        },
-    )
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
 
-    return AdminUserActionResponse(
-        user_id=row["id"],
-        email=row["email"],
-        username=row["username"],
-        is_admin=row["is_admin"],
-        disabled_at=row["disabled_at"],
-    )
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(row["id"]),
+                "target_email": row["email"],
+            },
+        )
+
+        return AdminUserActionResponse(
+            user_id=row["id"],
+            email=row["email"],
+            username=row["username"],
+            is_admin=row["is_admin"],
+            disabled_at=row["disabled_at"],
+        )
+    except HTTPException as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
 
 
 @router.post("/users/{user_id}/admin", response_model=AdminUserActionResponse)
@@ -470,65 +541,86 @@ def set_admin_role(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminUserActionResponse:
-    require_admin_origin(request, require_present=True)
-    action_token = require_admin_action_token(
-        request,
-        db=db,
-        session_id=str(current_user.session_id),
-    )
-
-    if user_id == current_user.user_id and not req.is_admin:
-        raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
-
-    row = (
-        db.execute(
-            text(
-                """
-                UPDATE users
-                SET is_admin = :is_admin
-                WHERE id = :user_id
-                RETURNING id, email, username, is_admin, disabled_at
-                """
-            ),
-            {"user_id": str(user_id), "is_admin": req.is_admin},
-        )
-        .mappings()
-        .fetchone()
-    )
-
-    if row is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    consume_admin_action_token(
-        db,
-        session_id=str(current_user.session_id),
-        token=action_token,
-    )
-    db.commit()
-
     event_type = "admin.user.promote" if req.is_admin else "admin.user.demote"
-    client_ip, user_agent = _request_meta(request)
-    log_audit_event(
-        event_type=event_type,
-        user_id=current_user.user_id,
-        email=current_user.email,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        success=True,
-        metadata={
-            "target_user_id": str(row["id"]),
-            "target_email": row["email"],
-            "is_admin": row["is_admin"],
-        },
-    )
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
 
-    return AdminUserActionResponse(
-        user_id=row["id"],
-        email=row["email"],
-        username=row["username"],
-        is_admin=row["is_admin"],
-        disabled_at=row["disabled_at"],
-    )
+        if user_id == current_user.user_id and not req.is_admin:
+            raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
+
+        row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET is_admin = :is_admin
+                    WHERE id = :user_id
+                    RETURNING id, email, username, is_admin, disabled_at
+                    """
+                ),
+                {"user_id": str(user_id), "is_admin": req.is_admin},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(row["id"]),
+                "target_email": row["email"],
+                "is_admin": row["is_admin"],
+            },
+        )
+
+        return AdminUserActionResponse(
+            user_id=row["id"],
+            email=row["email"],
+            username=row["username"],
+            is_admin=row["is_admin"],
+            disabled_at=row["disabled_at"],
+        )
+    except HTTPException as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
 
 
 @router.post("/users/{user_id}/sessions/revoke", response_model=AdminRevokeSessionsResponse)
@@ -538,64 +630,86 @@ def revoke_user_sessions(
     current_user: AuthenticatedUser = Depends(require_admin_user),
     db: Session = Depends(get_db),
 ) -> AdminRevokeSessionsResponse:
-    require_admin_origin(request, require_present=True)
-    action_token = require_admin_action_token(
-        request,
-        db=db,
-        session_id=str(current_user.session_id),
-    )
+    event_type = "admin.user.revoke_sessions"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
 
-    user_row = (
-        db.execute(
+        user_row = (
+            db.execute(
+                text(
+                    """
+                    SELECT id, email
+                    FROM users
+                    WHERE id = :user_id
+                    """
+                ),
+                {"user_id": str(user_id)},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if user_row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        now = datetime.now(timezone.utc)
+        revoked = db.execute(
             text(
                 """
-                SELECT id, email
-                FROM users
-                WHERE id = :user_id
+                UPDATE user_sessions
+                SET revoked_at = :now
+                WHERE user_id = :user_id
+                  AND revoked_at IS NULL
                 """
             ),
-            {"user_id": str(user_id)},
+            {"user_id": str(user_id), "now": now},
+        ).rowcount
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
         )
-        .mappings()
-        .fetchone()
-    )
+        db.commit()
 
-    if user_row is None:
-        raise HTTPException(status_code=404, detail="User not found")
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(user_row["id"]),
+                "target_email": user_row["email"],
+                "revoked_sessions": revoked,
+            },
+        )
 
-    now = datetime.now(timezone.utc)
-    revoked = db.execute(
-        text(
-            """
-            UPDATE user_sessions
-            SET revoked_at = :now
-            WHERE user_id = :user_id
-              AND revoked_at IS NULL
-            """
-        ),
-        {"user_id": str(user_id), "now": now},
-    ).rowcount
-
-    consume_admin_action_token(
-        db,
-        session_id=str(current_user.session_id),
-        token=action_token,
-    )
-    db.commit()
-
-    client_ip, user_agent = _request_meta(request)
-    log_audit_event(
-        event_type="admin.user.revoke_sessions",
-        user_id=current_user.user_id,
-        email=current_user.email,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        success=True,
-        metadata={
-            "target_user_id": str(user_row["id"]),
-            "target_email": user_row["email"],
-            "revoked_sessions": revoked,
-        },
-    )
-
-    return AdminRevokeSessionsResponse(user_id=user_row["id"], revoked_count=revoked)
+        return AdminRevokeSessionsResponse(user_id=user_row["id"], revoked_count=revoked)
+    except HTTPException as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
