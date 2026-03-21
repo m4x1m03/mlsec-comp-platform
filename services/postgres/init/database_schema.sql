@@ -49,6 +49,27 @@ CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 
 
 --------------------------------------------------
+-- AUDIT LOGS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type TEXT NOT NULL,
+    user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    email TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    success BOOLEAN,
+    message TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_audit_logs_event_type ON audit_logs(event_type);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
+
+
+--------------------------------------------------
 -- SUBMISSIONS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS submissions (

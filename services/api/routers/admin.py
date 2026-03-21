@@ -13,6 +13,8 @@ from core.settings import get_settings
 from schemas.admin import (
     AdminActiveSessionRecord,
     AdminActiveSessionsResponse,
+    AdminAuditLogRecord,
+    AdminAuditLogsResponse,
     AdminEvaluationLogRecord,
     AdminEvaluationLogsResponse,
     AdminJobLogRecord,
@@ -175,3 +177,47 @@ def get_active_sessions(
 
     items = [AdminActiveSessionRecord(**row) for row in rows]
     return AdminActiveSessionsResponse(count=len(items), items=items)
+
+
+@router.get("/logs/audit", response_model=AdminAuditLogsResponse)
+def get_audit_logs(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    event_type: str | None = Query(default=None),
+    success: bool | None = Query(default=None),
+) -> AdminAuditLogsResponse:
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    event_type,
+                    user_id,
+                    email,
+                    ip_address,
+                    user_agent,
+                    success,
+                    message,
+                    metadata,
+                    created_at
+                FROM audit_logs
+                WHERE (:event_type IS NULL OR event_type = :event_type)
+                  AND (:success IS NULL OR success = :success)
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "event_type": event_type,
+                "success": success,
+                "limit": limit,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminAuditLogRecord(**row) for row in rows]
+    return AdminAuditLogsResponse(count=len(items), items=items)

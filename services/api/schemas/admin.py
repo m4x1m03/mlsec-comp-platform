@@ -70,3 +70,21 @@ class AdminActiveSessionRecord(BaseModel):
 class AdminActiveSessionsResponse(BaseModel):
     count: int
     items: list[AdminActiveSessionRecord]
+
+
+class AdminAuditLogRecord(BaseModel):
+    id: UUID
+    event_type: str
+    user_id: UUID | None = None
+    email: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    success: bool | None = None
+    message: str | None = None
+    metadata: dict | None = None
+    created_at: datetime
+
+
+class AdminAuditLogsResponse(BaseModel):
+    count: int
+    items: list[AdminAuditLogRecord]
