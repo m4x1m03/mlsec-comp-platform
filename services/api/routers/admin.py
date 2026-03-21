@@ -33,7 +33,9 @@ from schemas.admin import (
     AdminRevokeSessionsResponse,
     AdminSetAdminRequest,
     AdminSystemCounts,
+    AdminUserRecord,
     AdminUserActionResponse,
+    AdminUsersResponse,
 )
 
 router = APIRouter(
@@ -84,6 +86,69 @@ def get_overview(
         environment=get_settings().env,
         counts=AdminSystemCounts(**counts_row),
     )
+
+
+@router.get("/users", response_model=AdminUsersResponse)
+def get_users(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None),
+    include_disabled: bool = Query(default=True),
+) -> AdminUsersResponse:
+    search_like = f"%{search}%" if search else None
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    u.id,
+                    u.email,
+                    u.username,
+                    u.is_admin,
+                    u.created_at,
+                    u.disabled_at,
+                    last_seen.last_seen_at,
+                    COALESCE(active_sessions.active_count, 0) AS active_sessions
+                FROM users u
+                LEFT JOIN LATERAL (
+                    SELECT COALESCE(us.last_seen_at, us.created_at) AS last_seen_at
+                    FROM user_sessions us
+                    WHERE us.user_id = u.id
+                      AND us.revoked_at IS NULL
+                      AND us.expires_at > NOW()
+                    ORDER BY COALESCE(us.last_seen_at, us.created_at) DESC
+                    LIMIT 1
+                ) last_seen ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS active_count
+                    FROM user_sessions us2
+                    WHERE us2.user_id = u.id
+                      AND us2.revoked_at IS NULL
+                      AND us2.expires_at > NOW()
+                ) active_sessions ON TRUE
+                WHERE (:search IS NULL OR u.email ILIKE :search_like OR u.username ILIKE :search_like)
+                  AND (:include_disabled OR u.disabled_at IS NULL)
+                ORDER BY u.created_at DESC
+                LIMIT :limit
+                OFFSET :offset
+                """
+            ),
+            {
+                "search": search,
+                "search_like": search_like,
+                "include_disabled": include_disabled,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminUserRecord(**row) for row in rows]
+    return AdminUsersResponse(count=len(items), items=items)
 
 
 @router.get("/logs/jobs", response_model=AdminJobLogsResponse)

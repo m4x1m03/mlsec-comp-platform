@@ -90,6 +90,22 @@ class AdminAuditLogsResponse(BaseModel):
     items: list[AdminAuditLogRecord]
 
 
+class AdminUserRecord(BaseModel):
+    id: UUID
+    email: str
+    username: str
+    is_admin: bool
+    created_at: datetime
+    disabled_at: datetime | None = None
+    last_seen_at: datetime | None = None
+    active_sessions: int
+
+
+class AdminUsersResponse(BaseModel):
+    count: int
+    items: list[AdminUserRecord]
+
+
 class AdminActionTokenResponse(BaseModel):
     token: str
     expires_at: datetime
