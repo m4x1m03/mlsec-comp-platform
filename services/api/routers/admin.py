@@ -19,6 +19,7 @@ from core.audit import log_audit_event
 from core.auth import AuthenticatedUser
 from core.database import get_db
 from core.settings import get_settings
+from core.submission_control import get_submission_control, set_close_at, set_manual_closed
 from schemas.admin import (
     AdminActiveSessionRecord,
     AdminActiveSessionsResponse,
@@ -32,6 +33,8 @@ from schemas.admin import (
     AdminOverviewResponse,
     AdminRevokeSessionsResponse,
     AdminSetAdminRequest,
+    AdminSubmissionControlResponse,
+    AdminSubmissionScheduleRequest,
     AdminSystemCounts,
     AdminUserRecord,
     AdminUserActionResponse,
@@ -59,13 +62,14 @@ def _log_admin_action_failure(
     message: str,
     target_user_id: UUID | None = None,
     target_email: str | None = None,
+    metadata: dict[str, str | None] | None = None,
 ) -> None:
     client_ip, user_agent = _request_meta(request)
-    metadata: dict[str, str] = {}
+    payload: dict[str, str | None] = dict(metadata or {})
     if target_user_id:
-        metadata["target_user_id"] = str(target_user_id)
+        payload["target_user_id"] = str(target_user_id)
     if target_email:
-        metadata["target_email"] = target_email
+        payload["target_email"] = target_email
     log_audit_event(
         event_type=event_type,
         user_id=current_user.user_id,
@@ -74,7 +78,7 @@ def _log_admin_action_failure(
         user_agent=user_agent,
         success=False,
         message=message,
-        metadata=metadata or None,
+        metadata=payload or None,
     )
 
 
@@ -177,6 +181,219 @@ def get_users(
     items = [AdminUserRecord(**row) for row in rows]
     return AdminUsersResponse(count=len(items), items=items)
 
+
+def _submission_control_response(
+    control,
+) -> AdminSubmissionControlResponse:
+    return AdminSubmissionControlResponse(
+        manual_closed=control.manual_closed,
+        close_at=control.close_at,
+        is_closed=control.is_closed(),
+        updated_at=control.updated_at,
+        updated_by=control.updated_by,
+    )
+
+
+@router.get("/submissions/status", response_model=AdminSubmissionControlResponse)
+def get_submission_status(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    control = get_submission_control(db)
+    return _submission_control_response(control)
+
+
+@router.post("/submissions/close", response_model=AdminSubmissionControlResponse)
+def close_submissions(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    event_type = "admin.submissions.close"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        control = set_manual_closed(
+            db,
+            closed=True,
+            updated_by=str(current_user.user_id),
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "manual_closed": str(control.manual_closed),
+                "close_at": control.close_at.isoformat() if control.close_at else None,
+            },
+        )
+
+        return _submission_control_response(control)
+    except HTTPException as exc:
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+        )
+        raise
+
+
+@router.post("/submissions/open", response_model=AdminSubmissionControlResponse)
+def open_submissions(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    event_type = "admin.submissions.open"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        control = set_manual_closed(
+            db,
+            closed=False,
+            updated_by=str(current_user.user_id),
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "manual_closed": str(control.manual_closed),
+                "close_at": control.close_at.isoformat() if control.close_at else None,
+            },
+        )
+
+        return _submission_control_response(control)
+    except HTTPException as exc:
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+        )
+        raise
+
+
+@router.post("/submissions/schedule", response_model=AdminSubmissionControlResponse)
+def schedule_submissions_close(
+    req: AdminSubmissionScheduleRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    event_type = "admin.submissions.schedule"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        control = set_close_at(
+            db,
+            close_at=req.close_at,
+            updated_by=str(current_user.user_id),
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "manual_closed": str(control.manual_closed),
+                "close_at": control.close_at.isoformat() if control.close_at else None,
+            },
+        )
+
+        return _submission_control_response(control)
+    except HTTPException as exc:
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            metadata={
+                "close_at": req.close_at.isoformat() if req.close_at else None,
+            },
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            metadata={
+                "close_at": req.close_at.isoformat() if req.close_at else None,
+            },
+        )
+        raise
 
 @router.get("/logs/jobs", response_model=AdminJobLogsResponse)
 def get_recent_jobs(

@@ -83,6 +83,22 @@ CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
 
 
 --------------------------------------------------
+-- SUBMISSION CONTROL
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS submission_control (
+    id INT PRIMARY KEY CHECK (id = 1),
+    manual_closed BOOLEAN NOT NULL DEFAULT FALSE,
+    close_at TIMESTAMPTZ NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by UUID NULL REFERENCES users(id) ON DELETE SET NULL
+);
+
+INSERT INTO submission_control (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
+
+--------------------------------------------------
 -- SUBMISSIONS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS submissions (

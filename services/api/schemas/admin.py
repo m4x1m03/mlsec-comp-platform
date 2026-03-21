@@ -106,6 +106,18 @@ class AdminUsersResponse(BaseModel):
     items: list[AdminUserRecord]
 
 
+class AdminSubmissionControlResponse(BaseModel):
+    manual_closed: bool
+    close_at: datetime | None = None
+    is_closed: bool
+    updated_at: datetime | None = None
+    updated_by: UUID | None = None
+
+
+class AdminSubmissionScheduleRequest(BaseModel):
+    close_at: datetime | None = None
+
+
 class AdminActionTokenResponse(BaseModel):
     token: str
     expires_at: datetime
