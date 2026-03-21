@@ -613,7 +613,9 @@ def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
     """
     Return filename-keyed behavioral reports for the given template.
 
-    Only rows with non-NULL behavioral_signals are included.
+    All attempted files are included (sandbox_report_ref IS NOT NULL), even
+    those where the sandbox returned no behavioral signals. Callers should
+    check whether behavioral_signals is None before using a record for scoring.
 
     Returns:
         dict mapping filename to {sha256, sandbox_report_ref, behash, behavioral_signals}
@@ -626,7 +628,7 @@ def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
                 SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
                 FROM template_file_reports
                 WHERE template_id = CAST(:tid AS uuid)
-                  AND behavioral_signals IS NOT NULL
+                  AND sandbox_report_ref IS NOT NULL
             """),
             {"tid": template_id},
         ).fetchall()
@@ -643,8 +645,16 @@ def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
 
 def is_template_fully_seeded(template_id: str) -> bool:
     """
-    Return True when every template_file_reports row for this template has
-    non-NULL behavioral_signals.
+    Return True when every template_file_reports row for this template has been
+    attempted by the sandbox (sandbox_report_ref IS NOT NULL).
+
+    Files that were submitted to the sandbox but returned no behavioral signals
+    are considered attempted and do not block this check. Those files are skipped
+    during heuristic scoring with a warning.
+
+    # TODO: Add an admin endpoint to trigger a re-seed for a specific template,
+    # so operators can retry files that returned no behavioral signals without
+    # having to re-upload the template ZIP.
     """
     from sqlalchemy import text
     engine = get_engine()
@@ -658,15 +668,15 @@ def is_template_fully_seeded(template_id: str) -> bool:
         ).scalar() or 0
         if total == 0:
             return False
-        seeded = conn.execute(
+        attempted = conn.execute(
             text("""
                 SELECT COUNT(*) FROM template_file_reports
                 WHERE template_id = CAST(:tid AS uuid)
-                  AND behavioral_signals IS NOT NULL
+                  AND sandbox_report_ref IS NOT NULL
             """),
             {"tid": template_id},
         ).scalar() or 0
-    return seeded >= total
+    return attempted >= total
 
 
 def get_active_heurval_set() -> dict | None:

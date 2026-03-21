@@ -436,6 +436,15 @@ def validate_heuristic(
             scores.append(0.0)
             continue
 
+        if template_record.get("behavioral_signals") is None:
+            logger.warning(
+                "Template file '%s' was submitted to sandbox but returned no behavioral "
+                "signals (report_ref=%s). Skipping file in similarity scoring.",
+                inner_name,
+                template_record.get("sandbox_report_ref"),
+            )
+            continue
+
         template_report = SandboxReport(
             behavioral_signals=template_record.get("behavioral_signals"),
             behash=template_record.get("behash"),

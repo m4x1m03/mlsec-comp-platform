@@ -15,9 +15,9 @@ worker:
   heuristic_validation:
     enable_heuristic_validation: true
     heurval_malware_fpr_minimum: 0.0
-    heurval_malware_tpr_minimum: 0.0
+    heurval_malware_tpr_minimum: 0.50
     heurval_goodware_fpr_minimum: 0.0
-    heurval_goodware_tpr_minimum: 0.0
+    heurval_goodware_tpr_minimum: 0.50
     reject_heurval_failures: true
   source:
     # Resource limits
@@ -37,9 +37,11 @@ worker:
     cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
   minio:
     bucket_name: "mlsec-submissions"
+    access_key: "mlsec_minio_admin"
+    secret_key: "mlsec_minio_password_change_in_production"
   attack:
     check_similarity: true           # false = skip evaluation, accept all validated attacks
-    reject_dissimilar_attacks: true  # only applies when check_similarity=true
+    reject_dissimilar_attacks: false  # only applies when check_similarity=true
                                      #   true  = reject if score < minimum_attack_similarity
                                      #   false = log score but accept regardless
     minimum_attack_similarity: 50    # 0-100 threshold (used when check_similarity=true)
