@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from core.admin import require_admin_user, require_localhost_request
+from core.admin import (
+    consume_admin_action_token,
+    issue_admin_action_token,
+    require_admin_action_token,
+    require_admin_origin,
+    require_admin_user,
+    require_localhost_request,
+)
+from core.audit import log_audit_event
 from core.auth import AuthenticatedUser
 from core.database import get_db
 from core.settings import get_settings
 from schemas.admin import (
     AdminActiveSessionRecord,
     AdminActiveSessionsResponse,
+    AdminActionTokenResponse,
     AdminAuditLogRecord,
     AdminAuditLogsResponse,
     AdminEvaluationLogRecord,
@@ -20,7 +30,10 @@ from schemas.admin import (
     AdminJobLogRecord,
     AdminJobLogsResponse,
     AdminOverviewResponse,
+    AdminRevokeSessionsResponse,
+    AdminSetAdminRequest,
     AdminSystemCounts,
+    AdminUserActionResponse,
 )
 
 router = APIRouter(
@@ -28,6 +41,12 @@ router = APIRouter(
     tags=["admin"],
     dependencies=[Depends(require_localhost_request)],
 )
+
+
+def _request_meta(request: Request) -> tuple[str | None, str | None]:
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    return client_ip, user_agent
 
 
 @router.get("/overview", response_model=AdminOverviewResponse)
@@ -221,3 +240,297 @@ def get_audit_logs(
 
     items = [AdminAuditLogRecord(**row) for row in rows]
     return AdminAuditLogsResponse(count=len(items), items=items)
+
+
+@router.post("/actions/token", response_model=AdminActionTokenResponse)
+def issue_action_token(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminActionTokenResponse:
+    require_admin_origin(request, require_present=True)
+    token, expires_at = issue_admin_action_token(db, session_id=str(current_user.session_id))
+    return AdminActionTokenResponse(token=token, expires_at=expires_at)
+
+
+@router.post("/users/{user_id}/disable", response_model=AdminUserActionResponse)
+def disable_user(
+    user_id: UUID,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserActionResponse:
+    require_admin_origin(request, require_present=True)
+    action_token = require_admin_action_token(
+        request,
+        db=db,
+        session_id=str(current_user.session_id),
+    )
+
+    if user_id == current_user.user_id:
+        raise HTTPException(status_code=400, detail="Cannot disable your own account")
+
+    now = datetime.now(timezone.utc)
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE users
+                SET disabled_at = COALESCE(disabled_at, :now)
+                WHERE id = :user_id
+                RETURNING id, email, username, is_admin, disabled_at
+                """
+            ),
+            {"user_id": str(user_id), "now": now},
+        )
+        .mappings()
+        .fetchone()
+    )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    revoked = db.execute(
+        text(
+            """
+            UPDATE user_sessions
+            SET revoked_at = :now
+            WHERE user_id = :user_id
+              AND revoked_at IS NULL
+            """
+        ),
+        {"user_id": str(user_id), "now": now},
+    ).rowcount
+
+    consume_admin_action_token(
+        db,
+        session_id=str(current_user.session_id),
+        token=action_token,
+    )
+    db.commit()
+
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.user.disable",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={
+            "target_user_id": str(row["id"]),
+            "target_email": row["email"],
+            "revoked_sessions": revoked,
+        },
+    )
+
+    return AdminUserActionResponse(
+        user_id=row["id"],
+        email=row["email"],
+        username=row["username"],
+        is_admin=row["is_admin"],
+        disabled_at=row["disabled_at"],
+        revoked_sessions=revoked,
+    )
+
+
+@router.post("/users/{user_id}/enable", response_model=AdminUserActionResponse)
+def enable_user(
+    user_id: UUID,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserActionResponse:
+    require_admin_origin(request, require_present=True)
+    action_token = require_admin_action_token(
+        request,
+        db=db,
+        session_id=str(current_user.session_id),
+    )
+
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE users
+                SET disabled_at = NULL
+                WHERE id = :user_id
+                RETURNING id, email, username, is_admin, disabled_at
+                """
+            ),
+            {"user_id": str(user_id)},
+        )
+        .mappings()
+        .fetchone()
+    )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    consume_admin_action_token(
+        db,
+        session_id=str(current_user.session_id),
+        token=action_token,
+    )
+    db.commit()
+
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.user.enable",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={
+            "target_user_id": str(row["id"]),
+            "target_email": row["email"],
+        },
+    )
+
+    return AdminUserActionResponse(
+        user_id=row["id"],
+        email=row["email"],
+        username=row["username"],
+        is_admin=row["is_admin"],
+        disabled_at=row["disabled_at"],
+    )
+
+
+@router.post("/users/{user_id}/admin", response_model=AdminUserActionResponse)
+def set_admin_role(
+    user_id: UUID,
+    req: AdminSetAdminRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserActionResponse:
+    require_admin_origin(request, require_present=True)
+    action_token = require_admin_action_token(
+        request,
+        db=db,
+        session_id=str(current_user.session_id),
+    )
+
+    if user_id == current_user.user_id and not req.is_admin:
+        raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
+
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE users
+                SET is_admin = :is_admin
+                WHERE id = :user_id
+                RETURNING id, email, username, is_admin, disabled_at
+                """
+            ),
+            {"user_id": str(user_id), "is_admin": req.is_admin},
+        )
+        .mappings()
+        .fetchone()
+    )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    consume_admin_action_token(
+        db,
+        session_id=str(current_user.session_id),
+        token=action_token,
+    )
+    db.commit()
+
+    event_type = "admin.user.promote" if req.is_admin else "admin.user.demote"
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type=event_type,
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={
+            "target_user_id": str(row["id"]),
+            "target_email": row["email"],
+            "is_admin": row["is_admin"],
+        },
+    )
+
+    return AdminUserActionResponse(
+        user_id=row["id"],
+        email=row["email"],
+        username=row["username"],
+        is_admin=row["is_admin"],
+        disabled_at=row["disabled_at"],
+    )
+
+
+@router.post("/users/{user_id}/sessions/revoke", response_model=AdminRevokeSessionsResponse)
+def revoke_user_sessions(
+    user_id: UUID,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminRevokeSessionsResponse:
+    require_admin_origin(request, require_present=True)
+    action_token = require_admin_action_token(
+        request,
+        db=db,
+        session_id=str(current_user.session_id),
+    )
+
+    user_row = (
+        db.execute(
+            text(
+                """
+                SELECT id, email
+                FROM users
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": str(user_id)},
+        )
+        .mappings()
+        .fetchone()
+    )
+
+    if user_row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    now = datetime.now(timezone.utc)
+    revoked = db.execute(
+        text(
+            """
+            UPDATE user_sessions
+            SET revoked_at = :now
+            WHERE user_id = :user_id
+              AND revoked_at IS NULL
+            """
+        ),
+        {"user_id": str(user_id), "now": now},
+    ).rowcount
+
+    consume_admin_action_token(
+        db,
+        session_id=str(current_user.session_id),
+        token=action_token,
+    )
+    db.commit()
+
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.user.revoke_sessions",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={
+            "target_user_id": str(user_row["id"]),
+            "target_email": user_row["email"],
+            "revoked_sessions": revoked,
+        },
+    )
+
+    return AdminRevokeSessionsResponse(user_id=user_row["id"], revoked_count=revoked)

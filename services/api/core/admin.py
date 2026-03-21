@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from ipaddress import ip_address, ip_network
 from typing import Iterable
+from urllib.parse import urlparse
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from core.auth import AuthenticatedUser, get_authenticated_user
 from core.settings import get_settings
@@ -115,4 +121,146 @@ def require_admin_user(
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Admin privileges required",
+    )
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def require_admin_origin(request: Request, *, require_present: bool = True) -> None:
+    """Ensure Origin/Referer points to localhost (and is present if required)."""
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+
+    def _origin_host(value: str) -> str | None:
+        try:
+            parsed = urlparse(value)
+            return parsed.hostname
+        except Exception:
+            return None
+
+    if require_present and not origin and not referer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin actions require a localhost browser origin",
+        )
+
+    if origin:
+        origin_host = _origin_host(origin)
+        if not _is_loopback_host(origin_host):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin actions require localhost origin",
+            )
+
+    if referer:
+        referer_host = _origin_host(referer)
+        if not _is_loopback_host(referer_host):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin actions require localhost origin",
+            )
+
+
+def issue_admin_action_token(
+    db: Session,
+    *,
+    session_id: str,
+) -> tuple[str, datetime]:
+    """Generate and persist a short-lived admin action token."""
+    settings = get_settings()
+    token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(token)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.admin_action_token_ttl_minutes
+    )
+
+    db.execute(
+        text(
+            """
+            DELETE FROM admin_action_tokens
+            WHERE session_id = :session_id
+            """
+        ),
+        {"session_id": session_id},
+    )
+
+    db.execute(
+        text(
+            """
+            INSERT INTO admin_action_tokens (session_id, token_hash, expires_at)
+            VALUES (:session_id, :token_hash, :expires_at)
+            """
+        ),
+        {
+            "session_id": session_id,
+            "token_hash": token_hash,
+            "expires_at": expires_at,
+        },
+    )
+
+    db.commit()
+    return token, expires_at
+
+
+def require_admin_action_token(
+    request: Request,
+    *,
+    db: Session,
+    session_id: str,
+) -> str:
+    """Validate the admin action token against the session."""
+    token = request.headers.get("x-admin-action")
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin action token required",
+        )
+
+    token_hash = _hash_token(token)
+    row = db.execute(
+        text(
+            """
+            SELECT expires_at
+            FROM admin_action_tokens
+            WHERE session_id = :session_id
+              AND token_hash = :token_hash
+            """
+        ),
+        {"session_id": session_id, "token_hash": token_hash},
+    ).fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin action token",
+        )
+
+    expires_at = row[0]
+    if expires_at and expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin action token expired",
+        )
+    return token
+
+
+def consume_admin_action_token(
+    db: Session,
+    *,
+    session_id: str,
+    token: str,
+) -> None:
+    """Consume an admin action token after use."""
+    token_hash = _hash_token(token)
+    db.execute(
+        text(
+            """
+            DELETE FROM admin_action_tokens
+            WHERE session_id = :session_id
+              AND token_hash = :token_hash
+            """
+        ),
+        {"session_id": session_id, "token_hash": token_hash},
     )

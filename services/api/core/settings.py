@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     admin_forwarded_for_header: str = "x-forwarded-for"
     admin_allowed_hosts: list[str] = []
     admin_allowed_networks: list[str] = []
+    admin_action_token_ttl_minutes: int = 15
 
     cors_allow_origins: list[str] = [
         "http://localhost:4321",

@@ -49,6 +49,19 @@ CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 
 
 --------------------------------------------------
+-- ADMIN ACTION TOKENS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS admin_action_tokens (
+    session_id UUID PRIMARY KEY REFERENCES user_sessions(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_admin_action_tokens_expires_at ON admin_action_tokens(expires_at);
+
+
+--------------------------------------------------
 -- AUDIT LOGS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS audit_logs (

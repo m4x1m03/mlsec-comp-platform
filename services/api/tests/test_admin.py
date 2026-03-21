@@ -282,3 +282,57 @@ def test_admin_job_logs_support_filters(client, db_session):
     assert body["count"] == 1
     assert body["items"][0]["status"] == "failed"
     assert body["items"][0]["job_type"] == "A"
+
+
+def test_admin_action_token_requires_origin(client, db_session):
+    admin_user_id = _create_user(db_session, is_admin=True)
+    access_token = _create_session_token(db_session, user_id=admin_user_id)
+
+    resp = client.post("/admin/actions/token", headers={"Authorization": f"Bearer {access_token}"})
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Admin actions require a localhost browser origin"
+
+
+def test_admin_disable_user_requires_action_token(client, db_session):
+    admin_user_id = _create_user(db_session, is_admin=True)
+    target_user_id = _create_user(db_session, is_admin=False)
+    access_token = _create_session_token(db_session, user_id=admin_user_id)
+    origin = "http://localhost:14321"
+
+    token_resp = client.post(
+        "/admin/actions/token",
+        headers={"Authorization": f"Bearer {access_token}", "Origin": origin},
+    )
+    assert token_resp.status_code == 200
+    token = token_resp.json()["token"]
+
+    missing_token_resp = client.post(
+        f"/admin/users/{target_user_id}/disable",
+        headers={"Authorization": f"Bearer {access_token}", "Origin": origin},
+    )
+    assert missing_token_resp.status_code == 403
+    assert missing_token_resp.json()["detail"] == "Admin action token required"
+
+    disable_resp = client.post(
+        f"/admin/users/{target_user_id}/disable",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Origin": origin,
+            "X-Admin-Action": token,
+        },
+    )
+    assert disable_resp.status_code == 200
+    assert disable_resp.json()["user_id"] == target_user_id
+    assert disable_resp.json()["disabled_at"] is not None
+
+    reused_token_resp = client.post(
+        f"/admin/users/{target_user_id}/disable",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Origin": origin,
+            "X-Admin-Action": token,
+        },
+    )
+    assert reused_token_resp.status_code == 403
+    assert reused_token_resp.json()["detail"] == "Invalid admin action token"

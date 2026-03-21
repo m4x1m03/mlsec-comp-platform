@@ -88,3 +88,26 @@ class AdminAuditLogRecord(BaseModel):
 class AdminAuditLogsResponse(BaseModel):
     count: int
     items: list[AdminAuditLogRecord]
+
+
+class AdminActionTokenResponse(BaseModel):
+    token: str
+    expires_at: datetime
+
+
+class AdminSetAdminRequest(BaseModel):
+    is_admin: bool
+
+
+class AdminUserActionResponse(BaseModel):
+    user_id: UUID
+    email: str
+    username: str
+    is_admin: bool
+    disabled_at: datetime | None = None
+    revoked_sessions: int | None = None
+
+
+class AdminRevokeSessionsResponse(BaseModel):
+    user_id: UUID
+    revoked_count: int
