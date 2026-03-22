@@ -49,3 +49,4 @@ worker:
     minimum_attack_similarity: 50    # 0-100 threshold (used when check_similarity=true)
     max_zip_size_mb: 100
     sandbox_backend: "virustotal"    # "virustotal" | "local"
+    cache_persistence_duration: 300  # seconds of inactivity before clearing the sample cache

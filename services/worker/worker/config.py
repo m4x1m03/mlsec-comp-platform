@@ -86,6 +86,7 @@ class AttackConfig(BaseModel):
     template_path: str | None = None  # Removed: template is now managed via the admin endpoint and DB
     max_zip_size_mb: int = 100
     sandbox_backend: str = "virustotal"  # "virustotal" | "local"
+    cache_persistence_duration: int = 300  # seconds of queue inactivity before clearing sample cache
     virustotal_api_key: str = Field(
         default_factory=lambda: os.getenv("VIRUSTOTAL_API_KEY", "")
     )
