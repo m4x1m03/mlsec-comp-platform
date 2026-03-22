@@ -416,6 +416,7 @@ def run_batch_defense_job(
         logger.info(f"Cleaning up resources for batch job {job_id}")
         # Unregister worker from Redis
         registry.unregister(worker_id)
+        source_config = config_dict.get('worker', {}).get('source', {})
         for ctx in defense_contexts:
             try:
                 # Cleanup container
@@ -423,7 +424,7 @@ def run_batch_defense_job(
                 ctx["container"].remove()
             except Exception as e:
                 logger.debug(f"Failed to remove container for defense {ctx.get('defense_submission_id')}: {e}")
-            
+
             try:
                 # Cleanup network
                 ctx["network"].disconnect(client.containers.get("mlsec-gateway"), force=True)
@@ -438,20 +439,31 @@ def run_batch_defense_job(
                 gateway_container.exec_run(f"iptables -t nat -D PREROUTING -p tcp --dport {ctx['gateway_port']} -m comment --comment {rule_id} -j DNAT --to-destination {ctx['student_ip']}:8080")
                 gateway_container.exec_run(f"iptables -t nat -D POSTROUTING -d {ctx['student_ip']} -p tcp --dport 8080 -m comment --comment {rule_id} -j MASQUERADE")
                 gateway_container.exec_run(f"iptables -D FORWARD -p tcp -d {ctx['student_ip']} --dport 8080 -m comment --comment {rule_id} -j ACCEPT")
-                
+
                 # Release port
                 registry.release_gateway_port(ctx["gateway_port"])
             except Exception as e:
                 logger.warning(f"Failed to cleanup iptables or release port for defense {ctx.get('defense_submission_id')}: {e}")
-
             if ctx.get("image_name") and ctx.get("source_type") in ['github', 'zip']:
-                if config_dict.get('worker', {}).get('source', {}).get('cleanup_built_images', True):
-                    try: 
-                        # Cleanup built image (GitHub/ZIP sources only)
+                if source_config.get('cleanup_built_images', True):
+                    try:
                         logger.info(f"Removing built image {ctx['image_name']}")
                         client.images.remove(ctx["image_name"], force=True)
                     except Exception as e:
                         logger.debug(f"Failed to remove image {ctx['image_name']}: {e}")
+            elif ctx.get("image_name") and ctx.get("source_type") == 'docker':
+                if source_config.get('cleanup_pulled_images', True):
+                    try:
+                        logger.info(f"Removing pulled image {ctx['image_name']}")
+                        client.images.remove(ctx["image_name"], force=True)
+                    except Exception as e:
+                        logger.debug(f"Failed to remove pulled image {ctx['image_name']}: {e}")
+
+        try:
+            client.images.prune(filters={'dangling': True})
+            logger.debug("Pruned dangling images")
+        except Exception as e:
+            logger.debug(f"Failed to prune dangling images: {e}")
 
 
 @celery_app.task(name="worker.tasks.run_defense_job", bind=True)

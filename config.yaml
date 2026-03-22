@@ -36,6 +36,7 @@ worker:
 
     # Cleanup settings
     cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
+    cleanup_pulled_images: true           # Remove pulled images after evaluation (Docker Hub sources only)
   minio:
     bucket_name: "mlsec-submissions"
     access_key: "mlsec_minio_admin"

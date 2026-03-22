@@ -66,8 +66,8 @@ class SourceConfig(BaseModel):
     max_dockerfile_size_kb: int = 100
 
     # Cleanup settings
-    # Remove GitHub/ZIP images after evaluation TODO: Adjust settings
-    cleanup_built_images: bool = True
+    cleanup_built_images: bool = True   # Remove GitHub/ZIP images after evaluation
+    cleanup_pulled_images: bool = True  # Remove Docker Hub images after evaluation
 
 
 class AttackConfig(BaseModel):
