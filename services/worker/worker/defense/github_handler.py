@@ -73,6 +73,8 @@ def build_from_github_repo(
         source_config = config.get('source', {})
         no_cache = source_config.get('no_cache', True)
         build_timeout = source_config.get('max_build_time_seconds', 300)
+        network_disabled = source_config.get('network_disabled', True)
+        network_mode = 'none' if network_disabled else 'default'
 
         def _run_build():
             return client.images.build(
@@ -82,7 +84,7 @@ def build_from_github_repo(
                 rm=True,
                 forcerm=True,
                 pull=False,
-                network_mode='none',
+                network_mode=network_mode,
                 use_config_proxy=False
             )
 

@@ -757,15 +757,19 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
         test_image, force=True)
 
 
-def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
-    """Test that Docker Hub images are NOT removed after evaluation."""
-    from worker import tasks
+def test_defense_job_removes_docker_hub_images(db_session, fake_redis, test_helpers, monkeypatch):
+    """Test that Docker Hub images ARE removed after evaluation when cleanup_pulled_images is true."""
+    import worker.tasks
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
         self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    patched_config = worker.tasks.config.model_copy(deep=True)
+    patched_config.worker.source.cleanup_pulled_images = True
+    monkeypatch.setattr(worker.tasks, "config", patched_config)
 
     # Create Docker Hub defense
     defense_id = test_helpers.create_defense(
@@ -791,7 +795,7 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
     mock_docker_client.containers.run.return_value = fake_container
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
-    mock_docker_client.images.remove = Mock()  # Track cleanup
+    mock_docker_client.images.remove = Mock()
 
     # Mock Docker image for size validation
     mock_image = Mock()
@@ -823,7 +827,82 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
-    # Verify image cleanup was NOT called
+    # Verify pulled image was removed
+    mock_docker_client.images.remove.assert_called_once_with(
+        "user/defense:latest", force=True)
+
+
+def test_defense_job_keeps_docker_hub_images_when_disabled(db_session, fake_redis, test_helpers, monkeypatch):
+    """Test that Docker Hub images are NOT removed when cleanup_pulled_images is false."""
+    import worker.tasks
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    patched_config = worker.tasks.config.model_copy(deep=True)
+    patched_config.worker.source.cleanup_pulled_images = False
+    monkeypatch.setattr(worker.tasks, "config", patched_config)
+
+    # Create Docker Hub defense
+    defense_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense:latest",
+        is_functional=True
+    )
+
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_id
+    )
+
+    # Create attack
+    attack_id = test_helpers.create_attack()
+
+    # Mock Docker
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork(f"eval_net_{job_id}")
+
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    mock_docker_client.images.remove = Mock()
+
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    # Mock HTTP requests
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    # Mock docker handler
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image",
+        lambda x: x
+    )
+
+    # Mock validation
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional",
+        lambda *args, **kwargs: None
+    )
+
+    monkeypatch.setattr(
+        "worker.defense.evaluate.evaluate_defenses_async", AsyncMock())
+
+    # Run defense job
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+
+    # Verify image removal was NOT called
     mock_docker_client.images.remove.assert_not_called()
 
 

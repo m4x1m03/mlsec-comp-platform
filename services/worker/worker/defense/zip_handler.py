@@ -120,6 +120,8 @@ def build_from_zip_archive(
         # Extract security settings from config
         no_cache = source_config.get('no_cache', True)
         build_timeout = source_config.get('max_build_time_seconds', 300)
+        network_disabled = source_config.get('network_disabled', True)
+        network_mode = 'none' if network_disabled else 'default'
 
         def _run_build():
             return docker_client.images.build(
@@ -129,7 +131,7 @@ def build_from_zip_archive(
                 rm=True,
                 forcerm=True,
                 pull=False,
-                network_mode='none',
+                network_mode=network_mode,
                 use_config_proxy=False
             )
 
