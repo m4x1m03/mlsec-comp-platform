@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import shutil
 import tempfile
 from pathlib import Path
@@ -70,33 +71,32 @@ def build_from_github_repo(
 
         # Extract security settings from config
         source_config = config.get('source', {})
-        network_disabled = source_config.get('network_disabled', True)
         no_cache = source_config.get('no_cache', True)
+        build_timeout = source_config.get('max_build_time_seconds', 300)
 
-        # Build arguments
-        buildargs = {}
-
-        # BuildKit and security options
-        extra_hosts = None
-        if network_disabled:
-            # Disable network during build
-            extra_hosts = {}
-
-        # Build the image
-        try:
-            image, build_logs = client.images.build(
+        def _run_build():
+            return client.images.build(
                 path=str(build_context),
                 tag=image_name,
                 nocache=no_cache,
-                rm=True,  # Remove intermediate containers
-                forcerm=True,  # Always remove intermediate containers
-                pull=False,  # Don't pull base images (security)
-                extra_hosts=extra_hosts,
-                buildargs=buildargs,
+                rm=True,
+                forcerm=True,
+                pull=False,
+                network_mode='none',
                 use_config_proxy=False
             )
 
-            # Log build output
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_run_build)
+                try:
+                    image, build_logs = future.result(timeout=build_timeout)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    raise ValueError(
+                        f"Docker build timed out after {build_timeout} seconds"
+                    )
+
             for log_entry in build_logs:
                 if 'stream' in log_entry:
                     logger.info(log_entry['stream'].strip())

@@ -659,9 +659,8 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                     inner_name = _inner_filename(file_path, extract_path)
                     submission_files.append((inner_name, str(file_path)))
 
-                    # Construct object key for future reference
-                    # In a real implementation, these might be uploaded back to MinIO
                     file_object_key = f"attack/{attack_submission_id}/{rel_path}"
+                    minio_client.fput_object(bucket_name, file_object_key, str(file_path))
 
                     extracted_files.append({
                         "filename": str(rel_path),
