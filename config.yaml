@@ -22,6 +22,7 @@ worker:
   source:
     # Resource limits
     max_zip_size_mb: 512
+    max_uncompressed_zip_size_mb: 2048
     max_build_time_seconds: 300
     build_mem_limit: "2g"
     temp_build_dir: "/tmp/mlsec-builds"  # Inside container only - NOT mounted from host

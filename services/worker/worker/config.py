@@ -53,6 +53,7 @@ class SourceConfig(BaseModel):
     """Configuration for building defense artifacts from various sources."""
     # Resource limits
     max_zip_size_mb: int = 512
+    max_uncompressed_zip_size_mb: int = 2048
     max_build_time_seconds: int = 300
     build_mem_limit: str = "2g"
     temp_build_dir: str = "/tmp/mlsec-builds"
