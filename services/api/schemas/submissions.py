@@ -67,3 +67,24 @@ class SubmissionDetailsResponse(BaseModel):
     user_id: str
     # Nested details added dynamically based on type
     details: dict
+
+
+class SubmissionListItem(BaseModel):
+    """One entry in a user's submission list."""
+
+    submission_id: str
+    submission_type: str
+    status: str
+    is_functional: bool | None
+    functional_error: str | None
+    version: str
+    display_name: str | None
+    created_at: str
+    is_active: bool
+
+
+class SetActiveResponse(BaseModel):
+    """Response after setting an active submission."""
+
+    submission_id: str
+    submission_type: str
