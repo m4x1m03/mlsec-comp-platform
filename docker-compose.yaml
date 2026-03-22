@@ -158,6 +158,7 @@ services:
     container_name: mlsec-frontend
     environment:
       PUBLIC_API_URL: http://localhost:8000
+      API_INTERNAL_URL: http://api:8000
     volumes:
       - ./services/frontend:/app
       - /app/node_modules
