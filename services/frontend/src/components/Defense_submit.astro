@@ -1,20 +1,119 @@
 ---
-import InputLink from "./InputLink.astro";
-import FileUpload from "./FileUpload.astro";
-import SubmissionForm from "./Form.astro";
 ---
 
-<div class="flex flex-col flex-1 bg-green-100 ml-6 mr-3 mt-6 mb-3 p-7 rounded-xl">
-  <h1 class="text-2xl font-semibold text-gray-900 pb-2">Model Submission</h1>
-  <SubmissionForm button_text="Submit Model">
-    <div class="flex flex-col">
-      <InputLink title="DockerHub Link:" placeholder="https://hub.docker.com/" submit_text="Submit Model"/>
-      <div class="flex items-center my-2">
-        <div class="flex-1 border-t border-gray-300"></div>
-        <span class="px-2 text-sm text-gray-500 font-medium">OR</span>
-        <div class="flex-1 border-t border-gray-300"></div>
+<div class="flex flex-col flex-1 bg-white border border-gray-200 shadow-sm ml-6 mr-3 mt-6 mb-3 p-6 rounded-xl">
+  <h2 class="text-xl font-semibold text-gray-900 mb-5">Model Submission</h2>
+
+  <form id="defense-form" class="flex flex-col gap-4">
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Source</label>
+      <div class="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+        <button type="button" class="defense-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors bg-white text-gray-900 shadow-sm" data-tab="docker">DockerHub</button>
+        <button type="button" class="defense-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-gray-500 hover:text-gray-700" data-tab="github">GitHub</button>
+        <button type="button" class="defense-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-gray-500 hover:text-gray-700" data-tab="zip">ZIP</button>
       </div>
-      <FileUpload title="Upload Docker Image File:" subtext="Uplaod Dockerfile up to 10Mb"/>
     </div>
-  </SubmissionForm>
+
+    <div id="defense-panel-docker">
+      <label for="defense-docker" class="block text-sm font-medium text-gray-700 mb-1">DockerHub Image</label>
+      <input
+        type="text"
+        id="defense-docker"
+        name="docker_image"
+        placeholder="username/image:tag"
+        class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+      />
+    </div>
+
+    <div id="defense-panel-github" class="hidden">
+      <label for="defense-github" class="block text-sm font-medium text-gray-700 mb-1">GitHub Repository</label>
+      <input
+        type="url"
+        id="defense-github"
+        name="git_repo"
+        placeholder="https://github.com/org/repo"
+        class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+      />
+    </div>
+
+    <div id="defense-panel-zip" class="hidden">
+      <label class="block text-sm font-medium text-gray-700 mb-1">ZIP Archive</label>
+      <label
+        for="defense-file"
+        class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition"
+      >
+        <div class="flex flex-col items-center text-center px-4">
+          <svg class="w-8 h-8 mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6H16a5 5 0 011 9.9M12 12v9m0 0l-3-3m3 3l3-3" />
+          </svg>
+          <p class="text-sm text-gray-600">
+            <span class="font-medium text-primary">Click to upload</span> or drag and drop
+          </p>
+          <p class="text-xs text-gray-400 mt-0.5">ZIP file up to 10 MB</p>
+        </div>
+        <input id="defense-file" name="file" type="file" accept=".zip" class="hidden" />
+      </label>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label for="defense-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+        <input
+          type="text"
+          id="defense-name"
+          name="display_name"
+          placeholder="My Defense"
+          class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+        />
+      </div>
+      <div>
+        <label for="defense-version" class="block text-sm font-medium text-gray-700 mb-1">Version</label>
+        <input
+          type="text"
+          id="defense-version"
+          name="version"
+          placeholder="1.0.0"
+          pattern="^\d+\.\d+\.\d+$"
+          required
+          class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+        />
+      </div>
+    </div>
+
+    <div id="defense-feedback" class="hidden text-sm rounded-lg px-3 py-2"></div>
+
+    <button
+      type="submit"
+      class="w-full bg-primary hover:bg-secondary text-white font-semibold py-2.5 rounded-lg transition duration-200"
+    >
+      Submit Model
+    </button>
+
+  </form>
 </div>
+
+<script>
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.defense-tab');
+  const panels: Record<string, HTMLElement | null> = {
+    docker: document.getElementById('defense-panel-docker'),
+    github: document.getElementById('defense-panel-github'),
+    zip:    document.getElementById('defense-panel-zip'),
+  };
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab!;
+      tabs.forEach(t => {
+        const active = t.dataset.tab === target;
+        t.classList.toggle('bg-white',    active);
+        t.classList.toggle('text-gray-900', active);
+        t.classList.toggle('shadow-sm',   active);
+        t.classList.toggle('text-gray-500', !active);
+      });
+      Object.entries(panels).forEach(([key, panel]) => {
+        panel?.classList.toggle('hidden', key !== target);
+      });
+    });
+  });
+</script>
