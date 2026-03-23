@@ -187,3 +187,7 @@ class WorkerRegistry:
     def release_gateway_port(self, port: int) -> None:
         """Release a gateway port."""
         self.client.delete(f"gateway:port:{port}")
+
+    def publish_leaderboard_update(self) -> None:
+        """Notify connected API clients that leaderboard scores have changed."""
+        self.client.publish("leaderboard:updated", "1")

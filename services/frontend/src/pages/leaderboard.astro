@@ -1,7 +1,7 @@
 ---
 import Navbar from "../components/Navbar.astro";
 import Footer from "../components/Footer.astro";
-import Health from "../components/health.astro";
+import EvaluationMatrix from "../components/EvaluationMatrix";
 ---
 
 <html lang="en">
@@ -16,11 +16,10 @@ import Health from "../components/health.astro";
   <body class="flex flex-col min-h-screen bg-gray-50">
     <Navbar />
     <div class="flex-grow max-w-7xl mx-auto w-full px-6 py-10">
-      <div class="flex items-center justify-between mb-6">
+      <div class="mb-6">
         <h1 class="text-2xl font-semibold text-gray-900">Evaluation Matrix</h1>
-        <Health />
       </div>
-      <div id="matrix-root"></div>
+      <EvaluationMatrix client:load />
     </div>
     <Footer />
   </body>

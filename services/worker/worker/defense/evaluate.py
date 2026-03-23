@@ -17,7 +17,8 @@ from worker.db import (
     mark_defense_failed,
     set_evaluation_run_status,
     upsert_evaluation,
-    get_attack_files
+    upsert_pair_score,
+    get_attack_files,
 )
 from worker.redis_client import WorkerRegistry
 from worker.cache_handler import get_sample_path
@@ -352,10 +353,16 @@ async def evaluate_defenses_async(
                     registry.close_queue(worker_id)
                     return
 
-            # Mark evaluation runs as done after all files for this attack.
-            for run_id in runs:
+            # Mark evaluation runs as done and aggregate pair scores.
+            for ctx, run_id in zip(active_contexts, runs):
                 set_evaluation_run_status(run_id, "done")
+                upsert_pair_score(
+                    evaluation_run_id=run_id,
+                    defense_submission_id=ctx["defense_submission_id"],
+                    attack_submission_id=attack_id,
+                )
 
+            registry.publish_leaderboard_update()
             registry.heartbeat(worker_id)
 
     logger.info("Async batch evaluation complete")

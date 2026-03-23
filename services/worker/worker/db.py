@@ -131,6 +131,55 @@ def upsert_evaluation(
         )
 
 
+def upsert_pair_score(
+    *,
+    evaluation_run_id: str,
+    defense_submission_id: str,
+    attack_submission_id: str,
+) -> None:
+    """Aggregate per-file results into evaluation_pair_scores for a completed run."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO evaluation_pair_scores (
+                    defense_submission_id,
+                    attack_submission_id,
+                    latest_evaluation_run_id,
+                    zip_score_avg,
+                    n_files_scored,
+                    n_files_error,
+                    computed_at
+                )
+                SELECT
+                    :def_id,
+                    :atk_id,
+                    :run_id,
+                    AVG(model_output::numeric)         FILTER (WHERE model_output IS NOT NULL),
+                    COUNT(*)                           FILTER (WHERE model_output IS NOT NULL),
+                    COUNT(*)                           FILTER (WHERE error IS NOT NULL),
+                    NOW()
+                FROM evaluation_file_results
+                WHERE evaluation_run_id = :run_id
+                ON CONFLICT (defense_submission_id, attack_submission_id)
+                DO UPDATE SET
+                    latest_evaluation_run_id = EXCLUDED.latest_evaluation_run_id,
+                    zip_score_avg            = EXCLUDED.zip_score_avg,
+                    n_files_scored           = EXCLUDED.n_files_scored,
+                    n_files_error            = EXCLUDED.n_files_error,
+                    computed_at              = EXCLUDED.computed_at
+                """
+            ),
+            {
+                "def_id": defense_submission_id,
+                "atk_id": attack_submission_id,
+                "run_id": evaluation_run_id,
+            },
+        )
+
+
 def get_defense_submission_source(submission_id: str) -> tuple[str, dict]:
     """
     Query defense_submission_details and return source type with relevant data.

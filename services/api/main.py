@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -8,7 +9,7 @@ from core.settings import get_settings
 from routers.admin import router as admin_router
 from routers.auth import router as auth_router
 from routers.health import router as health_router
-from routers.leaderboard import router as leaderboard_router
+from routers.leaderboard import router as leaderboard_router, start_redis_subscriber
 from routers.queue import router as queue_router
 from routers.submissions import router as submissions_router
 
@@ -29,9 +30,15 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize MinIO: {e}")
         # Continue startup (may fail later on upload, but allows API to start)
 
+    subscriber_task = asyncio.create_task(start_redis_subscriber())
+
     yield  # Application runs here
 
-    # NOTE: Cleanup code would go here
+    subscriber_task.cancel()
+    try:
+        await subscriber_task
+    except asyncio.CancelledError:
+        pass
     logger.info("API shutting down...")
 
 

@@ -4,6 +4,7 @@ import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
 import tailwind from '@astrojs/tailwind';
 
+const apiTarget = process.env.API_INTERNAL_URL || 'http://127.0.0.1:8000';
 
 // https://astro.build/config
 export default defineConfig({
@@ -12,8 +13,9 @@ export default defineConfig({
   vite: {
     server: {
       proxy: {
-        '/health': 'http://127.0.0.1:8000',
-        '/auth': 'http://127.0.0.1:8000',
+        '/health': apiTarget,
+        '/auth':   apiTarget,
+        '/api':    apiTarget,
       },
     },
   },
