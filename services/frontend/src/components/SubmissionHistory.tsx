@@ -165,9 +165,9 @@ export default function SubmissionHistory({ type, title }: Props) {
   };
 
   return (
-    <div className="flex flex-col mb-4 last:mb-0">
-      <h2 className="text-base font-semibold text-gray-700 mb-2">{title}</h2>
-      <div className="rounded-lg bg-gray-50 border border-gray-200 overflow-y-auto max-h-64">
+    <div className="flex flex-col flex-1 min-h-48">
+      <h2 className="text-base font-semibold text-gray-700 mb-2 shrink-0">{title}</h2>
+      <div className="flex-1 min-h-0 rounded-lg bg-gray-50 border border-gray-200 overflow-y-auto">
         {loading ? (
           <p className="text-sm text-gray-400 p-4">Loading...</p>
         ) : submissions.length === 0 ? (

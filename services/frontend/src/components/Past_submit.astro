@@ -2,9 +2,9 @@
 import SubmissionHistory from './SubmissionHistory';
 ---
 
-<div class="flex flex-1 flex-col max-w-2xl flex-grow bg-white border border-gray-200 shadow-sm ml-3 mr-6 mt-6 mb-3 p-6 rounded-xl">
-  <h1 class="text-xl font-semibold text-gray-900 mb-4">Submission History</h1>
-  <div class="flex flex-col flex-grow gap-2">
+<div class="flex flex-col w-96 shrink-0 bg-white border border-gray-200 shadow-sm ml-3 mr-6 my-6 p-6 rounded-xl overflow-hidden">
+  <h1 class="text-xl font-semibold text-gray-900 mb-4 shrink-0">Submission History</h1>
+  <div class="flex flex-col flex-1 gap-3 min-h-0">
     <SubmissionHistory type="defense" title="Defense Submissions" client:load />
     <SubmissionHistory type="attack" title="Attack Submissions" client:load />
   </div>
