@@ -29,7 +29,7 @@ worker:
 
     # Security settings for build isolation
     use_buildkit: true                    # Enable Docker BuildKit security features
-    network_disabled: true                # Prevent network access during builds
+    network_disabled: false               # Allow network access during builds (needed for pip install)
     no_cache: true                        # Prevent cache poisoning
     build_cpu_quota: 100000               # Limit CPU usage to 1 core (prevent resource spamming)
     max_dockerfile_size_kb: 100           # Limit Dockerfile size (negotiable, we can remove this)

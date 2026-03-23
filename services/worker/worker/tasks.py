@@ -233,25 +233,30 @@ def run_batch_defense_job(
             
             image_name = None
             # Build/pull defense image from source
-            if source_type == "docker":
-                from worker.defense.docker_handler import pull_and_resolve_docker_image
-                image_name = pull_and_resolve_docker_image(
-                    source_data["docker_image"]
-                )
-            elif source_type == "github":
-                from worker.defense.github_handler import build_from_github_repo
-                image_name = build_from_github_repo(
-                    source_data["git_repo"], 
-                    defense_submission_id, 
-                    config_dict
-                )
-            elif source_type == "zip":
-                from worker.defense.zip_handler import build_from_zip_archive
-                image_name = build_from_zip_archive(
-                    source_data["object_key"], 
-                    defense_submission_id, 
-                    config_dict
-                )
+            try:
+                if source_type == "docker":
+                    from worker.defense.docker_handler import pull_and_resolve_docker_image
+                    image_name = pull_and_resolve_docker_image(
+                        source_data["docker_image"]
+                    )
+                elif source_type == "github":
+                    from worker.defense.github_handler import build_from_github_repo
+                    image_name = build_from_github_repo(
+                        source_data["git_repo"],
+                        defense_submission_id,
+                        config_dict
+                    )
+                elif source_type == "zip":
+                    from worker.defense.zip_handler import build_from_zip_archive
+                    image_name = build_from_zip_archive(
+                        source_data["object_key"],
+                        defense_submission_id,
+                        config_dict
+                    )
+            except Exception as e:
+                logger.error(f"Failed to build image for defense {defense_submission_id}: {e}")
+                mark_defense_failed(defense_submission_id, f"Image build failed: {e}")
+                continue
             
             gateway_port = registry.lease_gateway_port(job_id=job_id)
             

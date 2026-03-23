@@ -18,10 +18,10 @@ interface Props {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  submitted:  'bg-gray-100 text-gray-500',
-  evaluating: 'bg-amber-50 text-amber-700',
-  ready:      'bg-green-50 text-green-700',
-  failed:     'bg-red-50 text-red-600',
+  submitted:  'text-gray-400',
+  evaluating: 'text-amber-500 font-semibold',
+  ready:      'text-green-600 font-semibold',
+  failed:     'text-red-600 font-semibold',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -46,7 +46,7 @@ function StarIcon({ filled }: { filled: boolean }) {
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 20 20"
         fill="currentColor"
-        className="w-4 h-4 flex-shrink-0 text-primary"
+        className="w-4 h-4 flex-shrink-0 text-yellow-400"
       >
         <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
       </svg>
@@ -148,6 +148,15 @@ export default function SubmissionHistory({ type, title }: Props) {
     return () => document.removeEventListener('submission-created', handler);
   }, [fetchSubmissions, type]);
 
+  useEffect(() => {
+    const hasActive = submissions.some(
+      s => s.status === 'submitted' || s.status === 'evaluating'
+    );
+    if (!hasActive) return;
+    const id = setInterval(fetchSubmissions, 5000);
+    return () => clearInterval(id);
+  }, [submissions, fetchSubmissions]);
+
   const handleSetActive = async (submissionId: string) => {
     const res = await fetch(`/api/submissions/${submissionId}/active`, { method: 'PUT' });
     if (!res.ok) return;
@@ -167,15 +176,15 @@ export default function SubmissionHistory({ type, title }: Props) {
   return (
     <div className="flex flex-col flex-1 min-h-48">
       <h2 className="text-base font-semibold text-gray-700 mb-2 shrink-0">{title}</h2>
-      <div className="flex-1 min-h-0 rounded-lg bg-gray-50 border border-gray-200 overflow-y-auto">
+      <div className="flex-1 min-h-0 rounded-lg bg-gray-50 border border-gray-200 overflow-y-auto p-1.5">
         {loading ? (
           <p className="text-sm text-gray-400 p-4">Loading...</p>
         ) : submissions.length === 0 ? (
           <p className="text-sm text-gray-400 p-4">No submissions yet.</p>
         ) : (
-          <ul className="divide-y divide-gray-100">
+          <ul className="flex flex-col gap-1.5">
             {submissions.map(sub => (
-              <li key={sub.submission_id}>
+              <li key={sub.submission_id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <button
                     onClick={() => handleSetActive(sub.submission_id)}
@@ -198,7 +207,7 @@ export default function SubmissionHistory({ type, title }: Props) {
                   </span>
 
                   <span
-                    className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${STATUS_STYLES[sub.status] ?? STATUS_STYLES.submitted}`}
+                    className={`text-xs flex-shrink-0 ${STATUS_STYLES[sub.status] ?? STATUS_STYLES.submitted}`}
                   >
                     {STATUS_LABELS[sub.status] ?? sub.status}
                   </span>
@@ -213,8 +222,8 @@ export default function SubmissionHistory({ type, title }: Props) {
                 </div>
 
                 {expanded.has(sub.submission_id) && (
-                  <div className="px-3 pb-2.5">
-                    <div className="bg-white border border-gray-100 rounded-lg px-3 py-2">
+                  <div className="px-3 pb-2.5 border-t border-gray-100">
+                    <div className="pt-2">
                       <ExpandedDetail sub={sub} />
                     </div>
                   </div>
