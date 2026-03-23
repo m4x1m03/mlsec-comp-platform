@@ -106,14 +106,74 @@
       const target = tab.dataset.tab!;
       tabs.forEach(t => {
         const active = t.dataset.tab === target;
-        t.classList.toggle('bg-white',    active);
+        t.classList.toggle('bg-white',      active);
         t.classList.toggle('text-gray-900', active);
-        t.classList.toggle('shadow-sm',   active);
+        t.classList.toggle('shadow-sm',     active);
         t.classList.toggle('text-gray-500', !active);
       });
       Object.entries(panels).forEach(([key, panel]) => {
         panel?.classList.toggle('hidden', key !== target);
       });
     });
+  });
+</script>
+
+<script>
+  document.getElementById('defense-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const feedback = document.getElementById('defense-feedback')!;
+    const btn = document.querySelector<HTMLButtonElement>('#defense-form button[type="submit"]')!;
+    const version     = (document.getElementById('defense-version') as HTMLInputElement).value.trim();
+    const displayName = (document.getElementById('defense-name')    as HTMLInputElement).value.trim() || null;
+    const activeTab   = document.querySelector<HTMLButtonElement>('.defense-tab.bg-white')?.dataset.tab ?? 'docker';
+
+    btn.disabled    = true;
+    btn.textContent = 'Submitting...';
+    feedback.className = 'hidden text-sm rounded-lg px-3 py-2';
+
+    try {
+      let res: Response;
+
+      if (activeTab === 'docker') {
+        const dockerImage = (document.getElementById('defense-docker') as HTMLInputElement).value.trim();
+        res = await fetch('/api/submissions/defense/docker', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ docker_image: dockerImage, version, display_name: displayName }),
+        });
+      } else if (activeTab === 'github') {
+        const gitRepo = (document.getElementById('defense-github') as HTMLInputElement).value.trim();
+        res = await fetch('/api/submissions/defense/github', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ git_repo: gitRepo, version, display_name: displayName }),
+        });
+      } else {
+        const fileInput = document.getElementById('defense-file') as HTMLInputElement;
+        const file = fileInput.files?.[0];
+        if (!file) throw new Error('Please select a ZIP file.');
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('version', version);
+        if (displayName) fd.append('display_name', displayName);
+        res = await fetch('/api/submissions/defense/zip', { method: 'POST', body: fd });
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+
+      feedback.textContent = `Submitted (ID: ${data.submission_id})`;
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
+      (e.target as HTMLFormElement).reset();
+      document.dispatchEvent(new CustomEvent('submission-created', { detail: { type: 'defense' } }));
+
+    } catch (err: unknown) {
+      feedback.textContent = (err instanceof Error ? err.message : null) ?? 'Submission failed.';
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Submit Model';
+    }
   });
 </script>

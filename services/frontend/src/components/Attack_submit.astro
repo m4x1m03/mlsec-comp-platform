@@ -61,3 +61,49 @@
 
   </form>
 </div>
+
+<script>
+  document.getElementById('attack-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const feedback    = document.getElementById('attack-feedback')!;
+    const btn         = document.querySelector<HTMLButtonElement>('#attack-form button[type="submit"]')!;
+    const version     = (document.getElementById('attack-version') as HTMLInputElement).value.trim();
+    const displayName = (document.getElementById('attack-name')    as HTMLInputElement).value.trim() || null;
+    const fileInput   = document.getElementById('attack-file') as HTMLInputElement;
+    const file        = fileInput.files?.[0];
+
+    if (!file) {
+      feedback.textContent = 'Please select a ZIP file.';
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+      return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = 'Submitting...';
+    feedback.className = 'hidden text-sm rounded-lg px-3 py-2';
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('version', version);
+      if (displayName) fd.append('display_name', displayName);
+
+      const res  = await fetch('/api/submissions/attack/zip', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+
+      feedback.textContent = `Submitted (ID: ${data.submission_id})`;
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
+      (e.target as HTMLFormElement).reset();
+      document.dispatchEvent(new CustomEvent('submission-created', { detail: { type: 'attack' } }));
+
+    } catch (err: unknown) {
+      feedback.textContent = (err instanceof Error ? err.message : null) ?? 'Submission failed.';
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Submit Attack';
+    }
+  });
+</script>
