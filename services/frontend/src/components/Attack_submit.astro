@@ -1,13 +1,65 @@
 ---
 import InputLink from "./InputLink.astro";
 import FileUpload from "./FileUpload.astro";
+import TextField from "./TextField.astro";
 import SubmissionForm from "./Form.astro"
 ---
 
 <div class="flex flex-col flex-grow bg-gray-100 ml-6 mr-3 mb-6 mt-3 p-7 rounded-xl">
   <h1 class="text-2xl font-semibold text-gray-900 pb-2">Attack Submission</h1>
   <SubmissionForm button_text="Submit Attack">
-    <FileUpload title="Upload Locked Zip File:" subtext="Samples must be below 5MB each" id="attack-upload"/>
+    <div class="flex flex-col">
+      <TextField title="Submissions Name" placeholder="Attack Name" id="attack-name" required/>
+      <TextField title="Attack Version" placeholder="0.0.0" id="attack-version" required/>
+      <FileUpload title="Upload Locked Zip File:" subtext="Password must be 'infected'" id="attack-upload"/>
+    </div>
   </SubmissionForm>
 </div>
 
+<script>
+  const form = document.querySelector("form");
+  if (!form) throw new Error("Form not found");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const attackName = (document.getElementById("attack-name") as HTMLInputElement)?.value.trim();
+    const attackVersion = (document.getElementById("attack-version") as HTMLInputElement)?.value.trim();
+    const file = (document.getElementById("attack-upload") as HTMLInputElement)?.files?.[0];
+
+    if (!attackName || !attackVersion) {
+      alert("Please fill in all required fields.");
+      return;
+    }
+
+    if (!file) {
+      alert("Please upload a zip file.");
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("version", attackVersion);
+      formData.append("display_name", attackName);
+
+      const response = await fetch("/api/submissions/attack/zip", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        alert(`Submission failed: ${error}`);
+        return;
+      }
+
+      alert("Attack submitted successfully!");
+      form.reset();
+      window.dispatchEvent(new CustomEvent("submission-made"));
+
+    } catch (err) {
+      alert(`Network error: ${(err as Error).message}`);
+    }
+  });
+</script>

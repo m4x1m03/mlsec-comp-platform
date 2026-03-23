@@ -130,6 +130,9 @@ import SubmissionForm from "./Form.astro";
 
       alert("Model submitted successfully!");
       form.reset();
+      Object.values(sections).forEach((sectionId) => {
+        document.getElementById(sectionId)?.classList.add("hidden");
+      });
       window.dispatchEvent(new CustomEvent("submission-made"));
 
     } catch (err) {
