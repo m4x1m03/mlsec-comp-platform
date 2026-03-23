@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 REQUIRED_REGISTRATION_FIELDS = ["username"]
+JOIN_CODE_FIELD = "join_code"
 
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
@@ -57,6 +58,7 @@ class RegisterRequest(BaseModel):
 
     email: str = Field(..., min_length=3, max_length=255)
     username: str = Field(..., min_length=3, max_length=32)
+    join_code: str | None = Field(default=None, min_length=1, max_length=128)
 
     @field_validator("email")
     @classmethod
@@ -69,6 +71,35 @@ class RegisterRequest(BaseModel):
     def validate_username(cls, value: str) -> str:
         """Normalize and validate the username field."""
         return _normalize_username(value)
+
+    @field_validator("join_code")
+    @classmethod
+    def normalize_join_code(cls, value: str | None) -> str | None:
+        """Normalize the join code if provided."""
+        if value is None:
+            return None
+        return value.strip()
+
+
+class JoinCodeValidationRequest(BaseModel):
+    """Join code validation request payload."""
+    model_config = ConfigDict(extra="forbid")
+
+    join_code: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("join_code")
+    @classmethod
+    def normalize_join_code(cls, value: str | None) -> str | None:
+        """Normalize the join code if provided."""
+        if value is None:
+            return None
+        return value.strip()
+
+
+class JoinCodeValidationResponse(BaseModel):
+    """Join code validation response payload."""
+    valid: bool
+    required: bool
 
 
 class AuthenticatedUserResponse(BaseModel):
