@@ -5,13 +5,13 @@ const { title, endpoint } = Astro.props;
 <div class="flex flex-col flex-grow">
   <h1 class="text-xl text-gray-900">{title}</h1>
 
-  <div id="submissions-list" class="flex flex-grow bg-gray-50 rounded-lg p-4 m-3">
+  <div id="submissions-list" class="bg-gray-50 rounded-lg p-4 m-3 h-96 overflow-y-auto">
     <p class="text-gray-500">Loading submissions...</p>
   </div>
 </div>
 
 <script define:vars={{ endpoint }}>
-  async function fetchSubmissions() {
+  async function fetchSubmissions(retries = 5, delay = 1000) {
     const container = document.getElementById("submissions-list");
     if (!container) return;
 
@@ -23,7 +23,13 @@ const { title, endpoint } = Astro.props;
       const items = data.items ?? [];
 
       if (items.length === 0) {
-        container.innerHTML = `<p class="text-gray-500">No submissions found.</p>`;
+        if (retries > 0) {
+          setTimeout(() => fetchSubmissions(retries - 1, delay), delay);
+          return;
+        }
+        if (!container.querySelector("ul")) {
+          container.innerHTML = `<p class="text-gray-500">No submissions found.</p>`;
+        }
         return;
       }
 
@@ -39,14 +45,19 @@ const { title, endpoint } = Astro.props;
         </ul>
       `;
     } catch (err) {
-      const container = document.getElementById("submissions-list");
-      if (container) container.innerHTML = `<p class="text-red-500">Failed to load submissions.</p>`;
+      if (retries > 0) {
+        setTimeout(() => fetchSubmissions(retries - 1, delay), delay);
+        return;
+      }
+      if (!container.querySelector("ul")) {
+        container.innerHTML = `<p class="text-red-500">Failed to load submissions.</p>`;
+      }
       console.error(err);
     }
   }
 
-  fetchSubmissions();
+  setTimeout(() => fetchSubmissions(), 1000);
 
   // Re-fetch when a submission is made
-  window.addEventListener("submission-made", () => fetchSubmissions());
+  window.addEventListener("submission-made", () => fetchSubmissions(5, 1000));
 </script>
