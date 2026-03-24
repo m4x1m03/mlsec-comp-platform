@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     subscriber_task.cancel()
     try:
         await subscriber_task
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, Exception):
         pass
     logger.info("API shutting down...")
 

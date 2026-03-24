@@ -81,6 +81,8 @@ class SubmissionListItem(BaseModel):
     display_name: str | None
     created_at: str
     is_active: bool
+    heurval_tpr: float | None = None
+    heurval_fpr: float | None = None
 
 
 class SetActiveResponse(BaseModel):

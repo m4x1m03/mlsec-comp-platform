@@ -321,6 +321,7 @@ def mark_defense_validated(defense_submission_id: str) -> None:
         defense_submission_id: Defense submission UUID
     """
     from sqlalchemy import text
+    from worker.redis_client import get_redis_client
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -343,6 +344,10 @@ def mark_defense_validated(defense_submission_id: str) -> None:
             """),
             {"id": defense_submission_id},
         )
+    try:
+        get_redis_client().publish("leaderboard:updated", "defense_validated")
+    except Exception:
+        pass
 
 
 def mark_defense_failed(defense_submission_id: str, error: str) -> None:
@@ -470,6 +475,7 @@ def mark_attack_validated(attack_submission_id: str) -> None:
         attack_submission_id: Attack submission UUID
     """
     from sqlalchemy import text
+    from worker.redis_client import get_redis_client
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -492,6 +498,10 @@ def mark_attack_validated(attack_submission_id: str) -> None:
             """),
             {"id": attack_submission_id},
         )
+    try:
+        get_redis_client().publish("leaderboard:updated", "attack_validated")
+    except Exception:
+        pass
 
 
 def get_attack_submission_source(attack_submission_id: str) -> dict:

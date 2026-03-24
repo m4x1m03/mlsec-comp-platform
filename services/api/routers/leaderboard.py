@@ -135,7 +135,12 @@ async def start_redis_subscriber() -> None:
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
     r = aioredis.from_url(redis_url, decode_responses=True)
     pubsub = r.pubsub()
-    await pubsub.subscribe("leaderboard:updated")
+    try:
+        await pubsub.subscribe("leaderboard:updated")
+    except Exception as e:
+        logger.warning(f"Leaderboard Redis subscriber could not connect: {e}")
+        await r.aclose()
+        return
     logger.info("Leaderboard Redis subscriber started")
     try:
         async for message in pubsub.listen():
@@ -149,7 +154,10 @@ async def start_redis_subscriber() -> None:
     except asyncio.CancelledError:
         pass
     finally:
-        await pubsub.unsubscribe("leaderboard:updated")
+        try:
+            await pubsub.unsubscribe("leaderboard:updated")
+        except Exception:
+            pass
         await r.aclose()
         logger.info("Leaderboard Redis subscriber stopped")
 

@@ -10,6 +10,8 @@ interface Submission {
   display_name: string | null;
   created_at: string;
   is_active: boolean;
+  heurval_tpr: number | null;
+  heurval_fpr: number | null;
 }
 
 interface Props {
@@ -91,8 +93,27 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
+function HeurvalStats({ tpr, fpr }: { tpr: number | null; fpr: number | null }) {
+  if (tpr === null && fpr === null) return null;
+  return (
+    <div className="flex gap-3 mt-1">
+      {tpr !== null && (
+        <span className="text-xs text-gray-500">
+          TPR: <span className="font-medium text-gray-700">{(tpr * 100).toFixed(1)}%</span>
+        </span>
+      )}
+      {fpr !== null && (
+        <span className="text-xs text-gray-500">
+          FPR: <span className="font-medium text-gray-700">{(fpr * 100).toFixed(1)}%</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ExpandedDetail({ sub }: { sub: Submission }) {
-  const { status, functional_error } = sub;
+  const { status, functional_error, submission_type, heurval_tpr, heurval_fpr } = sub;
+  const showHeurval = submission_type === 'defense' && (heurval_tpr !== null || heurval_fpr !== null);
 
   if (status === 'submitted') {
     return <p className="text-xs text-gray-500">Queued for processing.</p>;
@@ -101,13 +122,28 @@ function ExpandedDetail({ sub }: { sub: Submission }) {
     return <p className="text-xs text-blue-500">Validation in progress.</p>;
   }
   if (status === 'validated') {
-    return <p className="text-xs text-blue-600">Validation passed. Waiting for evaluation.</p>;
+    return (
+      <>
+        <p className="text-xs text-blue-600">Validation passed. Waiting for evaluation.</p>
+        {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
+      </>
+    );
   }
   if (status === 'evaluating') {
-    return <p className="text-xs text-amber-600">Currently being evaluated.</p>;
+    return (
+      <>
+        <p className="text-xs text-amber-600">Currently being evaluated.</p>
+        {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
+      </>
+    );
   }
   if (status === 'evaluated') {
-    return <p className="text-xs text-green-600">Evaluation complete.</p>;
+    return (
+      <>
+        <p className="text-xs text-green-600">Evaluation complete.</p>
+        {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
+      </>
+    );
   }
   if (status === 'error') {
     return (

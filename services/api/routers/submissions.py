@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from core.auth import AuthenticatedUser, get_authenticated_user
 from core.database import get_db
+from core.redis_client import get_redis_client
 from core.settings import get_settings
 from core.storage import upload_attack_zip, upload_defense_zip
 from core.submissions import (
@@ -510,11 +511,20 @@ def list_my_submissions(
                 s.version,
                 s.display_name,
                 s.created_at,
-                (a.submission_id IS NOT NULL) AS is_active
+                (a.submission_id IS NOT NULL) AS is_active,
+                hr.malware_tpr,
+                hr.goodware_fpr
             FROM submissions s
             LEFT JOIN active_submissions a
                 ON a.submission_id = s.id
                 AND a.user_id = s.user_id
+            LEFT JOIN LATERAL (
+                SELECT malware_tpr, goodware_fpr
+                FROM heurval_results
+                WHERE defense_submission_id = s.id
+                ORDER BY computed_at DESC NULLS LAST
+                LIMIT 1
+            ) hr ON s.submission_type = 'defense'
             WHERE s.user_id = :user_id
               AND s.deleted_at IS NULL
               {query_filter}
@@ -535,6 +545,8 @@ def list_my_submissions(
             display_name=row[6],
             created_at=row[7].isoformat() if row[7] else "",
             is_active=bool(row[8]),
+            heurval_tpr=float(row[9]) if row[9] is not None else None,
+            heurval_fpr=float(row[10]) if row[10] is not None else None,
         )
         for row in rows
     ]
@@ -601,6 +613,12 @@ def set_active_submission(
     logger.info(
         f"User {current_user.user_id} set active {sub_type} submission to {submission_id}"
     )
+
+    try:
+        r = get_redis_client()
+        r.publish("leaderboard:updated", "active_changed")
+    except Exception:
+        logger.warning("Failed to publish leaderboard update after active submission change")
 
     return SetActiveResponse(
         submission_id=submission_id,
