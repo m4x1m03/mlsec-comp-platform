@@ -382,7 +382,7 @@ def test_helpers(db_session):
             git_repo: str = None,
             object_key: str = None,
             is_functional: bool = None,
-            status: str = "ready"
+            status: str = "validated"
         ) -> str:
             """Create defense submission with details."""
             # Create submission
@@ -416,7 +416,8 @@ def test_helpers(db_session):
             # Create submission
             submission_id = TestHelpers.create_submission(
                 submission_type="attack",
-                status="ready"
+                status="validated",
+                is_functional=True,
             )
 
             # Create attack submission details

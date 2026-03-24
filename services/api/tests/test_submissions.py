@@ -559,3 +559,172 @@ class TestValidationHelpers:
         with pytest.raises(HTTPException) as exc:
             validate_docker_image_format("-invalid")
         assert exc.value.status_code == 400
+
+
+# ============================================================================
+# Set Active Submission Tests
+# ============================================================================
+
+
+def _create_submission_with_status(db_session, user_id: str, submission_type: str, status: str) -> str:
+    """Insert a submission row at a specific status, bypassing the creation endpoints."""
+    row = db_session.execute(
+        text(
+            """
+            INSERT INTO submissions (submission_type, status, version, user_id)
+            VALUES (:type, :status, '1.0.0', CAST(:user_id AS uuid))
+            RETURNING id
+            """
+        ),
+        {"type": submission_type, "status": status, "user_id": user_id},
+    ).fetchone()
+    assert row is not None
+    return str(row[0])
+
+
+class TestSetActiveSubmission:
+    """Tests for PUT /api/submissions/{submission_id}/active."""
+
+    def test_set_active_no_auth(self, client):
+        """401 when no authentication token is provided."""
+        response = client.put(f"/api/submissions/{uuid4()}/active")
+        assert response.status_code == 401
+
+    def test_set_active_not_found(self, client, db_session):
+        """404 when submission UUID does not exist."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        response = client.put(
+            f"/api/submissions/{uuid4()}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 404
+
+    def test_set_active_wrong_user(self, client, db_session):
+        """404 when submission belongs to a different user."""
+        owner_id = _create_user(db_session)
+        other_id = db_session.execute(
+            text(
+                """
+                INSERT INTO users (username, email)
+                VALUES ('other_user', 'other@example.com')
+                RETURNING id
+                """
+            )
+        ).fetchone()[0]
+
+        sub_id = _create_submission_with_status(db_session, str(other_id), "defense", "validated")
+        token = _create_session_token(db_session, user_id=owner_id)
+
+        response = client.put(
+            f"/api/submissions/{sub_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 404
+
+    def test_set_active_status_submitted_rejected(self, client, db_session):
+        """409 when submission status is 'submitted'."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+        sub_id = _create_submission_with_status(db_session, user_id, "defense", "submitted")
+
+        response = client.put(
+            f"/api/submissions/{sub_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 409
+
+    def test_set_active_status_validating_rejected(self, client, db_session):
+        """409 when submission status is 'validating'."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+        sub_id = _create_submission_with_status(db_session, user_id, "defense", "validating")
+
+        response = client.put(
+            f"/api/submissions/{sub_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 409
+
+    def test_set_active_status_error_rejected(self, client, db_session):
+        """409 when submission status is 'error'."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+        sub_id = _create_submission_with_status(db_session, user_id, "attack", "error")
+
+        response = client.put(
+            f"/api/submissions/{sub_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 409
+
+    def test_set_active_validated_success(self, client, db_session):
+        """200 and active_submissions row created when status is 'validated'."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+        sub_id = _create_submission_with_status(db_session, user_id, "defense", "validated")
+
+        response = client.put(
+            f"/api/submissions/{sub_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["submission_id"] == sub_id
+        assert data["submission_type"] == "defense"
+
+        active = db_session.execute(
+            text(
+                """
+                SELECT submission_id FROM active_submissions
+                WHERE user_id = CAST(:uid AS uuid) AND submission_type = 'defense'
+                """
+            ),
+            {"uid": user_id},
+        ).scalar()
+        assert str(active) == sub_id
+
+    def test_set_active_evaluated_success(self, client, db_session):
+        """200 and active_submissions row created when status is 'evaluated'."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+        sub_id = _create_submission_with_status(db_session, user_id, "attack", "evaluated")
+
+        response = client.put(
+            f"/api/submissions/{sub_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["submission_id"] == sub_id
+        assert data["submission_type"] == "attack"
+
+    def test_set_active_replaces_existing(self, client, db_session):
+        """Setting a second submission active replaces the first."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        sub1_id = _create_submission_with_status(db_session, user_id, "defense", "validated")
+        sub2_id = _create_submission_with_status(db_session, user_id, "defense", "validated")
+
+        # Activate first
+        client.put(f"/api/submissions/{sub1_id}/active", headers=_make_auth_headers(token))
+
+        # Activate second
+        response = client.put(
+            f"/api/submissions/{sub2_id}/active",
+            headers=_make_auth_headers(token),
+        )
+        assert response.status_code == 200
+
+        active = db_session.execute(
+            text(
+                """
+                SELECT submission_id FROM active_submissions
+                WHERE user_id = CAST(:uid AS uuid) AND submission_type = 'defense'
+                """
+            ),
+            {"uid": user_id},
+        ).scalar()
+        assert str(active) == sub2_id
