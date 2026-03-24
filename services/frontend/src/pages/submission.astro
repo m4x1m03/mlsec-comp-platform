@@ -4,6 +4,14 @@ import Navbar from "../components/Navbar.astro";
 import Footer from "../components/Footer.astro";
 import Submit from "../components/Submit.astro";
 import PastSubmit from "../components/Past_submit.astro";
+
+import { getSession } from '../lib/auth';
+
+const session = await getSession(Astro.request);
+
+if (!session) {
+  return Astro.redirect('/');
+}
 ---
 
 <html lang="en">

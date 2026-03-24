@@ -23,28 +23,33 @@ const session = await getSession(Astro.request);
       ]}>
       Rules
     </a>
-    <a
-      href="/submission"
-      class:list={[
-        "font-bold hover:text-gray-300 transition-colors",
-        currentPath === '/submission' ? 'text-blue-400' : 'text-white'
-      ]}>
-      Submission
-    </a>
-    <a
-      href="/leaderboard"
-      class:list={[
-        "font-bold hover:text-gray-300 transition-colors",
-        currentPath === '/leaderboard' ? 'text-blue-400' : 'text-white'
-      ]}>
-      Leaderboard
-    </a>
+    {session && (
+      <a
+        href="/submission"
+        class:list={[
+          "font-bold hover:text-gray-300 transition-colors",
+          currentPath === '/submission' ? 'text-blue-400' : 'text-white'
+        ]}>
+        Submission
+      </a>
+    )}
+    {session && (
+      <a
+        href="/leaderboard"
+        class:list={[
+          "font-bold hover:text-gray-300 transition-colors",
+          currentPath === '/leaderboard' ? 'text-blue-400' : 'text-white'
+        ]}>
+        Leaderboard
+      </a>
+    )}
   </div>
 
   <Account session={session}>
     <LoginModal slot="modal" />
     <Logout slot="logout" />
   </Account>
+</nav>
 
 <script>
   document.getElementById('open-login-btn')!.addEventListener('click', () => {
