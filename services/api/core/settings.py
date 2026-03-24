@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     auth_session_cookie_domain: str | None = None
 
     cors_allow_origins: list[str] = [
+        "http://localhost",
+        "http://localhost:80",
         "http://localhost:4321",
         "http://127.0.0.1:4321",
     ]
