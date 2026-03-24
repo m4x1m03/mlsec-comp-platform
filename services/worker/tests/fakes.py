@@ -249,6 +249,10 @@ class FakeRedis:
         all_keys.update(self.lists.keys())
         return list(all_keys)
 
+    def publish(self, channel: str, message: Any) -> int:
+        """Publish a message to a channel (no-op in fake; returns 0 subscribers)."""
+        return 0
+
     def flushall(self) -> bool:
         """Delete all keys from all databases."""
         self.data.clear()

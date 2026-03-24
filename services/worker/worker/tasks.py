@@ -426,7 +426,7 @@ def run_batch_defense_job(
         logger.info(f"Cleaning up resources for batch job {job_id}")
         # Unregister worker from Redis
         registry.unregister(worker_id)
-        source_config = config_dict.get('worker', {}).get('source', {})
+        source_config = config_dict.get('source', {})
         for ctx in defense_contexts:
             try:
                 # Cleanup container

@@ -47,7 +47,7 @@ def test_mark_attack_failed_sets_status_and_error(db_session, test_helpers):
         {"id": attack_id},
     ).fetchone()
 
-    assert row[0] == "failed"
+    assert row[0] == "error"
     assert row[1] is False
     assert row[2] == "Invalid ZIP structure"
 
@@ -63,7 +63,7 @@ def test_mark_attack_failed_overwrites_previous_status(db_session, test_helpers)
         {"id": attack_id},
     ).scalar()
 
-    assert status == "failed"
+    assert status == "error"
 
 
 # ---------------------------------------------------------------------------

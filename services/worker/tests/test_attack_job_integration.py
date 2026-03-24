@@ -50,13 +50,13 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
         source_type="docker",
         docker_image="user/defense1:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
     def2_id = test_helpers.create_defense(
         source_type="docker",
         docker_image="user/defense2:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # Register workers for both defenses
@@ -104,12 +104,12 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
 
-    # Verify attack marked as validated
+    # Verify attack marked as evaluated
     status = db_session.execute(
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id}
     ).scalar()
-    assert status == "ready"
+    assert status == "evaluated"
 
     # Verify attacks added to both workers' queues
     queue1 = fake_redis.lrange("worker:worker_1:attacks", 0, -1)
@@ -149,13 +149,13 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
         source_type="docker",
         docker_image="user/defense1:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
     def2_id = test_helpers.create_defense(
         source_type="docker",
         docker_image="user/defense2:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # No workers registered (closed queues)
@@ -588,7 +588,7 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id}
     ).scalar()
-    assert status == "ready"
+    assert status == "validated"
 
     # Verify no defense jobs enqueued
     assert len(enqueued_tasks) == 0
@@ -666,7 +666,7 @@ def test_attack_job_functional_validation_failure(db_session, fake_redis, test_h
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "failed"
+    assert sub_status == "error"
 
 
 def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_helpers, monkeypatch):
@@ -719,7 +719,7 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "failed"
+    assert sub_status == "error"
 
 
 def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_helpers, monkeypatch):
@@ -766,7 +766,7 @@ def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_h
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "failed"
+    assert sub_status == "error"
 
 
 def test_attack_job_heuristic_skipped_no_template_reports(db_session, fake_redis, test_helpers, monkeypatch):
@@ -837,4 +837,4 @@ def test_attack_job_heuristic_accepted_despite_low_score(db_session, fake_redis,
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "ready"
+    assert sub_status == "validated"

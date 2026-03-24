@@ -149,7 +149,7 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
         {"id": defense_id}
     ).fetchone()
     assert result[0] is True
-    assert result[1] == "ready"
+    assert result[1] == "validated"
 
     # Verify job completed
     job_status = db_session.execute(
@@ -319,7 +319,7 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     ).fetchone()
 
     assert result[0] is False
-    assert result[1] == "failed"
+    assert result[1] == "error"
     assert "Defense failed health check" in result[2]
 
     # Verify job failed
