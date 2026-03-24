@@ -14,6 +14,8 @@ import httpx
 from worker.config import EvaluationConfig, get_config
 from worker.db import (
     ensure_evaluation_run,
+    mark_defense_evaluating,
+    mark_defense_evaluated,
     mark_defense_failed,
     set_evaluation_run_status,
     upsert_evaluation,
@@ -284,6 +286,7 @@ async def evaluate_defenses_async(
                         attack_submission_id=attack_id,
                     )
                     evaluation_runs[key] = run_id
+                    mark_defense_evaluating(def_id)
                 runs.append(evaluation_runs[key])
 
             # Process attack files
@@ -356,6 +359,7 @@ async def evaluate_defenses_async(
             # Mark evaluation runs as done and aggregate pair scores.
             for ctx, run_id in zip(active_contexts, runs):
                 set_evaluation_run_status(run_id, "done")
+                mark_defense_evaluated(ctx["defense_submission_id"])
                 upsert_pair_score(
                     evaluation_run_id=run_id,
                     defense_submission_id=ctx["defense_submission_id"],

@@ -249,10 +249,9 @@ def get_all_validated_defenses() -> list[str]:
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id FROM submissions 
-                WHERE submission_type = 'defense' 
-                AND is_functional = TRUE 
-                AND status = 'ready'
+                SELECT id FROM submissions
+                WHERE submission_type = 'defense'
+                AND is_functional = TRUE
                 AND deleted_at IS NULL
             """)
         ).fetchall()
@@ -275,9 +274,9 @@ def get_unevaluated_attacks(defense_submission_id: str) -> list[str]:
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id FROM submissions 
-                WHERE submission_type = 'attack' 
-                AND status = 'ready'
+                SELECT id FROM submissions
+                WHERE submission_type = 'attack'
+                AND is_functional = TRUE
                 AND deleted_at IS NULL
                 AND id NOT IN (
                     SELECT attack_submission_id 
@@ -326,12 +325,23 @@ def mark_defense_validated(defense_submission_id: str) -> None:
     with engine.begin() as conn:
         conn.execute(
             text("""
-                UPDATE submissions 
+                UPDATE submissions
                 SET is_functional = TRUE,
-                    status = 'ready'
+                    status = 'validated'
                 WHERE id = :id
             """),
             {"id": defense_submission_id}
+        )
+        conn.execute(
+            text("""
+                INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                SELECT user_id, 'defense', :id, NOW()
+                FROM submissions WHERE id = :id
+                ON CONFLICT (user_id, submission_type)
+                DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                              updated_at = EXCLUDED.updated_at
+            """),
+            {"id": defense_submission_id},
         )
 
 
@@ -348,13 +358,46 @@ def mark_defense_failed(defense_submission_id: str, error: str) -> None:
     with engine.begin() as conn:
         conn.execute(
             text("""
-                UPDATE submissions 
+                UPDATE submissions
                 SET is_functional = FALSE,
                     functional_error = :error,
-                    status = 'failed'
+                    status = 'error'
                 WHERE id = :id
             """),
             {"id": defense_submission_id, "error": error}
+        )
+
+
+def mark_defense_validating(defense_submission_id: str) -> None:
+    """Set defense status to 'validating' when the worker begins validation checks."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'validating' WHERE id = :id"),
+            {"id": defense_submission_id},
+        )
+
+
+def mark_defense_evaluating(defense_submission_id: str) -> None:
+    """Set defense status to 'evaluating' when an evaluation run starts against it."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluating' WHERE id = :id"),
+            {"id": defense_submission_id},
+        )
+
+
+def mark_defense_evaluated(defense_submission_id: str) -> None:
+    """Set defense status to 'evaluated' when an evaluation run against it completes."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluated' WHERE id = :id"),
+            {"id": defense_submission_id},
         )
 
 
@@ -432,10 +475,22 @@ def mark_attack_validated(attack_submission_id: str) -> None:
         conn.execute(
             text("""
                 UPDATE submissions
-                SET status = 'ready'
+                SET status = 'validated',
+                    is_functional = TRUE
                 WHERE id = :id
             """),
             {"id": attack_submission_id}
+        )
+        conn.execute(
+            text("""
+                INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                SELECT user_id, 'attack', :id, NOW()
+                FROM submissions WHERE id = :id
+                ON CONFLICT (user_id, submission_type)
+                DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                              updated_at = EXCLUDED.updated_at
+            """),
+            {"id": attack_submission_id},
         )
 
 
@@ -489,12 +544,45 @@ def mark_attack_failed(attack_submission_id: str, error: str) -> None:
         conn.execute(
             text("""
                 UPDATE submissions
-                SET status = 'failed',
+                SET status = 'error',
                     is_functional = FALSE,
                     functional_error = :error
                 WHERE id = :id
             """),
             {"id": attack_submission_id, "error": error}
+        )
+
+
+def mark_attack_validating(attack_submission_id: str) -> None:
+    """Set attack status to 'validating' when the worker begins validation checks."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'validating' WHERE id = :id"),
+            {"id": attack_submission_id},
+        )
+
+
+def mark_attack_evaluating(attack_submission_id: str) -> None:
+    """Set attack status to 'evaluating' when evaluation dispatch begins."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluating' WHERE id = :id"),
+            {"id": attack_submission_id},
+        )
+
+
+def mark_attack_evaluated(attack_submission_id: str) -> None:
+    """Set attack status to 'evaluated' after all evaluations have been dispatched."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluated' WHERE id = :id"),
+            {"id": attack_submission_id},
         )
 
 

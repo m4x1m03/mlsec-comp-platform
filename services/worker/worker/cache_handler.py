@@ -31,7 +31,6 @@ def get_sample_path(object_key: str) -> Path:
     local_path = CACHE_DIR / object_key
     
     if local_path.exists():
-        #logger.info(f"Cache hit: {object_key}")
         return local_path
         
     local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,11 +42,11 @@ def get_sample_path(object_key: str) -> Path:
         minio_client = get_minio_client()
         bucket_name = get_bucket_name()
         
-        #logger.info(f"Cache miss: Downloading {object_key} to {local_path}")
+        logger.info(f"Downloading {object_key} from MinIO")
         minio_client.fget_object(bucket_name, object_key, str(temp_path))
-        
+
         os.rename(temp_path, local_path)
-        logger.debug(f"Successfully cached {object_key}")
+        logger.info(f"Cached {object_key}")
         
     except Exception as e:
         logger.error(f"Failed to cache sample {object_key}: {e}")

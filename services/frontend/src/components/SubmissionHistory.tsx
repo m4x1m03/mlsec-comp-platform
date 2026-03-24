@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 interface Submission {
   submission_id: string;
   submission_type: string;
-  status: 'submitted' | 'evaluating' | 'ready' | 'failed';
+  status: 'submitted' | 'validating' | 'validated' | 'evaluating' | 'evaluated' | 'error';
   is_functional: boolean | null;
   functional_error: string | null;
   version: string;
@@ -19,16 +19,20 @@ interface Props {
 
 const STATUS_STYLES: Record<string, string> = {
   submitted:  'text-gray-400',
+  validating: 'text-blue-500 font-semibold',
+  validated:  'text-blue-600 font-semibold',
   evaluating: 'text-amber-500 font-semibold',
-  ready:      'text-green-600 font-semibold',
-  failed:     'text-red-600 font-semibold',
+  evaluated:  'text-green-600 font-semibold',
+  error:      'text-red-600 font-semibold',
 };
 
 const STATUS_LABELS: Record<string, string> = {
   submitted:  'Submitted',
+  validating: 'Validating',
+  validated:  'Validated',
   evaluating: 'Evaluating',
-  ready:      'Evaluated',
-  failed:     'Error',
+  evaluated:  'Evaluated',
+  error:      'Error',
 };
 
 function formatDate(iso: string): string {
@@ -88,25 +92,24 @@ function ChevronIcon({ open }: { open: boolean }) {
 }
 
 function ExpandedDetail({ sub }: { sub: Submission }) {
-  const { status, is_functional, functional_error } = sub;
+  const { status, functional_error } = sub;
 
   if (status === 'submitted') {
     return <p className="text-xs text-gray-500">Queued for processing.</p>;
   }
+  if (status === 'validating') {
+    return <p className="text-xs text-blue-500">Validation in progress.</p>;
+  }
+  if (status === 'validated') {
+    return <p className="text-xs text-blue-600">Validation passed. Waiting for evaluation.</p>;
+  }
   if (status === 'evaluating') {
     return <p className="text-xs text-amber-600">Currently being evaluated.</p>;
   }
-  if (status === 'ready') {
-    if (is_functional === false) {
-      return (
-        <p className="text-xs text-red-600">
-          Validation failed{functional_error ? `: ${functional_error}` : '.'}
-        </p>
-      );
-    }
-    return <p className="text-xs text-green-600">Validation passed.</p>;
+  if (status === 'evaluated') {
+    return <p className="text-xs text-green-600">Evaluation complete.</p>;
   }
-  if (status === 'failed') {
+  if (status === 'error') {
     return (
       <p className="text-xs text-red-600">
         {functional_error ?? 'An error occurred during processing.'}
@@ -150,7 +153,8 @@ export default function SubmissionHistory({ type, title }: Props) {
 
   useEffect(() => {
     const hasActive = submissions.some(
-      s => s.status === 'submitted' || s.status === 'evaluating'
+      s => s.status === 'submitted' || s.status === 'validating' ||
+           s.status === 'validated'  || s.status === 'evaluating'
     );
     if (!hasActive) return;
     const id = setInterval(fetchSubmissions, 5000);
@@ -188,9 +192,14 @@ export default function SubmissionHistory({ type, title }: Props) {
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <button
                     onClick={() => handleSetActive(sub.submission_id)}
+                    disabled={sub.status !== 'validated' && sub.status !== 'evaluated'}
                     aria-label={sub.is_active ? 'Active submission' : 'Set as active'}
-                    title={sub.is_active ? 'Active' : 'Set as active'}
-                    className="p-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    title={
+                      sub.status === 'error' ? 'Cannot activate errored submission' :
+                      sub.status === 'validated' || sub.status === 'evaluated' ? (sub.is_active ? 'Active' : 'Set as active') :
+                      'Submission is still processing'
+                    }
+                    className={`p-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary${sub.status !== 'validated' && sub.status !== 'evaluated' ? ' cursor-not-allowed opacity-40' : ''}`}
                   >
                     <StarIcon filled={sub.is_active} />
                   </button>

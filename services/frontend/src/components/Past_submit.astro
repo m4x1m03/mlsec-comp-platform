@@ -23,19 +23,27 @@ import SubmissionHistory from './SubmissionHistory';
         <ul class="flex flex-col gap-2.5">
           <li class="flex items-start gap-2.5">
             <span class="text-xs text-gray-400 font-medium w-20 shrink-0 mt-0.5">Submitted</span>
-            <span class="text-xs text-gray-600">Queued and waiting to be processed.</span>
+            <span class="text-xs text-gray-600">Queued and waiting for the worker to pick up.</span>
+          </li>
+          <li class="flex items-start gap-2.5">
+            <span class="text-xs text-blue-500 font-semibold w-20 shrink-0 mt-0.5">Validating</span>
+            <span class="text-xs text-gray-600">Functional and heuristic checks are running.</span>
+          </li>
+          <li class="flex items-start gap-2.5">
+            <span class="text-xs text-blue-600 font-semibold w-20 shrink-0 mt-0.5">Validated</span>
+            <span class="text-xs text-gray-600">Passed all checks. Waiting to be matched for evaluation.</span>
           </li>
           <li class="flex items-start gap-2.5">
             <span class="text-xs text-amber-500 font-semibold w-20 shrink-0 mt-0.5">Evaluating</span>
-            <span class="text-xs text-gray-600">Currently being built and validated.</span>
+            <span class="text-xs text-gray-600">Currently being pitted against another submission.</span>
           </li>
           <li class="flex items-start gap-2.5">
             <span class="text-xs text-green-600 font-semibold w-20 shrink-0 mt-0.5">Evaluated</span>
-            <span class="text-xs text-gray-600">Validation passed and submission is active.</span>
+            <span class="text-xs text-gray-600">Evaluation complete. Scores may be availible on the leaderboard.</span>
           </li>
           <li class="flex items-start gap-2.5">
             <span class="text-xs text-red-600 font-semibold w-20 shrink-0 mt-0.5">Error</span>
-            <span class="text-xs text-gray-600">Processing failed. Expand the row for details.</span>
+            <span class="text-xs text-gray-600">A step failed. Expand the row for details.</span>
           </li>
         </ul>
       </div>

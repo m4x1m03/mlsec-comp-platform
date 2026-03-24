@@ -175,6 +175,7 @@ def run_batch_defense_job(
         check_if_needs_validation,
         get_defense_submission_source,
         get_unevaluated_attacks,
+        mark_defense_validating,
         mark_defense_validated,
         mark_defense_failed,
     )
@@ -222,12 +223,14 @@ def run_batch_defense_job(
             registry.add_attack_to_queue(worker_id, attack_id)
 
         # Build/Pull images for each defense
-        # Convert config to dict for defense module functions
-        config_dict = config.model_dump()
+        # Convert config to dict for defense module functions (handlers expect worker-level keys)
+        config_dict = config.model_dump()['worker']
         logger.info(f"Preparing batch of {len(defense_submission_ids)} defenses for job {job_id}")
         for defense_submission_id in defense_submission_ids:
             # Check if defense needs validation
             needs_validation = check_if_needs_validation(defense_submission_id)
+            if needs_validation:
+                mark_defense_validating(defense_submission_id)
             # Get defense source information
             source_type, source_data = get_defense_submission_source(defense_submission_id)
             
@@ -343,7 +346,6 @@ def run_batch_defense_job(
             if ctx["needs_validation"]:
                 try:
                     validate_functional(ctx["image_name"], ctx["url"], config_dict)
-                    mark_defense_validated(ctx["defense_submission_id"])
                     logger.info(f"Functional validation PASSED for defense {ctx['defense_submission_id']}")
                 except Exception as e:
                     logger.error(f"Functional validation FAILED for {ctx['defense_submission_id']}: {e}")
@@ -401,6 +403,9 @@ def run_batch_defense_job(
                             )
                             mark_defense_failed(ctx["defense_submission_id"], error_msg)
                             raise ValueError(error_msg)
+
+                mark_defense_validated(ctx["defense_submission_id"])
+                logger.info(f"Validation PASSED for defense {ctx['defense_submission_id']}")
 
         # Run async evaluation (Send samples to all containers)
         loop.run_until_complete(evaluate_defenses_async(
@@ -539,10 +544,13 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
     from worker.db import (
         set_job_status,
         get_attack_submission_source,
+        mark_attack_validating,
+        mark_attack_validated,
+        mark_attack_evaluating,
+        mark_attack_evaluated,
         mark_attack_failed,
         insert_attack_files,
         get_template_reports,
-        mark_attack_validated,
         get_all_validated_defenses,
         is_evaluation_in_progress,
     )
@@ -560,6 +568,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
     try:
         set_job_status(job_id=job_id, status="running")
+        mark_attack_validating(attack_submission_id)
         logger.info(
             f"Starting attack job {job_id} for submission {attack_submission_id}")
 
@@ -775,6 +784,9 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
         validated_defenses = get_all_validated_defenses()
         logger.info(f"Found {len(validated_defenses)} validated defenses")
 
+        if validated_defenses:
+            mark_attack_evaluating(attack_submission_id)
+
         enqueued_count = 0
         new_jobs_count = 0
 
@@ -836,6 +848,9 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
             f"Attack job complete: enqueued to {enqueued_count} workers, "
             f"created {new_jobs_count} new defense jobs"
         )
+
+        if validated_defenses:
+            mark_attack_evaluated(attack_submission_id)
 
         set_job_status(job_id=job_id, status="done")
     except Exception as exc:

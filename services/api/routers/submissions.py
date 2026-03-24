@@ -558,7 +558,7 @@ def set_active_submission(
     row = db.execute(
         text(
             """
-            SELECT id, submission_type
+            SELECT id, submission_type, status
             FROM submissions
             WHERE id = :id
               AND user_id = :user_id
@@ -572,6 +572,13 @@ def set_active_submission(
         raise HTTPException(status_code=404, detail="Submission not found")
 
     sub_type = row[1]
+    status = row[2]
+
+    if status not in ("validated", "evaluated"):
+        raise HTTPException(
+            status_code=409,
+            detail="Submission must be validated or evaluated before it can be set as active",
+        )
 
     db.execute(
         text(

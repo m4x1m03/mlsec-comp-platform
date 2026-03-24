@@ -161,8 +161,7 @@ def _validate_image_size(image_name: str, config: dict) -> None:
         size_mb = size_bytes / (1024 * 1024)
 
         # Get limit from config
-        worker_config = config.get('worker', {})
-        defense_job_config = worker_config.get('defense_job', {})
+        defense_job_config = config.get('defense_job', {})
         max_size_mb = defense_job_config.get('max_uncompressed_size_mb', 1024)
 
         logger.info(
@@ -213,8 +212,7 @@ def _validate_post_endpoint(container_url: str, config: dict) -> None:
         probe_data += b"\x00" * (4096 - len(probe_data))
 
     # Get timeout from config
-    worker_config = config.get('worker', {})
-    eval_config = worker_config.get('evaluation', {})
+    eval_config = config.get('evaluation', {})
     timeout = eval_config.get('requests_timeout_seconds', 5)
 
     # Send POST request direct to container (via gateway NAT)

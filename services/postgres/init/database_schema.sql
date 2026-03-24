@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     display_name TEXT,
 
     status TEXT NOT NULL CHECK (
-        status IN ('submitted', 'evaluating', 'ready', 'failed')
+        status IN ('submitted', 'validating', 'validated', 'evaluating', 'evaluated', 'error')
     ),
 
     is_functional BOOLEAN,

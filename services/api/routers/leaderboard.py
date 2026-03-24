@@ -105,8 +105,8 @@ def _fetch_leaderboard_sync() -> dict:
                         n_files_error,
                         computed_at
                     FROM evaluation_pair_scores
-                    WHERE attack_submission_id  = ANY(:attack_ids)
-                      AND defense_submission_id = ANY(:defense_ids)
+                    WHERE attack_submission_id::text  = ANY(:attack_ids)
+                      AND defense_submission_id::text = ANY(:defense_ids)
                     """
                 ),
                 {"attack_ids": attack_ids, "defense_ids": defense_ids},
