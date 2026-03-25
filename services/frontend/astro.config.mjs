@@ -16,6 +16,25 @@ export default defineConfig({
         '/health': apiTarget,
         '/auth':   apiTarget,
         '/api':    apiTarget,
+        '/admin': {
+          target: apiTarget,
+          bypass(req) {
+            // Let Vite handle the five admin page navigations directly.
+            const adminPages = [
+              '/admin',
+              '/admin/users',
+              '/admin/logs',
+              '/admin/competition',
+              '/admin/workers',
+              '/admin/submissions',
+            ];
+            const url = (req.url ?? '').split('?')[0];
+            const wantsHtml = (req.headers['accept'] ?? '').includes('text/html');
+            if (adminPages.includes(url) && wantsHtml) {
+              return url;
+            }
+          },
+        },
       },
     },
   },
