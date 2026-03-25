@@ -7,12 +7,14 @@ cookie management and session persistence.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from core.audit import log_audit_event
 from core.auth import AuthenticatedUser, create_session, get_authenticated_user, revoke_session_by_id
 from core.config import get_config
 from core.database import get_db
@@ -31,6 +33,13 @@ from schemas.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
+
+
+def _request_meta(request: Request) -> tuple[str | None, str | None]:
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    return client_ip, user_agent
 
 
 def _to_user_response(
@@ -115,6 +124,7 @@ def _validate_join_code_or_raise(submitted_code: str | None) -> None:
 def login(
     req: LoginRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> LoginResponse:
     """Authenticate an email-only user and issue a session token."""
@@ -148,20 +158,49 @@ def login(
             {"email": req.email},
         ).fetchone()
         if disabled is not None:
+            client_ip, user_agent = _request_meta(request)
+            log_audit_event(
+                event_type="auth.login",
+                email=req.email,
+                ip_address=client_ip,
+                user_agent=user_agent,
+                success=False,
+                message="disabled account",
+            )
+            logger.warning("Login attempt for disabled account")
             raise HTTPException(status_code=403, detail="User account is disabled")
 
-        required_fields = list(REQUIRED_REGISTRATION_FIELDS)
-        if _join_code_required():
-            required_fields.append(JOIN_CODE_FIELD)
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.login",
+            email=req.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="unknown email",
+        )
+        logger.info("Login requested for unknown email")
+
         return LoginResponse(
             authenticated=False,
             requires_registration=True,
-            required_registration_fields=required_fields,
+            required_registration_fields=REQUIRED_REGISTRATION_FIELDS,
         )
 
     session_token = create_session(db, user_id=row["id"])
     _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="auth.login",
+        user_id=row["id"],
+        email=row["email"],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+    )
+    logger.info("Login success for user %s (admin=%s)", row["id"], row["is_admin"])
     return LoginResponse(
         authenticated=True,
         requires_registration=False,
@@ -179,6 +218,7 @@ def login(
 def register(
     req: RegisterRequest,
     response: Response,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> SessionResponse:
     """Register a new user and issue a session token."""
@@ -199,7 +239,25 @@ def register(
     )
     if existing_email is not None:
         if existing_email["disabled_at"] is None:
+            client_ip, user_agent = _request_meta(request)
+            log_audit_event(
+                event_type="auth.register",
+                email=req.email,
+                ip_address=client_ip,
+                user_agent=user_agent,
+                success=False,
+                message="email already registered",
+            )
             raise HTTPException(status_code=409, detail="Email is already registered")
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.register",
+            email=req.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="email belongs to disabled user",
+        )
         raise HTTPException(status_code=409, detail="Email belongs to a disabled user")
 
     existing_username = db.execute(
@@ -213,6 +271,15 @@ def register(
         {"username": req.username},
     ).fetchone()
     if existing_username is not None:
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.register",
+            email=req.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="username already taken",
+        )
         raise HTTPException(status_code=409, detail="Username is already taken")
 
     try:
@@ -253,6 +320,16 @@ def register(
         db.commit()
     except IntegrityError:
         db.rollback()
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.register",
+            email=req.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="duplicate email or username",
+        )
+        logger.warning("Registration failed due to duplicate email or username")
         raise HTTPException(status_code=409, detail="Email or username is already registered") from None
     except HTTPException:
         db.rollback()
@@ -260,6 +337,16 @@ def register(
 
     _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="auth.register",
+        user_id=user_row["id"],
+        email=user_row["email"],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+    )
+    logger.info("Registered new user %s", user_row["id"])
     return SessionResponse(
         expires_at=session_token.expires_at,
         user=_to_user_response(
@@ -288,6 +375,7 @@ def validate_join_code(req: JoinCodeValidationRequest) -> JoinCodeValidationResp
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
     response: Response,
+    request: Request,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
     db: Session = Depends(get_db),
 ) -> Response:
@@ -295,6 +383,16 @@ def logout(
     revoke_session_by_id(db, session_id=current_user.session_id, commit=True)
     _clear_session_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="auth.logout",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+    )
+    logger.info("Logout for user %s", current_user.user_id)
     return response
 
 

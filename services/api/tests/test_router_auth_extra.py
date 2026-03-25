@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from unittest.mock import MagicMock
 
 from routers import auth as auth_router
 from schemas.auth import RegisterRequest
@@ -113,11 +114,14 @@ class _FakeSession:
 
 def test_register_raises_when_user_row_missing():
     fake_db = _FakeSession(responses=[None, None, None])
+    fake_request = MagicMock()
+    fake_request.client = None
 
     with pytest.raises(HTTPException) as exc:
         auth_router.register(
             RegisterRequest(email="missing@example.com", username="missinguser"),
             Response(),
+            fake_request,
             db=fake_db,
         )
 
@@ -129,11 +133,14 @@ def test_register_rolls_back_on_integrity_error():
         responses=[None, None],
         raise_on={"INSERT INTO users": IntegrityError("stmt", {}, Exception("dup"))},
     )
+    fake_request = MagicMock()
+    fake_request.client = None
 
     with pytest.raises(HTTPException) as exc:
         auth_router.register(
             RegisterRequest(email="dupe@example.com", username="dupeuser"),
             Response(),
+            fake_request,
             db=fake_db,
         )
 
@@ -162,10 +169,13 @@ def test_register_rolls_back_on_http_exception(monkeypatch):
 
     monkeypatch.setattr(auth_router, "create_session", _boom_create_session)
 
+    fake_request = MagicMock()
+    fake_request.client = None
     with pytest.raises(HTTPException) as exc:
         auth_router.register(
             RegisterRequest(email="boom@example.com", username="boomuser"),
             Response(),
+            fake_request,
             db=fake_db,
         )
 

@@ -26,7 +26,6 @@ pnpm-debug.log*
 # docker tmp
 .docker-tmp/
 
-
 # jetbrains setting folder
 .idea/
 

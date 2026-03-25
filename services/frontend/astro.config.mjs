@@ -12,10 +12,10 @@ export default defineConfig({
   vite: {
     server: {
       proxy: {
-        '/health': 'http://127.0.0.1:8000',
-        '/auth': 'http://127.0.0.1:8000',
-        '/defense': 'http://127.0.0.1:8000',
-        '/api': 'http://127.0.0.1:8000',
+        '/health': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
+        '/auth': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
+        '/defense': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
+        '/api': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
       },
     },
   },

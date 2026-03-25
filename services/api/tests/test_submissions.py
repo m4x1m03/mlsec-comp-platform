@@ -110,6 +110,22 @@ def _create_password_protected_zip() -> io.BytesIO:
     return zip_buffer
 
 
+def _set_submission_control(db_session, *, manual_closed: bool, close_at: datetime | None) -> None:
+    """Upsert submission control flags for test scenarios."""
+    db_session.execute(
+        text(
+            """
+            INSERT INTO submission_control (id, manual_closed, close_at)
+            VALUES (1, :manual_closed, :close_at)
+            ON CONFLICT (id) DO UPDATE
+            SET manual_closed = EXCLUDED.manual_closed,
+                close_at = EXCLUDED.close_at
+            """
+        ),
+        {"manual_closed": manual_closed, "close_at": close_at},
+    )
+
+
 # ============================================================================
 # Defense Docker Submission Tests
 # ============================================================================
@@ -117,6 +133,55 @@ def _create_password_protected_zip() -> io.BytesIO:
 
 class TestDefenseDockerSubmission:
     """Test Docker Hub defense submission endpoint."""
+
+    def test_submissions_rejected_when_manually_closed(self, client, db_session, monkeypatch):
+        from routers import submissions as submissions_module
+
+        fake = _FakeCelery()
+        monkeypatch.setattr(submissions_module, "_publish_task",
+                            lambda **kwargs: fake.send_task("", kwargs))
+
+        user_id = _create_user(db_session, username="closed_manual_user", email="closed_manual@example.com")
+        token = _create_session_token(db_session, user_id=user_id)
+        _set_submission_control(db_session, manual_closed=True, close_at=None)
+
+        response = client.post(
+            "/api/submissions/defense/docker",
+            json={
+                "docker_image": "nginx:latest",
+                "version": "1.0.0",
+                "display_name": "My Defense",
+            },
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 403
+        assert "closed" in response.json()["detail"].lower()
+
+    def test_submissions_rejected_when_deadline_passed(self, client, db_session, monkeypatch):
+        from routers import submissions as submissions_module
+
+        fake = _FakeCelery()
+        monkeypatch.setattr(submissions_module, "_publish_task",
+                            lambda **kwargs: fake.send_task("", kwargs))
+
+        user_id = _create_user(db_session, username="closed_deadline_user", email="closed_deadline@example.com")
+        token = _create_session_token(db_session, user_id=user_id)
+        past_deadline = datetime.now(timezone.utc) - timedelta(minutes=5)
+        _set_submission_control(db_session, manual_closed=False, close_at=past_deadline)
+
+        response = client.post(
+            "/api/submissions/defense/docker",
+            json={
+                "docker_image": "nginx:latest",
+                "version": "1.0.0",
+                "display_name": "My Defense",
+            },
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 403
+        assert "closed" in response.json()["detail"].lower()
 
     def test_create_defense_docker_success(self, client, db_session, monkeypatch):
         """Test successful Docker defense submission."""

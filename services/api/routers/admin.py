@@ -1,0 +1,955 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from core.admin import (
+    consume_admin_action_token,
+    issue_admin_action_token,
+    require_admin_action_token,
+    require_admin_origin,
+    require_admin_user,
+    require_localhost_request,
+)
+from core.audit import log_audit_event
+from core.auth import AuthenticatedUser
+from core.database import get_db
+from core.settings import get_settings
+from core.submission_control import get_submission_control, set_close_at, set_manual_closed
+from schemas.admin import (
+    AdminActiveSessionRecord,
+    AdminActiveSessionsResponse,
+    AdminActionTokenResponse,
+    AdminAuditLogRecord,
+    AdminAuditLogsResponse,
+    AdminEvaluationLogRecord,
+    AdminEvaluationLogsResponse,
+    AdminJobLogRecord,
+    AdminJobLogsResponse,
+    AdminOverviewResponse,
+    AdminRevokeSessionsResponse,
+    AdminSetAdminRequest,
+    AdminSubmissionControlResponse,
+    AdminSubmissionScheduleRequest,
+    AdminSystemCounts,
+    AdminUserRecord,
+    AdminUserActionResponse,
+    AdminUsersResponse,
+)
+
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_localhost_request)],
+)
+
+
+def _request_meta(request: Request) -> tuple[str | None, str | None]:
+    """Return client IP and user-agent for audit logging."""
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    return client_ip, user_agent
+
+
+def _log_admin_action_failure(
+    *,
+    request: Request,
+    current_user: AuthenticatedUser,
+    event_type: str,
+    message: str,
+    target_user_id: UUID | None = None,
+    target_email: str | None = None,
+    metadata: dict[str, str | None] | None = None,
+) -> None:
+    """Persist a failed admin action event with optional target metadata."""
+    client_ip, user_agent = _request_meta(request)
+    payload: dict[str, str | None] = dict(metadata or {})
+    if target_user_id:
+        payload["target_user_id"] = str(target_user_id)
+    if target_email:
+        payload["target_email"] = target_email
+    log_audit_event(
+        event_type=event_type,
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=False,
+        message=message,
+        metadata=payload or None,
+    )
+
+
+@router.get("/overview", response_model=AdminOverviewResponse)
+def get_overview(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminOverviewResponse:
+    """Return summary counts for the admin dashboard."""
+    counts_row = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM users) AS users_total,
+                    (SELECT COUNT(*) FROM users WHERE disabled_at IS NULL) AS users_active,
+                    (
+                        SELECT COUNT(*)
+                        FROM user_sessions
+                        WHERE revoked_at IS NULL
+                          AND expires_at > NOW()
+                    ) AS sessions_active,
+                    (SELECT COUNT(*) FROM submissions WHERE deleted_at IS NULL) AS submissions_total,
+                    (SELECT COUNT(*) FROM evaluation_runs) AS evaluation_runs_total,
+                    (SELECT COUNT(*) FROM jobs WHERE status = 'queued') AS jobs_queued,
+                    (SELECT COUNT(*) FROM jobs WHERE status = 'running') AS jobs_running,
+                    (SELECT COUNT(*) FROM jobs WHERE status = 'failed') AS jobs_failed
+                """
+            )
+        )
+        .mappings()
+        .one()
+    )
+
+    return AdminOverviewResponse(
+        generated_at=datetime.now(timezone.utc),
+        environment=get_settings().env,
+        counts=AdminSystemCounts(**counts_row),
+    )
+
+
+@router.get("/users", response_model=AdminUsersResponse)
+def get_users(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None),
+    include_disabled: bool = Query(default=True),
+) -> AdminUsersResponse:
+    """List users with last-seen and active session counts."""
+    search_like = f"%{search}%" if search else None
+    # LATERAL joins let us compute per-user aggregates without duplicating rows.
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    u.id,
+                    u.email,
+                    u.username,
+                    u.is_admin,
+                    u.created_at,
+                    u.disabled_at,
+                    last_seen.last_seen_at,
+                    COALESCE(active_sessions.active_count, 0) AS active_sessions
+                FROM users u
+                LEFT JOIN LATERAL (
+                    SELECT COALESCE(us.last_seen_at, us.created_at) AS last_seen_at
+                    FROM user_sessions us
+                    WHERE us.user_id = u.id
+                      AND us.revoked_at IS NULL
+                      AND us.expires_at > NOW()
+                    ORDER BY COALESCE(us.last_seen_at, us.created_at) DESC
+                    LIMIT 1
+                ) last_seen ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS active_count
+                    FROM user_sessions us2
+                    WHERE us2.user_id = u.id
+                      AND us2.revoked_at IS NULL
+                      AND us2.expires_at > NOW()
+                ) active_sessions ON TRUE
+                WHERE (:search IS NULL OR u.email ILIKE :search_like OR u.username ILIKE :search_like)
+                  AND (:include_disabled OR u.disabled_at IS NULL)
+                ORDER BY u.created_at DESC
+                LIMIT :limit
+                OFFSET :offset
+                """
+            ),
+            {
+                "search": search,
+                "search_like": search_like,
+                "include_disabled": include_disabled,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminUserRecord(**row) for row in rows]
+    return AdminUsersResponse(count=len(items), items=items)
+
+
+def _submission_control_response(
+    control,
+) -> AdminSubmissionControlResponse:
+    """Normalize submission control state into the API response schema."""
+    return AdminSubmissionControlResponse(
+        manual_closed=control.manual_closed,
+        close_at=control.close_at,
+        is_closed=control.is_closed(),
+        updated_at=control.updated_at,
+        updated_by=control.updated_by,
+    )
+
+
+@router.get("/submissions/status", response_model=AdminSubmissionControlResponse)
+def get_submission_status(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    """Return the current submission close settings."""
+    control = get_submission_control(db)
+    return _submission_control_response(control)
+
+
+@router.post("/submissions/close", response_model=AdminSubmissionControlResponse)
+def close_submissions(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    """Manually close submissions until reopened by an admin."""
+    event_type = "admin.submissions.close"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        control = set_manual_closed(
+            db,
+            closed=True,
+            updated_by=str(current_user.user_id),
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "manual_closed": str(control.manual_closed),
+                "close_at": control.close_at.isoformat() if control.close_at else None,
+            },
+        )
+
+        return _submission_control_response(control)
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+        )
+        raise
+
+
+@router.post("/submissions/open", response_model=AdminSubmissionControlResponse)
+def open_submissions(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    """Reopen submissions that were manually closed."""
+    event_type = "admin.submissions.open"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        control = set_manual_closed(
+            db,
+            closed=False,
+            updated_by=str(current_user.user_id),
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "manual_closed": str(control.manual_closed),
+                "close_at": control.close_at.isoformat() if control.close_at else None,
+            },
+        )
+
+        return _submission_control_response(control)
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+        )
+        raise
+
+
+@router.post("/submissions/schedule", response_model=AdminSubmissionControlResponse)
+def schedule_submissions_close(
+    req: AdminSubmissionScheduleRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminSubmissionControlResponse:
+    """Set or clear the scheduled submissions close time."""
+    event_type = "admin.submissions.schedule"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        control = set_close_at(
+            db,
+            close_at=req.close_at,
+            updated_by=str(current_user.user_id),
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "manual_closed": str(control.manual_closed),
+                "close_at": control.close_at.isoformat() if control.close_at else None,
+            },
+        )
+
+        return _submission_control_response(control)
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            metadata={
+                "close_at": req.close_at.isoformat() if req.close_at else None,
+            },
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            metadata={
+                "close_at": req.close_at.isoformat() if req.close_at else None,
+            },
+        )
+        raise
+
+
+@router.get("/logs/jobs", response_model=AdminJobLogsResponse)
+def get_recent_jobs(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    status_filter: str | None = Query(default=None),
+) -> AdminJobLogsResponse:
+    """Return recent job records for the admin logs view."""
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    job_type,
+                    status,
+                    requested_by_user_id,
+                    payload,
+                    created_at,
+                    updated_at
+                FROM jobs
+                WHERE (:status_filter IS NULL OR status = :status_filter)
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"status_filter": status_filter, "limit": limit},
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminJobLogRecord(**row) for row in rows]
+    return AdminJobLogsResponse(count=len(items), items=items)
+
+
+@router.get("/logs/evaluations", response_model=AdminEvaluationLogsResponse)
+def get_recent_evaluations(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    status_filter: str | None = Query(default=None),
+) -> AdminEvaluationLogsResponse:
+    """Return recent evaluation runs for the admin logs view."""
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    defense_submission_id,
+                    attack_submission_id,
+                    scope,
+                    status,
+                    include_behavior_different,
+                    error,
+                    duration_ms,
+                    created_at,
+                    updated_at
+                FROM evaluation_runs
+                WHERE (:status_filter IS NULL OR status = :status_filter)
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"status_filter": status_filter, "limit": limit},
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminEvaluationLogRecord(**row) for row in rows]
+    return AdminEvaluationLogsResponse(count=len(items), items=items)
+
+
+@router.get("/sessions/active", response_model=AdminActiveSessionsResponse)
+def get_active_sessions(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> AdminActiveSessionsResponse:
+    """Return currently active user sessions."""
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    us.id AS session_id,
+                    us.user_id,
+                    u.email,
+                    u.username,
+                    u.is_admin,
+                    us.created_at,
+                    us.last_seen_at,
+                    us.expires_at
+                FROM user_sessions us
+                JOIN users u
+                  ON u.id = us.user_id
+                WHERE us.revoked_at IS NULL
+                  AND us.expires_at > NOW()
+                  AND u.disabled_at IS NULL
+                ORDER BY COALESCE(us.last_seen_at, us.created_at) DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminActiveSessionRecord(**row) for row in rows]
+    return AdminActiveSessionsResponse(count=len(items), items=items)
+
+
+@router.get("/logs/audit", response_model=AdminAuditLogsResponse)
+def get_audit_logs(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    event_type: str | None = Query(default=None),
+    success: bool | None = Query(default=None),
+) -> AdminAuditLogsResponse:
+    """Return recent audit log entries."""
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    event_type,
+                    user_id,
+                    email,
+                    ip_address,
+                    user_agent,
+                    success,
+                    message,
+                    metadata,
+                    created_at
+                FROM audit_logs
+                WHERE (:event_type IS NULL OR event_type = :event_type)
+                  AND (:success IS NULL OR success = :success)
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "event_type": event_type,
+                "success": success,
+                "limit": limit,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    items = [AdminAuditLogRecord(**row) for row in rows]
+    return AdminAuditLogsResponse(count=len(items), items=items)
+
+
+@router.post("/actions/token", response_model=AdminActionTokenResponse)
+def issue_action_token(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminActionTokenResponse:
+    """Issue a short-lived token required for admin write actions."""
+    require_admin_origin(request, require_present=True)
+    token, expires_at = issue_admin_action_token(db, session_id=str(current_user.session_id))
+    return AdminActionTokenResponse(token=token, expires_at=expires_at)
+
+
+@router.post("/users/{user_id}/disable", response_model=AdminUserActionResponse)
+def disable_user(
+    user_id: UUID,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserActionResponse:
+    """Disable a user account and revoke any active sessions."""
+    event_type = "admin.user.disable"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        if user_id == current_user.user_id:
+            raise HTTPException(status_code=400, detail="Cannot disable your own account")
+
+        now = datetime.now(timezone.utc)
+        row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET disabled_at = COALESCE(disabled_at, :now)
+                    WHERE id = :user_id
+                    RETURNING id, email, username, is_admin, disabled_at
+                    """
+                ),
+                {"user_id": str(user_id), "now": now},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        revoked = db.execute(
+            text(
+                """
+                UPDATE user_sessions
+                SET revoked_at = :now
+                WHERE user_id = :user_id
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"user_id": str(user_id), "now": now},
+        ).rowcount
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(row["id"]),
+                "target_email": row["email"],
+                "revoked_sessions": revoked,
+            },
+        )
+
+        return AdminUserActionResponse(
+            user_id=row["id"],
+            email=row["email"],
+            username=row["username"],
+            is_admin=row["is_admin"],
+            disabled_at=row["disabled_at"],
+            revoked_sessions=revoked,
+        )
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
+
+
+@router.post("/users/{user_id}/enable", response_model=AdminUserActionResponse)
+def enable_user(
+    user_id: UUID,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserActionResponse:
+    """Re-enable a previously disabled user account."""
+    event_type = "admin.user.enable"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET disabled_at = NULL
+                    WHERE id = :user_id
+                    RETURNING id, email, username, is_admin, disabled_at
+                    """
+                ),
+                {"user_id": str(user_id)},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(row["id"]),
+                "target_email": row["email"],
+            },
+        )
+
+        return AdminUserActionResponse(
+            user_id=row["id"],
+            email=row["email"],
+            username=row["username"],
+            is_admin=row["is_admin"],
+            disabled_at=row["disabled_at"],
+        )
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
+
+
+@router.post("/users/{user_id}/admin", response_model=AdminUserActionResponse)
+def set_admin_role(
+    user_id: UUID,
+    req: AdminSetAdminRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminUserActionResponse:
+    """Promote or demote a user to admin based on the request payload."""
+    event_type = "admin.user.promote" if req.is_admin else "admin.user.demote"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        if user_id == current_user.user_id and not req.is_admin:
+            raise HTTPException(status_code=400, detail="Cannot remove your own admin privileges")
+
+        row = (
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET is_admin = :is_admin
+                    WHERE id = :user_id
+                    RETURNING id, email, username, is_admin, disabled_at
+                    """
+                ),
+                {"user_id": str(user_id), "is_admin": req.is_admin},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(row["id"]),
+                "target_email": row["email"],
+                "is_admin": row["is_admin"],
+            },
+        )
+
+        return AdminUserActionResponse(
+            user_id=row["id"],
+            email=row["email"],
+            username=row["username"],
+            is_admin=row["is_admin"],
+            disabled_at=row["disabled_at"],
+        )
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise
+
+
+@router.post("/users/{user_id}/sessions/revoke", response_model=AdminRevokeSessionsResponse)
+def revoke_user_sessions(
+    user_id: UUID,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> AdminRevokeSessionsResponse:
+    """Revoke all active sessions for a user."""
+    event_type = "admin.user.revoke_sessions"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        user_row = (
+            db.execute(
+                text(
+                    """
+                    SELECT id, email
+                    FROM users
+                    WHERE id = :user_id
+                    """
+                ),
+                {"user_id": str(user_id)},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if user_row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        now = datetime.now(timezone.utc)
+        revoked = db.execute(
+            text(
+                """
+                UPDATE user_sessions
+                SET revoked_at = :now
+                WHERE user_id = :user_id
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"user_id": str(user_id), "now": now},
+        ).rowcount
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "target_user_id": str(user_row["id"]),
+                "target_email": user_row["email"],
+                "revoked_sessions": revoked,
+            },
+        )
+
+        return AdminRevokeSessionsResponse(user_id=user_row["id"], revoked_count=revoked)
+    except HTTPException as exc:
+        # Avoid rolling back on HTTP errors so the session stays usable in tests.
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+            target_user_id=user_id,
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+            target_user_id=user_id,
+        )
+        raise

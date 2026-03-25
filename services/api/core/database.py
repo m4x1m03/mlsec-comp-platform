@@ -5,6 +5,7 @@ dependency injection and health checks.
 """
 
 import os
+import logging
 from functools import lru_cache
 
 from sqlalchemy import create_engine, text  # type: ignore
@@ -15,6 +16,7 @@ from core.settings import get_settings
 
 # TODO: Change this to .env for resolving password, port, etc.
 DEFAULT_DATABASE_URL = "postgresql://postgres:password123@postgres:5432/mlsec"
+logger = logging.getLogger(__name__)
 
 
 def get_database_url() -> str:
@@ -26,6 +28,7 @@ def get_database_url() -> str:
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
     """Create (and cache) the SQLAlchemy Engine."""
+    logger.info("Creating database engine")
     return create_engine(get_database_url(), pool_pre_ping=True)
 
 
@@ -49,5 +52,6 @@ def ping_db() -> bool:
         with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning("Database ping failed", exc_info=exc)
         return False

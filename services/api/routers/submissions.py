@@ -23,6 +23,7 @@ from core.submissions import (
     validate_github_url_format,
     validate_semver_format,
 )
+from core.submission_control import ensure_submissions_open
 from routers.queue import _insert_job, _publish_task
 from schemas.jobs import JobType
 from schemas.submissions import (
@@ -100,6 +101,8 @@ def create_defense_docker(
     Submit defense from Docker Hub or registry.
     Automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     # 1. Validate format
     validate_docker_image_format(req.docker_image)
     validate_semver_format(req.version)
@@ -190,6 +193,8 @@ def create_defense_github(
     Submit defense from GitHub repository.
     Automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     # 1. Validate format
     validate_github_url_format(req.git_repo)
     validate_semver_format(req.version)
@@ -282,6 +287,8 @@ async def create_defense_zip(
     Submit defense from ZIP file upload.
     Uploads to MinIO, automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     settings = get_settings()
 
     # 1. Validate file
@@ -436,6 +443,8 @@ async def create_attack_zip(
     Password must be 'infected'.
     Uploads to MinIO, automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     settings = get_settings()
 
     # 1. Validate file

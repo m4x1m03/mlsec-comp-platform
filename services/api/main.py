@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.settings import get_settings
+from routers.admin import router as admin_router
 from routers.auth import router as auth_router
 from routers.health import router as health_router
 from routers.leaderboard import (
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
+        allow_origin_regex=settings.cors_allow_origin_regex,
         allow_credentials=settings.cors_allow_credentials,
         allow_methods=settings.cors_allow_methods,
         allow_headers=settings.cors_allow_headers,
@@ -81,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(queue_router)
     app.include_router(submissions_router, prefix="/api")
     app.include_router(leaderboard_router, prefix="/api")
+    app.include_router(admin_router)
     return app
 
 

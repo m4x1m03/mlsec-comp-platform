@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -21,6 +22,7 @@ from core.database import get_db
 from core.settings import get_settings
 
 SESSION_COOKIE_ALIAS = get_settings().auth_session_cookie_name
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -140,6 +142,7 @@ def create_session(
 
     if commit:
         db.commit()
+    logger.info("Created session %s for user %s", row["id"], user_id)
 
     return SessionToken(
         session_id=row["id"],
@@ -169,6 +172,7 @@ def revoke_session_by_id(db: Session, *, session_id: UUID, commit: bool = True) 
     )
     if commit:
         db.commit()
+    logger.info("Revoked session %s", session_id)
 
 
 def _maybe_renew_session(
