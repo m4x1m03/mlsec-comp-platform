@@ -187,15 +187,6 @@ def upload_admin_asset(
         content: Raw file bytes to upload
         asset_type: "attack_template" | "defense_validation_set"
 
-    def upload_attack_template(
-        file_content: bytes, template_id: str
-    ) -> dict[str, str | int]:  
-    """
-    Upload attack template ZIP to MinIO.
-
-    Args:
-        file_content: Raw bytes of the ZIP file
-        template_id: UUID string used to form the object key
     Returns:
         dict with keys: object_key (str), sha256 (str), size_bytes (int)
     """
@@ -234,6 +225,28 @@ def upload_admin_asset(
         )
     except S3Error as e:
         logger.error("Failed to upload %s: %s", object_key, e)
+        raise
+
+    return {
+        "object_key": object_key,
+        "sha256": sha256_hash,
+        "size_bytes": size_bytes,
+    }
+
+
+def upload_attack_template(
+    file_content: bytes, template_id: str
+) -> dict[str, str | int]:
+    """
+    Upload attack template ZIP to MinIO.
+
+    Args:
+        file_content: Raw bytes of the ZIP file
+        template_id: UUID string used to form the object key
+
+    Returns:
+        dict with keys: object_key (str), sha256 (str), size_bytes (int)
+    """
     from io import BytesIO
 
     client = get_minio_client()
@@ -246,7 +259,9 @@ def upload_admin_asset(
     size_bytes = len(file_content)
 
     try:
-        logger.info(f"Uploading attack template to MinIO: {object_key} ({size_bytes} bytes)")
+        logger.info(
+            f"Uploading attack template to MinIO: {object_key} ({size_bytes} bytes)"
+        )
         client.put_object(
             bucket_name=bucket_name,
             object_name=object_key,
@@ -254,7 +269,9 @@ def upload_admin_asset(
             length=size_bytes,
             content_type="application/zip",
         )
-        logger.info(f"Successfully uploaded {object_key} (SHA256: {sha256_hash[:16]}...)")
+        logger.info(
+            f"Successfully uploaded {object_key} (SHA256: {sha256_hash[:16]}...)"
+        )
     except S3Error as e:
         logger.error(f"Failed to upload {object_key}: {e}")
         raise
@@ -336,6 +353,9 @@ def stat_admin_asset(asset_type: str) -> dict:
         "metadata": metadata,
         "last_modified": stat.last_modified,
         "uploaded_at": parsed_uploaded_at,
+    }
+
+
 def upload_heurval_set_zip(
     file_content: bytes, set_id: str
 ) -> dict[str, str | int]:
