@@ -156,3 +156,44 @@ class AdminWorkersResponse(BaseModel):
     workers: list[AdminWorkerRecord]
     running_jobs: list[AdminJobLogRecord]
     queued_jobs: list[AdminJobLogRecord]
+
+
+class AdminSubmissionRecord(BaseModel):
+    id: UUID
+    submission_type: str
+    version: str
+    display_name: str | None = None
+    status: str
+    is_functional: bool | None = None
+    created_at: datetime
+    is_active: bool
+
+
+class AdminUserSubmissionsResponse(BaseModel):
+    user_id: UUID
+    username: str
+    email: str
+    submissions: list[AdminSubmissionRecord]
+
+
+class AdminEvaluationPairRecord(BaseModel):
+    other_submission_id: UUID
+    other_submission_type: str
+    other_version: str
+    other_username: str
+    evaluation_status: str | None = None
+    evaluation_run_id: UUID | None = None
+    score: float | None = None
+
+
+class AdminSubmissionEvaluationsResponse(BaseModel):
+    submission_id: UUID
+    submission_type: str
+    pairs: list[AdminEvaluationPairRecord]
+
+
+class AdminActivateSubmissionResponse(BaseModel):
+    submission_id: UUID
+    user_id: UUID
+    submission_type: str
+    previous_active_id: UUID | None = None

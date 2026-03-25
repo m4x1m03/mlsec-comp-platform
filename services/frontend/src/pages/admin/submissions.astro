@@ -1,5 +1,6 @@
 ---
 import AdminLayout from '../../components/admin/AdminLayout.astro';
+import SubmissionsPage from '../../components/admin/submissions/SubmissionsPage';
 import { getSession } from '../../lib/auth';
 
 const session = await getSession(Astro.request);
@@ -9,5 +10,5 @@ if (!session || !session.user.is_admin) {
 ---
 
 <AdminLayout title="Submissions" currentPage="submissions">
-  <p class="text-gray-400 text-sm">Submissions page content will go here.</p>
+  <SubmissionsPage client:load />
 </AdminLayout>

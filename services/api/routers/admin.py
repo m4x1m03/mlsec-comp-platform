@@ -48,6 +48,11 @@ from schemas.admin import (
     AdminWorkerRecord,
     AdminWorkerTaskRecord,
     AdminWorkersResponse,
+    AdminSubmissionRecord,
+    AdminUserSubmissionsResponse,
+    AdminEvaluationPairRecord,
+    AdminSubmissionEvaluationsResponse,
+    AdminActivateSubmissionResponse,
 )
 
 router = APIRouter(
@@ -1375,3 +1380,222 @@ def get_workers(
         logger.warning("Celery inspect timed out or failed; returning empty worker list")
 
     return AdminWorkersResponse(workers=workers, running_jobs=running_jobs, queued_jobs=queued_jobs)
+
+
+@router.get("/submissions/users/{user_id}", response_model=AdminUserSubmissionsResponse)
+def get_user_submissions(
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: AuthenticatedUser = Depends(require_admin_user),
+) -> AdminUserSubmissionsResponse:
+    """Return all submissions for a given user."""
+    user_row = db.execute(
+        text("SELECT id, username, email FROM users WHERE id = CAST(:uid AS uuid)"),
+        {"uid": user_id},
+    ).mappings().first()
+    if user_row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows = (
+        db.execute(
+            text("""
+                SELECT
+                    s.id,
+                    s.submission_type,
+                    s.version,
+                    s.display_name,
+                    s.status,
+                    s.is_functional,
+                    s.created_at,
+                    CASE WHEN a.submission_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_active
+                FROM submissions s
+                LEFT JOIN active_submissions a
+                    ON a.submission_id = s.id
+                WHERE s.user_id = CAST(:uid AS uuid)
+                  AND s.deleted_at IS NULL
+                ORDER BY s.created_at DESC
+            """),
+            {"uid": user_id},
+        )
+        .mappings()
+        .all()
+    )
+
+    return AdminUserSubmissionsResponse(
+        user_id=user_row["id"],
+        username=user_row["username"],
+        email=user_row["email"],
+        submissions=[AdminSubmissionRecord(**row) for row in rows],
+    )
+
+
+@router.get("/submissions/{submission_id}/evaluations", response_model=AdminSubmissionEvaluationsResponse)
+def get_submission_evaluations(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    _: AuthenticatedUser = Depends(require_admin_user),
+) -> AdminSubmissionEvaluationsResponse:
+    """Return evaluation pair status for a given submission against all active counterparts."""
+    sub_row = db.execute(
+        text("""
+            SELECT id, submission_type
+            FROM submissions
+            WHERE id = CAST(:sid AS uuid) AND deleted_at IS NULL
+        """),
+        {"sid": submission_id},
+    ).mappings().first()
+    if sub_row is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission_type: str = sub_row["submission_type"]
+    counterpart_type = "attack" if submission_type == "defense" else "defense"
+
+    if submission_type == "defense":
+        pair_query = text("""
+            SELECT
+                s.id              AS other_submission_id,
+                'attack'          AS other_submission_type,
+                s.version         AS other_version,
+                u.username        AS other_username,
+                eps.latest_evaluation_run_id AS evaluation_run_id,
+                er.status         AS evaluation_status,
+                eps.zip_score_avg AS score
+            FROM active_submissions a
+            JOIN submissions s ON s.id = a.submission_id
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN evaluation_pair_scores eps
+                ON eps.defense_submission_id = CAST(:sid AS uuid)
+               AND eps.attack_submission_id  = s.id
+            LEFT JOIN evaluation_runs er ON er.id = eps.latest_evaluation_run_id
+            WHERE a.submission_type = 'attack'
+              AND s.deleted_at IS NULL
+            ORDER BY u.username, s.version
+        """)
+    else:
+        pair_query = text("""
+            SELECT
+                s.id              AS other_submission_id,
+                'defense'         AS other_submission_type,
+                s.version         AS other_version,
+                u.username        AS other_username,
+                eps.latest_evaluation_run_id AS evaluation_run_id,
+                er.status         AS evaluation_status,
+                eps.zip_score_avg AS score
+            FROM active_submissions a
+            JOIN submissions s ON s.id = a.submission_id
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN evaluation_pair_scores eps
+                ON eps.attack_submission_id   = CAST(:sid AS uuid)
+               AND eps.defense_submission_id  = s.id
+            LEFT JOIN evaluation_runs er ON er.id = eps.latest_evaluation_run_id
+            WHERE a.submission_type = 'defense'
+              AND s.deleted_at IS NULL
+            ORDER BY u.username, s.version
+        """)
+
+    rows = db.execute(pair_query, {"sid": submission_id}).mappings().all()
+
+    return AdminSubmissionEvaluationsResponse(
+        submission_id=sub_row["id"],
+        submission_type=submission_type,
+        pairs=[AdminEvaluationPairRecord(**row) for row in rows],
+    )
+
+
+@router.post("/submissions/{submission_id}/activate", response_model=AdminActivateSubmissionResponse)
+def activate_submission(
+    submission_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_admin_user),
+) -> AdminActivateSubmissionResponse:
+    """Set the given submission as the active submission for its owner and type."""
+    event_type = "admin.submission.activate"
+    try:
+        require_admin_origin(request, require_present=True)
+        action_token = require_admin_action_token(
+            request,
+            db=db,
+            session_id=str(current_user.session_id),
+        )
+
+        sub_row = db.execute(
+            text("""
+                SELECT id, user_id, submission_type
+                FROM submissions
+                WHERE id = CAST(:sid AS uuid) AND deleted_at IS NULL
+            """),
+            {"sid": submission_id},
+        ).mappings().first()
+        if sub_row is None:
+            raise HTTPException(status_code=404, detail="Submission not found")
+
+        user_id: str = str(sub_row["user_id"])
+        submission_type: str = sub_row["submission_type"]
+
+        prev_row = db.execute(
+            text("""
+                SELECT submission_id FROM active_submissions
+                WHERE user_id = CAST(:uid AS uuid) AND submission_type = :stype
+            """),
+            {"uid": user_id, "stype": submission_type},
+        ).mappings().first()
+        previous_active_id = prev_row["submission_id"] if prev_row else None
+
+        db.execute(
+            text("""
+                INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                VALUES (CAST(:uid AS uuid), :stype, CAST(:sid AS uuid), NOW())
+                ON CONFLICT (user_id, submission_type) DO UPDATE
+                    SET submission_id = EXCLUDED.submission_id,
+                        updated_at = EXCLUDED.updated_at
+            """),
+            {"uid": user_id, "stype": submission_type, "sid": submission_id},
+        )
+
+        consume_admin_action_token(
+            db,
+            session_id=str(current_user.session_id),
+            token=action_token,
+        )
+        db.commit()
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type=event_type,
+            user_id=current_user.user_id,
+            email=current_user.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+            metadata={
+                "submission_id": submission_id,
+                "user_id": user_id,
+                "submission_type": submission_type,
+                "previous_active_id": str(previous_active_id) if previous_active_id else None,
+            },
+        )
+
+        return AdminActivateSubmissionResponse(
+            submission_id=sub_row["id"],
+            user_id=sub_row["user_id"],
+            submission_type=submission_type,
+            previous_active_id=previous_active_id,
+        )
+    except HTTPException as exc:
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        db.rollback()
+        _log_admin_action_failure(
+            request=request,
+            current_user=current_user,
+            event_type=event_type,
+            message=str(exc),
+        )
+        raise
