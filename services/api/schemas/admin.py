@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AdminSystemCounts(BaseModel):
@@ -244,9 +244,23 @@ class AdminWorkerRecord(BaseModel):
     task: str | None = None
 
 
+class AdminWorkerTaskRecord(BaseModel):
+    task_id: str
+    name: str
+    kwargs: dict | None = None
+
+
+class AdminCeleryWorkerRecord(BaseModel):
+    name: str
+    active_tasks: list[AdminWorkerTaskRecord]
+
+
 class AdminWorkersResponse(BaseModel):
     count: int
     items: list[AdminWorkerRecord]
+    workers: list[AdminCeleryWorkerRecord] = Field(default_factory=list)
+    running_jobs: list[AdminJobLogRecord] = Field(default_factory=list)
+    queued_jobs: list[AdminJobLogRecord] = Field(default_factory=list)
 
 
 class AdminAssetRecord(BaseModel):
@@ -264,18 +278,3 @@ class AdminAssetRecord(BaseModel):
 class AdminAssetsResponse(BaseModel):
     count: int
     items: list[AdminAssetRecord]
-class AdminWorkerTaskRecord(BaseModel):
-    task_id: str
-    name: str
-    kwargs: dict | None = None
-
-
-class AdminWorkerRecord(BaseModel):
-    name: str
-    active_tasks: list[AdminWorkerTaskRecord]
-
-
-class AdminWorkersResponse(BaseModel):
-    workers: list[AdminWorkerRecord]
-    running_jobs: list[AdminJobLogRecord]
-    queued_jobs: list[AdminJobLogRecord]

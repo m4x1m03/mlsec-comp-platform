@@ -37,28 +37,27 @@ from schemas.admin import (
     AdminAuditLogsResponse,
     AdminAssetsResponse,
     AdminAssetRecord,
+    AdminAttackEvaluationsResponse,
+    AdminCeleryWorkerRecord,
+    AdminDefenseEvaluationsResponse,
     AdminEvaluationLogRecord,
     AdminEvaluationLogsResponse,
-    AdminDefenseEvaluationsResponse,
-    AdminAttackEvaluationsResponse,
     AdminJobLogRecord,
     AdminJobLogsResponse,
     AdminOverviewResponse,
     AdminRevokeSessionsResponse,
     AdminSetAdminRequest,
-    AdminSubmissionRecord,
+    AdminSubmissionControlResponse,
     AdminSubmissionLogRecord,
     AdminSubmissionLogsResponse,
-    AdminSubmissionControlResponse,
+    AdminSubmissionRecord,
     AdminSubmissionScheduleRequest,
     AdminSystemCounts,
+    AdminUserActionResponse,
     AdminUserDeleteResponse,
     AdminUserRecord,
-    AdminUserActionResponse,
     AdminUserSubmissionsResponse,
     AdminUsersResponse,
-    AdminWorkersResponse,
-    AdminWorkerRecord,
     AdminWorkerRecord,
     AdminWorkerTaskRecord,
     AdminWorkersResponse,
@@ -1015,7 +1014,48 @@ def get_workers(
 ) -> AdminWorkersResponse:
     """Return active Redis-registered workers and their current status."""
     items = _build_worker_records(db=db, stale_after_seconds=stale_after_seconds)
-    return AdminWorkersResponse(count=len(items), items=items)
+    rows = (
+        db.execute(
+            text(
+                """
+                SELECT id, job_type, status, requested_by_user_id, payload, created_at, updated_at
+                FROM jobs
+                WHERE status IN ('running', 'queued')
+                ORDER BY created_at
+                """
+            )
+        )
+        .mappings()
+        .all()
+    )
+    running_jobs = [AdminJobLogRecord(**row) for row in rows if row["status"] == "running"]
+    queued_jobs = [AdminJobLogRecord(**row) for row in rows if row["status"] == "queued"]
+
+    workers: list[AdminCeleryWorkerRecord] = []
+    try:
+        active = get_celery().control.inspect(timeout=2).active() or {}
+        for worker_name, tasks in active.items():
+            task_records = [
+                AdminWorkerTaskRecord(
+                    task_id=t.get("id", ""),
+                    name=t.get("name", ""),
+                    kwargs=t.get("kwargs"),
+                )
+                for t in (tasks or [])
+            ]
+            workers.append(
+                AdminCeleryWorkerRecord(name=worker_name, active_tasks=task_records)
+            )
+    except Exception:
+        logger.warning("Celery inspect timed out or failed; returning empty worker list")
+
+    return AdminWorkersResponse(
+        count=len(items),
+        items=items,
+        workers=workers,
+        running_jobs=running_jobs,
+        queued_jobs=queued_jobs,
+    )
 
 
 @router.get("/workers/{worker_id}", response_model=AdminWorkerRecord)
@@ -1041,7 +1081,13 @@ def get_worker_logs(
 ) -> AdminWorkersResponse:
     """Return current worker status for the logs view."""
     items = _build_worker_records(db=db, stale_after_seconds=stale_after_seconds)
-    return AdminWorkersResponse(count=len(items), items=items)
+    return AdminWorkersResponse(
+        count=len(items),
+        items=items,
+        workers=[],
+        running_jobs=[],
+        queued_jobs=[],
+    )
 
 
 @router.get("/assets", response_model=AdminAssetsResponse)
@@ -2163,43 +2209,3 @@ def deactivate_validation_samples(
     )
 
 
-@router.get("/workers", response_model=AdminWorkersResponse)
-def get_workers(
-    db: Session = Depends(get_db),
-    _: AuthenticatedUser = Depends(require_admin_user),
-) -> AdminWorkersResponse:
-    """Return active Celery workers and pending/running jobs."""
-    rows = (
-        db.execute(
-            text("""
-                SELECT id, job_type, status, requested_by_user_id, payload, created_at, updated_at
-                FROM jobs
-                WHERE status IN ('running', 'queued')
-                ORDER BY created_at
-            """)
-        )
-        .mappings()
-        .all()
-    )
-
-    from schemas.admin import AdminJobLogRecord
-    running_jobs = [AdminJobLogRecord(**row) for row in rows if row["status"] == "running"]
-    queued_jobs  = [AdminJobLogRecord(**row) for row in rows if row["status"] == "queued"]
-
-    workers: list[AdminWorkerRecord] = []
-    try:
-        active = get_celery().control.inspect(timeout=2).active() or {}
-        for worker_name, tasks in active.items():
-            task_records = [
-                AdminWorkerTaskRecord(
-                    task_id=t.get("id", ""),
-                    name=t.get("name", ""),
-                    kwargs=t.get("kwargs"),
-                )
-                for t in (tasks or [])
-            ]
-            workers.append(AdminWorkerRecord(name=worker_name, active_tasks=task_records))
-    except Exception:
-        logger.warning("Celery inspect timed out or failed; returning empty worker list")
-
-    return AdminWorkersResponse(workers=workers, running_jobs=running_jobs, queued_jobs=queued_jobs)
