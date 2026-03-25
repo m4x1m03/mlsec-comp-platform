@@ -139,3 +139,20 @@ class AdminUserActionResponse(BaseModel):
 class AdminRevokeSessionsResponse(BaseModel):
     user_id: UUID
     revoked_count: int
+
+
+class AdminWorkerTaskRecord(BaseModel):
+    task_id: str
+    name: str
+    kwargs: dict | None = None
+
+
+class AdminWorkerRecord(BaseModel):
+    name: str
+    active_tasks: list[AdminWorkerTaskRecord]
+
+
+class AdminWorkersResponse(BaseModel):
+    workers: list[AdminWorkerRecord]
+    running_jobs: list[AdminJobLogRecord]
+    queued_jobs: list[AdminJobLogRecord]
