@@ -102,6 +102,11 @@ class JoinCodeValidationResponse(BaseModel):
     required: bool
 
 
+class JoinCodeRequiredResponse(BaseModel):
+    """Response payload indicating whether a join code is required for registration."""
+    required: bool
+
+
 class AuthenticatedUserResponse(BaseModel):
     """User info returned in authenticated responses."""
     id: UUID

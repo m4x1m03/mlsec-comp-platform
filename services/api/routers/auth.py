@@ -23,6 +23,7 @@ from schemas.auth import (
     JOIN_CODE_FIELD,
     REQUIRED_REGISTRATION_FIELDS,
     AuthenticatedUserResponse,
+    JoinCodeRequiredResponse,
     JoinCodeValidationRequest,
     JoinCodeValidationResponse,
     LoginRequest,
@@ -356,6 +357,12 @@ def register(
             is_admin=user_row["is_admin"],
         ),
     )
+
+
+@router.get("/join-code/required", response_model=JoinCodeRequiredResponse)
+def join_code_required() -> JoinCodeRequiredResponse:
+    """Return whether a join code is required for registration."""
+    return JoinCodeRequiredResponse(required=_join_code_required())
 
 
 @router.post("/join-code/validate", response_model=JoinCodeValidationResponse)
