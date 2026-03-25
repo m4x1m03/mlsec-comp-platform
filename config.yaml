@@ -34,3 +34,7 @@ worker:
     template_path: "/app/attack-template"
     max_zip_size_mb: 100
     sandbox_backend: "virustotal"    # "virustotal" | "local"
+
+
+application: 
+  login_code: 'ABC'

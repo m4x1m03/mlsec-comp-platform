@@ -22,8 +22,13 @@ class MinIOConfig(BaseModel):
     secure: bool = False
 
 
+class ApplicationConfig(BaseModel):
+    join_code: str | None = None
+
+
 class AppConfig(BaseModel):
     minio: MinIOConfig = Field(default_factory=MinIOConfig)
+    application: ApplicationConfig = Field(default_factory=ApplicationConfig)
 
 
 @lru_cache(maxsize=1)
@@ -38,7 +43,14 @@ def get_config() -> AppConfig:
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
         minio_data = data.get("worker", {}).get("minio", {})
-        return AppConfig(minio=MinIOConfig(**minio_data))
+        app_data = data.get("application", {}) or {}
+        join_code = app_data.get("join_code")
+        if join_code is None:
+            join_code = app_data.get("login_code")
+        return AppConfig(
+            minio=MinIOConfig(**minio_data),
+            application=ApplicationConfig(join_code=join_code),
+        )
     except Exception as e:
         logger.error(
             f"Failed to load config from {config_path}: {e}. Falling back to defaults.")
