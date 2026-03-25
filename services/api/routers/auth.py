@@ -185,7 +185,7 @@ def login(
         return LoginResponse(
             authenticated=False,
             requires_registration=True,
-            required_registration_fields=required_fields,
+            required_registration_fields=REQUIRED_REGISTRATION_FIELDS,
         )
 
     session_token = create_session(db, user_id=row["id"])
