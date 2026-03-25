@@ -498,24 +498,38 @@ def run_defense_job(
     max_retries=3,
     retry_jitter=True,
 )
-def seed_attack_template(self, *, template_id: str) -> None:
+def seed_attack_template(self, *, template_id: str, job_id: str | None = None) -> None:
     """Submit all template files for a given template to the sandbox for seeding.
 
     Downloads the template ZIP from MinIO, extracts individual files, and
     calls ensure_template_seeded.  Already-seeded files are skipped.
     """
     logger.info("Starting behavioral seeding for template %s", template_id)
-    template_files = get_template_files(template_id)
-    if not template_files:
-        logger.warning(
-            "Template %s has no file records; nothing to seed.", template_id
-        )
-        return
+    if job_id:
+        set_job_status(job_id=job_id, status="running")
 
-    attack_cfg = config.worker.attack
-    sandbox = get_sandbox_backend(attack_cfg)
-    ensure_template_seeded(template_id, template_files, sandbox)
-    logger.info("Seeding complete for template %s", template_id)
+    try:
+        template_files = get_template_files(template_id)
+        if not template_files:
+            logger.warning(
+                "Template %s has no file records; nothing to seed.", template_id
+            )
+            if job_id:
+                set_job_status(job_id=job_id, status="done")
+            return
+
+        attack_cfg = config.worker.attack
+        sandbox = get_sandbox_backend(attack_cfg)
+        ensure_template_seeded(template_id, template_files, sandbox)
+        logger.info("Seeding complete for template %s", template_id)
+        if job_id:
+            set_job_status(job_id=job_id, status="done")
+    except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            logger.exception("Seeding failed for template %s after all retries", template_id)
+            if job_id:
+                set_job_status(job_id=job_id, status="failed", error=str(exc))
+        raise
 
 
 @celery_app.task(

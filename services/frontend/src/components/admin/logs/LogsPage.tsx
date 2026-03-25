@@ -30,6 +30,7 @@ function StatusBadge({ status }: { status: string | null }) {
     queued:     'bg-gray-100 text-gray-600',
     running:    'bg-blue-100 text-blue-700',
     completed:  'bg-green-100 text-green-700',
+    done:       'bg-green-100 text-green-700',
     evaluated:  'bg-green-100 text-green-700',
     validated:  'bg-green-100 text-green-700',
     failed:     'bg-red-100 text-red-700',
@@ -113,6 +114,10 @@ const AUDIT_EVENT_TYPES = [
   'admin.user.promote',
   'admin.user.demote',
   'admin.user.revoke_sessions',
+  'admin.attack_template.upload',
+  'admin.attack_template.deactivate',
+  'admin.defense_samples.upload',
+  'admin.defense_samples.deactivate',
 ];
 
 interface AuditRecord {
@@ -213,7 +218,7 @@ interface JobRecord {
   updated_at: string;
 }
 
-const JOB_STATUSES = ['queued', 'running', 'completed', 'failed'];
+const JOB_STATUSES = ['queued', 'running', 'done', 'failed'];
 
 function JobsTab() {
   const [records, setRecords] = useState<JobRecord[]>([]);
@@ -262,7 +267,7 @@ function JobsTab() {
             <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDateTime(r.created_at)}</td>
             <td className="px-4 py-2.5">
               <span className="font-medium text-gray-800">
-                {r.job_type === 'D' ? 'Defense' : r.job_type === 'A' ? 'Attack' : r.job_type}
+                {r.job_type === 'D' ? 'Defense' : r.job_type === 'A' ? 'Attack' : r.job_type === 'S' ? 'Seeding' : r.job_type}
               </span>
             </td>
             <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>

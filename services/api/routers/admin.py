@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import zipfile
 from datetime import datetime, timezone
@@ -978,6 +979,7 @@ def _strip_common_prefix(paths: list[str]) -> list[str]:
 
 @router.post("/attack-template", status_code=status.HTTP_201_CREATED)
 def upload_template(
+    request: Request,
     file: UploadFile,
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_admin_user),
@@ -1029,13 +1031,26 @@ def upload_template(
             },
         )
 
+    job_id = str(uuid4())
+    db.execute(
+        text("""
+            INSERT INTO jobs (id, job_type, status, requested_by_user_id, payload, created_at, updated_at)
+            VALUES (:id, 'S', 'queued', :user_id, CAST(:payload AS jsonb), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """),
+        {
+            "id": job_id,
+            "user_id": str(current_user.user_id),
+            "payload": json.dumps({"template_id": template_id}),
+        },
+    )
+
     db.commit()
 
     try:
         celery = get_celery()
         celery.send_task(
             "worker.tasks.seed_attack_template",
-            kwargs={"template_id": template_id},
+            kwargs={"template_id": template_id, "job_id": job_id},
         )
         logger.info("Published seed_attack_template task for template %s", template_id)
     except Exception:
@@ -1044,7 +1059,22 @@ def upload_template(
             template_id,
         )
 
-    logger.info(f"Attack template uploaded: id={template_id}, files={len(relative_paths)}")
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.attack_template.upload",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={
+            "template_id": template_id,
+            "file_count": str(len(relative_paths)),
+            "sha256": upload_result["sha256"],
+        },
+    )
+
+    logger.info("Attack template uploaded: id=%s, files=%d", template_id, len(relative_paths))
     return {
         "id": template_id,
         "file_count": len(relative_paths),
@@ -1095,6 +1125,7 @@ def get_template(
 
 @router.delete("/attack-template", status_code=status.HTTP_204_NO_CONTENT)
 def deactivate_template(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_admin_user),
 ) -> None:
@@ -1105,6 +1136,15 @@ def deactivate_template(
     db.commit()
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="No active attack template to deactivate")
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.attack_template.deactivate",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1113,6 +1153,7 @@ def deactivate_template(
 
 @router.post("/defense-validation-samples", status_code=status.HTTP_201_CREATED)
 def upload_validation_samples(
+    request: Request,
     file: UploadFile,
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_admin_user),
@@ -1206,9 +1247,25 @@ def upload_validation_samples(
 
     db.commit()
 
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.defense_samples.upload",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={
+            "set_id": set_id,
+            "malware_count": str(len(malware_rows)),
+            "goodware_count": str(len(goodware_rows)),
+            "sha256": zip_result["sha256"],
+        },
+    )
+
     logger.info(
-        f"Heurval sample set uploaded: id={set_id}, "
-        f"malware={len(malware_rows)}, goodware={len(goodware_rows)}"
+        "Heurval sample set uploaded: id=%s, malware=%d, goodware=%d",
+        set_id, len(malware_rows), len(goodware_rows),
     )
     return {
         "id": set_id,
@@ -1248,6 +1305,7 @@ def list_validation_samples(
 @router.delete("/defense-validation-samples/{set_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deactivate_validation_samples(
     set_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_admin_user),
 ) -> None:
@@ -1262,3 +1320,13 @@ def deactivate_validation_samples(
     db.commit()
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Sample set not found")
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="admin.defense_samples.deactivate",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        metadata={"set_id": set_id},
+    )

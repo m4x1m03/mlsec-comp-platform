@@ -1,5 +1,6 @@
 ---
 import AdminLayout from '../../components/admin/AdminLayout.astro';
+import CompetitionPage from '../../components/admin/competition/CompetitionPage';
 import { getSession } from '../../lib/auth';
 
 const session = await getSession(Astro.request);
@@ -9,5 +10,5 @@ if (!session || !session.user.is_admin) {
 ---
 
 <AdminLayout title="Competition" currentPage="competition">
-  <p class="text-gray-400 text-sm">Competition page content will go here.</p>
+  <CompetitionPage client:load />
 </AdminLayout>
