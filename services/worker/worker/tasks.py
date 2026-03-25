@@ -286,97 +286,112 @@ async def _validate_defense_container(
 
     Returns True if the defense passed (or did not require) validation.
     Returns False on any failure (error already recorded in DB).
+    Never raises; an outer try/except catches any unexpected exception so that
+    one defense's failure cannot abort the entire batch.
     """
     import requests
 
     defense_submission_id = ctx["defense_submission_id"]
     container_timeout = config.worker.defense_job.container_timeout
 
-    start_wait = time.time()
-    container_ready = False
-    while (time.time() - start_wait) < container_timeout:
-        try:
-            res = await asyncio.to_thread(requests.get, ctx["url"], timeout=2)
-            if res.status_code != 502:
-                container_ready = True
-                break
-        except Exception:
-            pass
-        await asyncio.sleep(1)
-
-    if not container_ready:
-        logger.error(
-            f"Defense {defense_submission_id} failed to start within {container_timeout}s timeout"
-        )
-        mark_defense_failed(defense_submission_id, "Container failed to start within timeout")
-        return False
-
-    if not ctx["needs_validation"]:
-        return True
-
     try:
-        await asyncio.to_thread(validate_functional, ctx["image_name"], ctx["url"], config_dict)
-        logger.info(f"Functional validation PASSED for defense {defense_submission_id}")
-    except Exception as e:
-        logger.error(f"Functional validation FAILED for {defense_submission_id}: {e}")
-        mark_defense_failed(defense_submission_id, str(e))
-        return False
+        start_wait = time.time()
+        container_ready = False
+        while (time.time() - start_wait) < container_timeout:
+            try:
+                res = await asyncio.to_thread(requests.get, ctx["url"], timeout=2)
+                if res.status_code != 502:
+                    container_ready = True
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(1)
 
-    if heurval_cfg.enable_heuristic_validation:
-        try:
-            metrics = await validate_defense_heuristic(
-                defense_submission_id=defense_submission_id,
-                container_url=ctx["url"],
-                container_name=ctx["container_name"],
-                docker_client=ctx["docker_client"],
-                eval_cfg=eval_cfg,
-                heurval_cfg=heurval_cfg,
-            )
-        except ContainerRestartError as e:
-            error_msg = "Container exceeded maximum restarts during heuristic validation."
+        if not container_ready:
             logger.error(
-                "Heuristic validation for defense %s raised ContainerRestartError: %s",
-                defense_submission_id,
-                e,
+                f"Defense {defense_submission_id} failed to start within {container_timeout}s timeout"
             )
-            mark_defense_failed(defense_submission_id, error_msg)
+            mark_defense_failed(defense_submission_id, "Container failed to start within timeout")
             return False
 
-        if metrics and heurval_cfg.reject_heurval_failures:
-            fails = []
-            if metrics.get("malware_tpr", 0.0) < heurval_cfg.heurval_malware_tpr_minimum:
-                fails.append(
-                    f"malware_tpr {metrics['malware_tpr']:.3f} < "
-                    f"{heurval_cfg.heurval_malware_tpr_minimum}"
+        if not ctx["needs_validation"]:
+            return True
+
+        try:
+            await asyncio.to_thread(validate_functional, ctx["image_name"], ctx["url"], config_dict)
+            logger.info(f"Functional validation PASSED for defense {defense_submission_id}")
+        except Exception as e:
+            logger.error(f"Functional validation FAILED for {defense_submission_id}: {e}")
+            mark_defense_failed(defense_submission_id, str(e))
+            return False
+
+        if heurval_cfg.enable_heuristic_validation:
+            try:
+                metrics = await validate_defense_heuristic(
+                    defense_submission_id=defense_submission_id,
+                    container_url=ctx["url"],
+                    container_name=ctx["container_name"],
+                    docker_client=ctx["docker_client"],
+                    eval_cfg=eval_cfg,
+                    heurval_cfg=heurval_cfg,
                 )
-            if metrics.get("malware_fpr", 0.0) < heurval_cfg.heurval_malware_fpr_minimum:
-                fails.append(
-                    f"malware_fpr {metrics['malware_fpr']:.3f} < "
-                    f"{heurval_cfg.heurval_malware_fpr_minimum}"
-                )
-            if metrics.get("goodware_tpr", 0.0) < heurval_cfg.heurval_goodware_tpr_minimum:
-                fails.append(
-                    f"goodware_tpr {metrics['goodware_tpr']:.3f} < "
-                    f"{heurval_cfg.heurval_goodware_tpr_minimum}"
-                )
-            if metrics.get("goodware_fpr", 0.0) < heurval_cfg.heurval_goodware_fpr_minimum:
-                fails.append(
-                    f"goodware_fpr {metrics['goodware_fpr']:.3f} < "
-                    f"{heurval_cfg.heurval_goodware_fpr_minimum}"
-                )
-            if fails:
-                error_msg = f"Heuristic validation failed: {'; '.join(fails)}"
-                logger.warning(
-                    "Defense %s rejected by heuristic validation: %s",
+            except ContainerRestartError as e:
+                error_msg = "Container exceeded maximum restarts during heuristic validation."
+                logger.error(
+                    "Heuristic validation for defense %s raised ContainerRestartError: %s",
                     defense_submission_id,
-                    error_msg,
+                    e,
                 )
                 mark_defense_failed(defense_submission_id, error_msg)
                 return False
 
-    mark_defense_validated(defense_submission_id)
-    logger.info(f"Validation PASSED for defense {defense_submission_id}")
-    return True
+            if metrics and heurval_cfg.reject_heurval_failures:
+                fails = []
+                if metrics.get("malware_tpr", 0.0) < heurval_cfg.heurval_malware_tpr_minimum:
+                    fails.append(
+                        f"malware_tpr {metrics['malware_tpr']:.3f} < "
+                        f"{heurval_cfg.heurval_malware_tpr_minimum}"
+                    )
+                if metrics.get("malware_fpr", 0.0) < heurval_cfg.heurval_malware_fpr_minimum:
+                    fails.append(
+                        f"malware_fpr {metrics['malware_fpr']:.3f} < "
+                        f"{heurval_cfg.heurval_malware_fpr_minimum}"
+                    )
+                if metrics.get("goodware_tpr", 0.0) < heurval_cfg.heurval_goodware_tpr_minimum:
+                    fails.append(
+                        f"goodware_tpr {metrics['goodware_tpr']:.3f} < "
+                        f"{heurval_cfg.heurval_goodware_tpr_minimum}"
+                    )
+                if metrics.get("goodware_fpr", 0.0) < heurval_cfg.heurval_goodware_fpr_minimum:
+                    fails.append(
+                        f"goodware_fpr {metrics['goodware_fpr']:.3f} < "
+                        f"{heurval_cfg.heurval_goodware_fpr_minimum}"
+                    )
+                if fails:
+                    error_msg = f"Heuristic validation failed: {'; '.join(fails)}"
+                    logger.warning(
+                        "Defense %s rejected by heuristic validation: %s",
+                        defense_submission_id,
+                        error_msg,
+                    )
+                    mark_defense_failed(defense_submission_id, error_msg)
+                    return False
+
+        mark_defense_validated(defense_submission_id)
+        logger.info(f"Validation PASSED for defense {defense_submission_id}")
+        return True
+
+    except Exception as e:
+        logger.error(
+            "Unexpected error during validation of defense %s: %s",
+            defense_submission_id,
+            e,
+        )
+        try:
+            mark_defense_failed(defense_submission_id, f"Unexpected validation error: {e}")
+        except Exception:
+            pass
+        return False
 
 
 @celery_app.task(

@@ -1085,3 +1085,158 @@ def test_defense_job_respects_cleanup_config(db_session, fake_redis, test_helper
         {"job_id": job_id}
     ).fetchone()
     assert job_status[0] == "done"
+
+
+def test_batch_partial_validation_failure(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """One defense fails functional validation; the other passes and is evaluated."""
+    from worker.redis_client import WorkerRegistry
+    from worker.tasks import run_batch_defense_job
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    defense_a_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_a:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    defense_b_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_b:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_a_id,
+    )
+
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork("eval_net_test")
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x
+    )
+
+    def selective_validate(image_name, url, cfg):
+        if "defense_a" in image_name:
+            raise ValueError("Defense A failed health check")
+
+    monkeypatch.setattr("worker.tasks.validate_functional", selective_validate)
+
+    eval_mock = AsyncMock()
+    monkeypatch.setattr("worker.defense.evaluate.evaluate_defenses_async", eval_mock)
+
+    run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_a_id, defense_b_id])
+
+    result_a = db_session.execute(
+        text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
+        {"id": defense_a_id},
+    ).fetchone()
+    assert result_a[0] is False
+    assert result_a[1] == "error"
+
+    result_b = db_session.execute(
+        text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
+        {"id": defense_b_id},
+    ).fetchone()
+    assert result_b[0] is True
+    assert result_b[1] == "validated"
+
+    assert eval_mock.call_count == 1
+    evaluated_ids = {
+        ctx["defense_submission_id"]
+        for ctx in eval_mock.call_args.kwargs["defense_contexts"]
+    }
+    assert defense_b_id in evaluated_ids
+    assert defense_a_id not in evaluated_ids
+
+    job_status = db_session.execute(
+        text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
+        {"id": job_id},
+    ).scalar()
+    assert job_status == "done"
+
+
+def test_batch_all_validation_failure(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """All defenses fail validation; evaluate is skipped and job completes as done."""
+    from worker.redis_client import WorkerRegistry
+    from worker.tasks import run_batch_defense_job
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    defense_a_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_a:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    defense_b_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_b:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_a_id,
+    )
+
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork("eval_net_test")
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x
+    )
+
+    monkeypatch.setattr(
+        "worker.tasks.validate_functional",
+        lambda *args: (_ for _ in ()).throw(ValueError("All defenses broken")),
+    )
+
+    eval_mock = AsyncMock()
+    monkeypatch.setattr("worker.defense.evaluate.evaluate_defenses_async", eval_mock)
+
+    run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_a_id, defense_b_id])
+
+    for defense_id in (defense_a_id, defense_b_id):
+        result = db_session.execute(
+            text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
+            {"id": defense_id},
+        ).fetchone()
+        assert result[0] is False
+        assert result[1] == "error"
+
+    eval_mock.assert_not_called()
+
+    job_status = db_session.execute(
+        text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
+        {"id": job_id},
+    ).scalar()
+    assert job_status == "done"
