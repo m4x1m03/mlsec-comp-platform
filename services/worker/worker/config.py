@@ -106,6 +106,7 @@ class MinIOConfig(BaseModel):
 
 
 class WorkerSettings(BaseModel):
+    num_workers: int = Field(default=4, ge=1)
     defense_job: DefenseJobConfig = Field(default_factory=DefenseJobConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     heuristic_validation: HeuristicValidationConfig = Field(default_factory=HeuristicValidationConfig)

@@ -8,6 +8,8 @@ import tempfile
 
 import pytest
 
+import pydantic
+
 from worker.config import (
     AppConfig,
     AttackConfig,
@@ -153,3 +155,21 @@ def test_heuristic_validation_config_loads_from_yaml():
     assert hv.heurval_malware_tpr_minimum == 0.8
     assert hv.heurval_goodware_tpr_minimum == 0.9
     assert hv.reject_heurval_failures is False
+
+
+def test_worker_settings_num_workers_default():
+    """WorkerSettings defaults num_workers to 4."""
+    settings = WorkerSettings()
+    assert settings.num_workers == 4
+
+
+def test_worker_settings_num_workers_loads_from_yaml():
+    """num_workers is populated from a YAML dict."""
+    cfg = AppConfig(**{"worker": {"num_workers": 2}})
+    assert cfg.worker.num_workers == 2
+
+
+def test_worker_settings_num_workers_must_be_at_least_one():
+    """num_workers=0 is rejected with a ValidationError."""
+    with pytest.raises(pydantic.ValidationError):
+        WorkerSettings(num_workers=0)

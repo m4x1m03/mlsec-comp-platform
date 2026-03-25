@@ -136,6 +136,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      CELERY_CONCURRENCY: "${WORKER_CONCURRENCY:-4}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro

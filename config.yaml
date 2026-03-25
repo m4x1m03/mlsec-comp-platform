@@ -1,4 +1,5 @@
 worker:
+  num_workers: 4   # number of concurrent Celery worker processes (maps to --concurrency)
   defense_job:
     mem_limit: "1g"
     nano_cpus: 1000000000
