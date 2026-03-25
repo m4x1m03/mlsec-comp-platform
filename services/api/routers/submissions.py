@@ -8,7 +8,7 @@ import zipfile
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ from core.submissions import (
     validate_github_url_format,
     validate_semver_format,
 )
+from core.submission_control import ensure_submissions_open
 from routers.queue import _insert_job, _publish_task
 from schemas.jobs import JobType
 from schemas.submissions import (
@@ -31,11 +32,62 @@ from schemas.submissions import (
     CreateDefenseGitHubRequest,
     SetActiveResponse,
     SubmissionListItem,
+    SubmissionHistoryResponse,
     SubmissionResponse,
 )
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 logger = logging.getLogger(__name__)
+
+
+def _get_submission_history(
+    *,
+    db: Session,
+    user_id: str,
+    submission_type: str,
+    limit: int,
+    offset: int,
+) -> SubmissionHistoryResponse:
+    base_sql = """
+        FROM submissions s
+        WHERE s.user_id = :user_id
+          AND s.submission_type = :submission_type
+          AND s.deleted_at IS NULL
+    """
+
+    data_sql = f"""
+        SELECT
+            s.id AS submission_id,
+            s.submission_type AS submission_type,
+            s.status AS status,
+            s.version AS version,
+            s.display_name AS display_name,
+            s.created_at AS created_at
+        {base_sql}
+        ORDER BY s.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """
+
+    count_sql = f"""
+        SELECT COUNT(*)
+        {base_sql}
+    """
+
+    params = {"user_id": user_id, "submission_type": submission_type}
+    rows = db.execute(
+        text(data_sql),
+        {**params, "limit": limit, "offset": offset},
+    ).mappings().fetchall()
+
+    total = db.execute(text(count_sql), params).scalar() or 0
+    items = [dict(row) for row in rows]
+
+    return SubmissionHistoryResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(
@@ -52,6 +104,8 @@ def create_defense_docker(
     Submit defense from Docker Hub or registry.
     Automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     # 1. Validate format
     validate_docker_image_format(req.docker_image)
     validate_semver_format(req.version)
@@ -142,6 +196,8 @@ def create_defense_github(
     Submit defense from GitHub repository.
     Automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     # 1. Validate format
     validate_github_url_format(req.git_repo)
     validate_semver_format(req.version)
@@ -234,6 +290,8 @@ async def create_defense_zip(
     Submit defense from ZIP file upload.
     Uploads to MinIO, automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     settings = get_settings()
 
     # 1. Validate file
@@ -331,6 +389,46 @@ async def create_defense_zip(
     )
 
 
+@router.get(
+    "/defense/history",
+    response_model=SubmissionHistoryResponse,
+)
+def defense_submission_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionHistoryResponse:
+    """Return the authenticated user's defense submission history."""
+    return _get_submission_history(
+        db=db,
+        user_id=str(current_user.user_id),
+        submission_type="defense",
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/attack/history",
+    response_model=SubmissionHistoryResponse,
+)
+def attack_submission_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionHistoryResponse:
+    """Return the authenticated user's attack submission history."""
+    return _get_submission_history(
+        db=db,
+        user_id=str(current_user.user_id),
+        submission_type="attack",
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.post(
     "/attack/zip",
     response_model=SubmissionResponse,
@@ -348,6 +446,8 @@ async def create_attack_zip(
     Password must be 'infected'.
     Uploads to MinIO, automatically enqueues validation job.
     """
+    # Enforce admin-controlled submission window before accepting new work.
+    ensure_submissions_open(db)
     settings = get_settings()
 
     # 1. Validate file

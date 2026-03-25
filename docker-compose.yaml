@@ -95,6 +95,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
+      ADMIN_ALLOWED_HOSTS: '["172.22.0.1"]' # Docker bridge gateway for localhost SSH tunnel access
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:

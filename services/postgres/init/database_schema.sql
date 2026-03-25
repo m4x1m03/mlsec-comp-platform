@@ -49,6 +49,56 @@ CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 
 
 --------------------------------------------------
+-- ADMIN ACTION TOKENS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS admin_action_tokens (
+    session_id UUID PRIMARY KEY REFERENCES user_sessions(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_admin_action_tokens_expires_at ON admin_action_tokens(expires_at);
+
+
+--------------------------------------------------
+-- AUDIT LOGS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type TEXT NOT NULL,
+    user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    email TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    success BOOLEAN,
+    message TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_audit_logs_event_type ON audit_logs(event_type);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
+
+
+--------------------------------------------------
+-- SUBMISSION CONTROL
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS submission_control (
+    id INT PRIMARY KEY CHECK (id = 1),
+    manual_closed BOOLEAN NOT NULL DEFAULT FALSE,
+    close_at TIMESTAMPTZ NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by UUID NULL REFERENCES users(id) ON DELETE SET NULL
+);
+
+INSERT INTO submission_control (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
+
+--------------------------------------------------
 -- SUBMISSIONS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS submissions (
@@ -286,6 +336,42 @@ CREATE TABLE IF NOT EXISTS evaluation_pair_scores (
 
     UNIQUE(defense_submission_id, attack_submission_id)
 );
+
+-- Indexes to speed leaderboard aggregation by submission
+CREATE INDEX IF NOT EXISTS idx_eval_pair_scores_attack
+ON evaluation_pair_scores(attack_submission_id);
+
+-- Notify API when leaderboard-relevant scores change
+CREATE OR REPLACE FUNCTION notify_leaderboard_change()
+RETURNS trigger AS $$
+DECLARE
+    payload json;
+BEGIN
+    IF (TG_OP = 'DELETE') THEN
+        payload = json_build_object(
+            'table', TG_TABLE_NAME,
+            'op', TG_OP,
+            'defense_submission_id', OLD.defense_submission_id,
+            'attack_submission_id', OLD.attack_submission_id
+        );
+    ELSE
+        payload = json_build_object(
+            'table', TG_TABLE_NAME,
+            'op', TG_OP,
+            'defense_submission_id', NEW.defense_submission_id,
+            'attack_submission_id', NEW.attack_submission_id
+        );
+    END IF;
+
+    PERFORM pg_notify('leaderboard_changes', payload::text);
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_leaderboard_scores_notify ON evaluation_pair_scores;
+CREATE TRIGGER trg_leaderboard_scores_notify
+AFTER INSERT OR UPDATE OR DELETE ON evaluation_pair_scores
+FOR EACH ROW EXECUTE FUNCTION notify_leaderboard_change();
 
 
 --------------------------------------------------

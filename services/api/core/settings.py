@@ -1,3 +1,9 @@
+"""Typed application settings loaded from environment variables.
+
+Defines defaults for database, MinIO, authentication, and CORS settings, and
+exposes a cached accessor for reuse across the API.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -7,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Pydantic settings object for the API service."""
     model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
     env: str = "dev"
@@ -38,12 +45,20 @@ class Settings(BaseSettings):
     auth_session_cookie_path: str = "/"
     auth_session_cookie_domain: str | None = None
 
+    admin_localhost_only: bool = True
+    admin_trusted_proxy_hosts: list[str] = ["127.0.0.1", "::1"]
+    admin_forwarded_for_header: str = "x-forwarded-for"
+    admin_allowed_hosts: list[str] = []
+    admin_allowed_networks: list[str] = []
+    admin_action_token_ttl_minutes: int = 15
+
     cors_allow_origins: list[str] = [
         "http://localhost",
         "http://localhost:80",
         "http://localhost:4321",
         "http://127.0.0.1:4321",
     ]
+    cors_allow_origin_regex: str | None = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     cors_allow_methods: list[str] = ["*"]
     cors_allow_headers: list[str] = ["*"]
     cors_allow_credentials: bool = True
@@ -51,4 +66,5 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Return a cached Settings instance."""
     return Settings()

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -90,3 +93,23 @@ class SetActiveResponse(BaseModel):
 
     submission_id: str
     submission_type: str
+
+
+class SubmissionHistoryItem(BaseModel):
+    """History item for a user's submissions."""
+
+    submission_id: UUID
+    submission_type: str
+    status: str
+    version: str
+    display_name: str | None
+    created_at: datetime
+
+
+class SubmissionHistoryResponse(BaseModel):
+    """Paginated submission history response."""
+
+    items: list[SubmissionHistoryItem]
+    total: int
+    limit: int
+    offset: int
