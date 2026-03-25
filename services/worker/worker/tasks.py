@@ -904,6 +904,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
         enqueued_count = 0
         new_jobs_count = 0
+        remaining_defenses: list[str] = []
 
         for defense_id in validated_defenses:
             # Check if evaluation already in progress (avoid duplicates)
@@ -932,13 +933,11 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                 enqueued_count += 1
             else:
                 # Collect defenses that need new jobs
-                if 'remaining_defenses' not in locals():
-                    remaining_defenses = []
                 remaining_defenses.append(defense_id)
                 logger.debug(f"Defense {defense_id} needs a new worker/batch job")
 
         # Batch remaining defenses
-        if 'remaining_defenses' in locals() and remaining_defenses:
+        if remaining_defenses:
             batch_size = config.worker.evaluation.batch_size
             for i in range(0, len(remaining_defenses), batch_size):
                 batch = remaining_defenses[i:i + batch_size]
