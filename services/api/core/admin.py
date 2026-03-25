@@ -50,10 +50,19 @@ def _hosts_match(left: str, right: str) -> bool:
 
 
 def _is_from_trusted_proxy(host: str | None, trusted_proxy_hosts: Iterable[str]) -> bool:
-    """Return True when the direct client matches a configured proxy host."""
+    """Return True when the direct client matches a configured proxy host or CIDR range."""
     if host is None:
         return False
-    return any(_hosts_match(host, trusted) for trusted in trusted_proxy_hosts)
+    normalized = host.strip().lower()
+    for trusted in trusted_proxy_hosts:
+        if _hosts_match(normalized, trusted):
+            return True
+        try:
+            if ip_address(normalized) in ip_network(trusted.strip(), strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _is_in_allowed_hosts(host: str | None, allowed_hosts: Iterable[str]) -> bool:

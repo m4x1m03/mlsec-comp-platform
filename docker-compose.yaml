@@ -96,6 +96,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
       ADMIN_ALLOWED_HOSTS: '["172.22.0.1"]' # Docker bridge gateway for localhost SSH tunnel access
+      ADMIN_TRUSTED_PROXY_HOSTS: '["127.0.0.1", "::1", "172.16.0.0/12"]' # Trust nginx on any Docker bridge subnet
+      ADMIN_ALLOWED_NETWORKS: '["172.16.0.0/12"]' # Allow Docker bridge gateway as effective client (localhost dev access)
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:

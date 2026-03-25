@@ -1,5 +1,6 @@
 ---
 import AdminLayout from '../../components/admin/AdminLayout.astro';
+import UsersPage from '../../components/admin/users/UsersPage';
 import { getSession } from '../../lib/auth';
 
 const session = await getSession(Astro.request);
@@ -9,5 +10,5 @@ if (!session || !session.user.is_admin) {
 ---
 
 <AdminLayout title="Users" currentPage="users">
-  <p class="text-gray-400 text-sm">Users page content will go here.</p>
+  <UsersPage client:load currentUserId={session.user.id.toString()} />
 </AdminLayout>
