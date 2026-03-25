@@ -14,11 +14,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.auth import AuthenticatedUser, create_session, get_authenticated_user, revoke_session_by_id
+from core.config import get_config
 from core.database import get_db
 from core.settings import get_settings
 from schemas.auth import (
+    JOIN_CODE_FIELD,
     REQUIRED_REGISTRATION_FIELDS,
     AuthenticatedUserResponse,
+    JoinCodeValidationRequest,
+    JoinCodeValidationResponse,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -76,6 +80,37 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
+def _normalize_join_code(value: str | None) -> str | None:
+    """Normalize join code input for comparison."""
+    if value is None:
+        return None
+    code = value.strip()
+    return code or None
+
+
+def _configured_join_code() -> str | None:
+    """Return the configured join code, if set."""
+    config = get_config()
+    return _normalize_join_code(config.application.join_code)
+
+
+def _join_code_required() -> bool:
+    """Return True when a join code is configured."""
+    return _configured_join_code() is not None
+
+
+def _validate_join_code_or_raise(submitted_code: str | None) -> None:
+    """Validate the provided join code against configuration."""
+    required_code = _configured_join_code()
+    if required_code is None:
+        return
+    candidate = _normalize_join_code(submitted_code)
+    if not candidate:
+        raise HTTPException(status_code=403, detail="Join code is required")
+    if candidate != required_code:
+        raise HTTPException(status_code=403, detail="Invalid join code")
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     req: LoginRequest,
@@ -115,10 +150,13 @@ def login(
         if disabled is not None:
             raise HTTPException(status_code=403, detail="User account is disabled")
 
+        required_fields = list(REQUIRED_REGISTRATION_FIELDS)
+        if _join_code_required():
+            required_fields.append(JOIN_CODE_FIELD)
         return LoginResponse(
             authenticated=False,
             requires_registration=True,
-            required_registration_fields=REQUIRED_REGISTRATION_FIELDS,
+            required_registration_fields=required_fields,
         )
 
     session_token = create_session(db, user_id=row["id"])
@@ -144,6 +182,7 @@ def register(
     db: Session = Depends(get_db),
 ) -> SessionResponse:
     """Register a new user and issue a session token."""
+    _validate_join_code_or_raise(req.join_code)
     existing_email = (
         db.execute(
             text(
@@ -230,6 +269,20 @@ def register(
             is_admin=user_row["is_admin"],
         ),
     )
+
+
+@router.post("/join-code/validate", response_model=JoinCodeValidationResponse)
+def validate_join_code(req: JoinCodeValidationRequest) -> JoinCodeValidationResponse:
+    """Validate a join code against the configured application setting."""
+    required_code = _configured_join_code()
+    if required_code is None:
+        return JoinCodeValidationResponse(valid=True, required=False)
+    candidate = _normalize_join_code(req.join_code)
+    if not candidate:
+        raise HTTPException(status_code=403, detail="Join code is required")
+    if candidate != required_code:
+        raise HTTPException(status_code=403, detail="Invalid join code")
+    return JoinCodeValidationResponse(valid=True, required=True)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -23,8 +23,9 @@ pnpm-debug.log*
 # macOS-specific files
 .DS_Store
 
-# docker 
-.docker-tmp/ 
+# docker tmp
+.docker-tmp/
+
 
 # jetbrains setting folder
 .idea/
