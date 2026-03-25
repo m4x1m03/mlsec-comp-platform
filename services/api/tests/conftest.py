@@ -139,6 +139,9 @@ def fake_redis():
             self.lists[key].extend(str(v) for v in values)
             return len(self.lists[key])
 
+        def llen(self, key):
+            return len(self.lists.get(key, []))
+
         def setnx(self, key, value):
             if key in self.data:
                 return False

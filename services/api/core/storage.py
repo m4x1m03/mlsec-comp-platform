@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from datetime import datetime
 from functools import lru_cache
 from typing import BinaryIO
 
@@ -160,6 +161,97 @@ def upload_attack_zip(
         "object_key": object_key,
         "sha256": sha256_hash,
         "size_bytes": size_bytes,
+    }
+
+
+def _admin_asset_object_key(asset_type: str) -> str:
+    return f"admin/{asset_type}/latest.zip"
+
+
+def upload_admin_asset(
+    content: bytes,
+    *,
+    asset_type: str,
+    metadata: dict[str, str | None],
+) -> dict[str, str | int]:
+    """
+    Upload admin-managed assets (attack template, defense validation set) to MinIO.
+
+    Args:
+        content: Raw file bytes to upload
+        asset_type: "attack_template" | "defense_validation_set"
+
+    Returns:
+        dict with keys: object_key (str), sha256 (str), size_bytes (int)
+    """
+    client = get_minio_client()
+    bucket_name = get_config().minio.bucket_name
+
+    object_key = _admin_asset_object_key(asset_type)
+
+    hasher = hashlib.sha256()
+    hasher.update(content)
+    sha256_hash = hasher.hexdigest()
+    size_bytes = len(content)
+
+    # Ensure sha256 metadata is present.
+    if metadata.get("sha256") is None:
+        metadata["sha256"] = sha256_hash
+
+    from io import BytesIO
+
+    file_stream = BytesIO(content)
+
+    try:
+        logger.info(
+            "Uploading admin asset to MinIO: %s (%s bytes)", object_key, size_bytes
+        )
+        client.put_object(
+            bucket_name=bucket_name,
+            object_name=object_key,
+            data=file_stream,
+            length=size_bytes,
+            content_type="application/zip",
+            metadata={k: v for k, v in metadata.items() if v is not None},
+        )
+        logger.info(
+            "Successfully uploaded %s (SHA256: %s...)", object_key, sha256_hash[:16]
+        )
+    except S3Error as e:
+        logger.error("Failed to upload %s: %s", object_key, e)
+        raise
+
+    return {
+        "object_key": object_key,
+        "sha256": sha256_hash,
+        "size_bytes": size_bytes,
+    }
+
+
+def stat_admin_asset(asset_type: str) -> dict:
+    """Fetch metadata for the latest admin asset stored at the fixed key."""
+    client = get_minio_client()
+    bucket_name = get_config().minio.bucket_name
+    object_key = _admin_asset_object_key(asset_type)
+
+    stat = client.stat_object(bucket_name, object_key)
+    metadata = stat.metadata or {}
+    uploaded_at = metadata.get("uploaded_at")
+
+    parsed_uploaded_at = None
+    if uploaded_at:
+        try:
+            parsed_uploaded_at = datetime.fromisoformat(uploaded_at)
+        except Exception:
+            parsed_uploaded_at = None
+
+    return {
+        "object_key": object_key,
+        "size_bytes": stat.size,
+        "etag": stat.etag,
+        "metadata": metadata,
+        "last_modified": stat.last_modified,
+        "uploaded_at": parsed_uploaded_at,
     }
 
 

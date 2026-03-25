@@ -139,3 +139,128 @@ class AdminUserActionResponse(BaseModel):
 class AdminRevokeSessionsResponse(BaseModel):
     user_id: UUID
     revoked_count: int
+
+
+class AdminUserDeleteResponse(BaseModel):
+    user_id: UUID
+    email: str
+    username: str
+    deleted_submissions: int
+    deleted_objects: int
+
+
+class AdminSubmissionRecord(BaseModel):
+    submission_id: UUID
+    user_id: UUID
+    username: str
+    email: str
+    submission_type: str
+    status: str
+    version: str
+    display_name: str | None = None
+    is_functional: bool | None = None
+    functional_error: str | None = None
+    created_at: datetime
+    deleted_at: datetime | None = None
+
+
+class AdminUserSubmissionsResponse(BaseModel):
+    count: int
+    items: list[AdminSubmissionRecord]
+
+
+class AdminSubmissionLogRecord(BaseModel):
+    submission_id: UUID
+    user_id: UUID
+    username: str
+    email: str
+    submission_type: str
+    status: str
+    version: str
+    display_name: str | None = None
+    functional_error: str | None = None
+    created_at: datetime
+
+
+class AdminSubmissionLogsResponse(BaseModel):
+    count: int
+    items: list[AdminSubmissionLogRecord]
+
+
+class AdminDefenseEvaluationRecord(BaseModel):
+    attack_submission_id: UUID
+    attack_user_id: UUID
+    attack_username: str
+    attack_email: str
+    attack_status: str
+    attack_version: str
+    attack_display_name: str | None = None
+    attack_created_at: datetime
+    evaluation_status: str
+    evaluation_run_id: UUID | None = None
+    evaluation_updated_at: datetime | None = None
+    evaluation_error: str | None = None
+
+
+class AdminDefenseEvaluationsResponse(BaseModel):
+    count: int
+    items: list[AdminDefenseEvaluationRecord]
+
+
+class AdminAttackEvaluationRecord(BaseModel):
+    defense_submission_id: UUID
+    defense_user_id: UUID
+    defense_username: str
+    defense_email: str
+    defense_status: str
+    defense_version: str
+    defense_display_name: str | None = None
+    defense_created_at: datetime
+    evaluation_status: str
+    evaluation_run_id: UUID | None = None
+    evaluation_updated_at: datetime | None = None
+    evaluation_error: str | None = None
+
+
+class AdminAttackEvaluationsResponse(BaseModel):
+    count: int
+    items: list[AdminAttackEvaluationRecord]
+
+
+class AdminWorkerRecord(BaseModel):
+    worker_id: str
+    defense_submission_id: UUID | None = None
+    job_id: UUID | None = None
+    job_status: str | None = None
+    job_type: str | None = None
+    submission_status: str | None = None
+    submission_is_functional: bool | None = None
+    queue_state: str | None = None
+    started_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    heartbeat_age_seconds: int | None = None
+    is_stale: bool
+    queued_attacks: int | None = None
+    task: str | None = None
+
+
+class AdminWorkersResponse(BaseModel):
+    count: int
+    items: list[AdminWorkerRecord]
+
+
+class AdminAssetRecord(BaseModel):
+    asset_type: str
+    object_key: str
+    sha256: str
+    size_bytes: int
+    original_filename: str | None = None
+    uploaded_at: datetime
+    uploaded_by: UUID | None = None
+    uploaded_by_email: str | None = None
+    uploaded_by_username: str | None = None
+
+
+class AdminAssetsResponse(BaseModel):
+    count: int
+    items: list[AdminAssetRecord]

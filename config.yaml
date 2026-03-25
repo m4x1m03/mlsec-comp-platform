@@ -25,6 +25,10 @@ worker:
     cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
   minio:
     bucket_name: "mlsec-submissions"
+    endpoint: "minio:9000"
+    access_key: "mlsec_minio_admin"
+    secret_key: "mlsec_minio_password_change_in_production"
+    secure: false
   attack:
     check_similarity: true           # false = skip evaluation, accept all validated attacks
     reject_dissimilar_attacks: true  # only applies when check_similarity=true
