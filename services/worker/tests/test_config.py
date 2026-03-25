@@ -1,4 +1,4 @@
-"""Unit tests for worker configuration including AttackConfig."""
+"""Unit tests for worker configuration."""
 
 from __future__ import annotations
 
@@ -6,7 +6,15 @@ import os
 import yaml
 import tempfile
 
-from worker.config import AppConfig, AttackConfig, WorkerSettings
+import pytest
+
+from worker.config import (
+    AppConfig,
+    AttackConfig,
+    EvaluationConfig,
+    HeuristicValidationConfig,
+    WorkerSettings,
+)
 
 
 def test_attack_config_defaults():
@@ -15,7 +23,7 @@ def test_attack_config_defaults():
     assert cfg.check_similarity is True
     assert cfg.reject_dissimilar_attacks is True
     assert cfg.minimum_attack_similarity == 50
-    assert cfg.template_path == "/app/attack-template"
+    assert cfg.template_path is None
     assert cfg.max_zip_size_mb == 100
     assert cfg.sandbox_backend == "virustotal"
     assert cfg.virustotal_api_key == ""
@@ -35,6 +43,13 @@ def test_worker_settings_includes_attack():
     assert isinstance(settings.attack, AttackConfig)
 
 
+def test_worker_settings_includes_heuristic_validation():
+    """WorkerSettings has a heuristic_validation sub-config."""
+    settings = WorkerSettings()
+    assert hasattr(settings, "heuristic_validation")
+    assert isinstance(settings.heuristic_validation, HeuristicValidationConfig)
+
+
 def test_app_config_loads_attack_from_yaml():
     """AppConfig.attack section is populated from a YAML file."""
     yaml_content = {
@@ -43,7 +58,6 @@ def test_app_config_loads_attack_from_yaml():
                 "check_similarity": False,
                 "reject_dissimilar_attacks": False,
                 "minimum_attack_similarity": 30,
-                "template_path": "/custom/template",
                 "max_zip_size_mb": 50,
                 "sandbox_backend": "local",
             }
@@ -63,7 +77,6 @@ def test_app_config_loads_attack_from_yaml():
         assert cfg.worker.attack.check_similarity is False
         assert cfg.worker.attack.reject_dissimilar_attacks is False
         assert cfg.worker.attack.minimum_attack_similarity == 30
-        assert cfg.worker.attack.template_path == "/custom/template"
         assert cfg.worker.attack.max_zip_size_mb == 50
         assert cfg.worker.attack.sandbox_backend == "local"
     finally:
@@ -88,3 +101,55 @@ def test_reject_dissimilar_attacks_can_be_disabled():
     cfg = AttackConfig(check_similarity=True, reject_dissimilar_attacks=False)
     assert cfg.check_similarity is True
     assert cfg.reject_dissimilar_attacks is False
+
+
+def test_evaluation_config_defaults():
+    """EvaluationConfig has the expected new fields with sensible defaults."""
+    cfg = EvaluationConfig()
+    assert cfg.defense_max_ram == 1024
+    assert cfg.defense_max_time == 5000
+    assert cfg.defense_max_timeout == 20000
+    assert cfg.defense_max_restarts == 3
+
+
+def test_evaluation_config_timeout_must_be_gte_time():
+    """defense_max_timeout < defense_max_time raises ValueError."""
+    with pytest.raises(ValueError, match="defense_max_timeout"):
+        EvaluationConfig(defense_max_time=10000, defense_max_timeout=5000)
+
+
+def test_evaluation_config_timeout_equal_to_time_is_valid():
+    """defense_max_timeout == defense_max_time is permitted."""
+    cfg = EvaluationConfig(defense_max_time=5000, defense_max_timeout=5000)
+    assert cfg.defense_max_timeout == cfg.defense_max_time
+
+
+def test_heuristic_validation_config_defaults():
+    """HeuristicValidationConfig has sensible defaults."""
+    cfg = HeuristicValidationConfig()
+    assert cfg.enable_heuristic_validation is True
+    assert cfg.heurval_malware_fpr_minimum == 0.0
+    assert cfg.heurval_malware_tpr_minimum == 0.0
+    assert cfg.heurval_goodware_fpr_minimum == 0.0
+    assert cfg.heurval_goodware_tpr_minimum == 0.0
+    assert cfg.reject_heurval_failures is True
+
+
+def test_heuristic_validation_config_loads_from_yaml():
+    """HeuristicValidationConfig is populated from YAML."""
+    yaml_content = {
+        "worker": {
+            "heuristic_validation": {
+                "enable_heuristic_validation": False,
+                "heurval_malware_tpr_minimum": 0.8,
+                "heurval_goodware_tpr_minimum": 0.9,
+                "reject_heurval_failures": False,
+            }
+        }
+    }
+    cfg = AppConfig(**yaml_content)
+    hv = cfg.worker.heuristic_validation
+    assert hv.enable_heuristic_validation is False
+    assert hv.heurval_malware_tpr_minimum == 0.8
+    assert hv.heurval_goodware_tpr_minimum == 0.9
+    assert hv.reject_heurval_failures is False

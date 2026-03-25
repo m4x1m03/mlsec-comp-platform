@@ -23,9 +23,6 @@ pnpm-debug.log*
 # macOS-specific files
 .DS_Store
 
-# docker tmp
-.docker-tmp/
-
 # jetbrains setting folder
 .idea/
 
@@ -38,6 +35,7 @@ __pycache__/
 # development
 .dev/
 .artifacts/
+localtests
 
 # artifacts
 artifacts/

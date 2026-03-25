@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import shutil
 import tempfile
@@ -14,9 +15,8 @@ from .validation import validate_dockerfile_safety, validate_build_context
 
 logger = get_task_logger(__name__)
 
-# Security limits for ZIP extraction
-MAX_TOTAL_SIZE = 10 * 1024 * 1024 * 1024  # 10 GB uncompressed
 MAX_FILE_COUNT = 10000  # Maximum number of files in archive
+MAX_COMPRESSION_RATIO = 100  # Reject ZIPs with ratio above this (zip bomb heuristic)
 
 
 def build_from_zip_archive(
@@ -80,13 +80,15 @@ def build_from_zip_archive(
                 f"(max: {max_zip_size_bytes})"
             )
 
+        max_uncompressed_mb = source_config.get('max_uncompressed_zip_size_mb', 2048)
+
         # Create extraction directory
         temp_extract_dir = tempfile.mkdtemp(
             prefix=f"defense_{submission_id}_extract_")
         logger.info(f"Extracting ZIP to {temp_extract_dir}")
 
         # Extract with security checks
-        _extract_zip_safely(temp_zip.name, temp_extract_dir)
+        _extract_zip_safely(temp_zip.name, temp_extract_dir, max_uncompressed_mb)
         logger.info("Successfully extracted ZIP archive")
 
         # Validate build context and Dockerfile
@@ -116,33 +118,34 @@ def build_from_zip_archive(
         docker_client = docker.from_env()
 
         # Extract security settings from config
-        network_disabled = source_config.get('network_disabled', True)
         no_cache = source_config.get('no_cache', True)
+        build_timeout = source_config.get('max_build_time_seconds', 300)
+        network_disabled = source_config.get('network_disabled', True)
+        network_mode = 'none' if network_disabled else 'default'
 
-        # Build arguments
-        buildargs = {}
-
-        # BuildKit and security options
-        extra_hosts = None
-        if network_disabled:
-            # Disable network during build
-            extra_hosts = {}
-
-        # Build the image
-        try:
-            image, build_logs = docker_client.images.build(
+        def _run_build():
+            return docker_client.images.build(
                 path=str(build_context),
                 tag=image_name,
                 nocache=no_cache,
-                rm=True,  # Remove intermediate containers
-                forcerm=True,  # Always remove intermediate containers
-                pull=False,  # Don't pull base images (security)
-                extra_hosts=extra_hosts,
-                buildargs=buildargs,
+                rm=True,
+                forcerm=True,
+                pull=False,
+                network_mode=network_mode,
                 use_config_proxy=False
             )
 
-            # Log build output
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_run_build)
+                try:
+                    image, build_logs = future.result(timeout=build_timeout)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    raise ValueError(
+                        f"Docker build timed out after {build_timeout} seconds"
+                    )
+
             for log_entry in build_logs:
                 if 'stream' in log_entry:
                     logger.info(log_entry['stream'].strip())
@@ -175,27 +178,33 @@ def build_from_zip_archive(
                 logger.warning(f"Failed to cleanup {temp_extract_dir}: {e}")
 
 
-def _extract_zip_safely(zip_path: str, extract_to: str) -> None:
+def _extract_zip_safely(
+    zip_path: str,
+    extract_to: str,
+    max_uncompressed_mb: int = 2048,
+) -> None:
     """
     Extract ZIP archive with security checks.
 
     Protects against:
-    - Zip bombs (excessive uncompressed size)
+    - Zip bombs (excessive uncompressed size and suspicious compression ratio)
     - Path traversal attacks (../ in filenames)
     - Excessive file counts
 
     Args:
         zip_path: Path to ZIP file
         extract_to: Directory to extract to
+        max_uncompressed_mb: Maximum allowed uncompressed size in MB
 
     Raises:
         ValueError: If ZIP is malicious or exceeds limits
     """
+    max_total_size = max_uncompressed_mb * 1024 * 1024
+
     try:
         with zipfile.ZipFile(zip_path, 'r') as zf:
             # Check for path traversal
             for member in zf.namelist():
-                # Normalize path and check for traversal
                 normalized = os.path.normpath(member)
                 if normalized.startswith('..') or os.path.isabs(normalized):
                     raise ValueError(
@@ -210,13 +219,22 @@ def _extract_zip_safely(zip_path: str, extract_to: str) -> None:
                     f"(max: {MAX_FILE_COUNT})"
                 )
 
-            # Check total uncompressed size (zip bomb protection)
-            total_size = sum(info.file_size for info in zf.infolist())
-            if total_size > MAX_TOTAL_SIZE:
+            # Check total uncompressed size and compression ratio (zip bomb protection)
+            total_uncompressed = sum(info.file_size for info in zf.infolist())
+            total_compressed = sum(info.compress_size for info in zf.infolist())
+
+            if total_uncompressed > max_total_size:
                 raise ValueError(
-                    f"ZIP uncompressed size too large: {total_size} bytes "
-                    f"(max: {MAX_TOTAL_SIZE})"
+                    f"ZIP uncompressed size too large: {total_uncompressed} bytes "
+                    f"(max: {max_total_size})"
                 )
+
+            if total_compressed > 0:
+                ratio = total_uncompressed / total_compressed
+                if ratio > MAX_COMPRESSION_RATIO:
+                    raise ValueError(
+                        f"Suspicious compression ratio ({ratio:.0f}x), possible ZIP bomb"
+                    )
 
             # Extract all files
             zf.extractall(extract_to)

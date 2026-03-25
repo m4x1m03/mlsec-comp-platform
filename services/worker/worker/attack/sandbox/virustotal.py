@@ -54,11 +54,15 @@ class VirusTotalBackend(SandboxBackend):
         poll_interval_s: int = 15,
         max_polls: int = 20,
         timeout: int = 30,
+        behavior_poll_interval_s: int = 30,
+        behavior_max_polls: int = 10,
     ) -> None:
         self._api_key = api_key
         self._poll_interval_s = poll_interval_s
         self._max_polls = max_polls
         self._timeout = timeout
+        self._behavior_poll_interval_s = behavior_poll_interval_s
+        self._behavior_max_polls = behavior_max_polls
 
     # ------------------------------------------------------------------
     # SandboxBackend interface
@@ -186,39 +190,67 @@ class VirusTotalBackend(SandboxBackend):
         )
 
     def _fetch_behaviours(self, sha256: str) -> dict[str, Any]:
-        """Fetch ``/files/{sha256}/behaviours`` and return the first useful report."""
+        """Fetch ``/files/{sha256}/behaviours`` and return the first useful report.
+
+        Polls with retries because behavioral sandbox results are produced
+        asynchronously after the static analysis completes.  Each attempt
+        checks whether any report contains at least one populated signal
+        field.  If no useful data appears after ``behavior_max_polls``
+        attempts, returns ``{}`` so the caller stores a partial result and
+        retries on the next seeding pass.
+        """
         url = f"{_VT_BASE}/files/{sha256}/behaviours"
-        try:
-            response = requests.get(
-                url, headers=self._headers(), timeout=self._timeout
-            )
-        except requests.RequestException as exc:
-            raise SandboxUnavailableError(
-                f"Failed to fetch VT behaviours: {exc}"
-            ) from exc
 
-        _raise_for_vt_error(response, context="behaviours fetch")
+        for attempt in range(1, self._behavior_max_polls + 1):
+            try:
+                response = requests.get(
+                    url, headers=self._headers(), timeout=self._timeout
+                )
+            except requests.RequestException as exc:
+                raise SandboxUnavailableError(
+                    f"Failed to fetch VT behaviours: {exc}"
+                ) from exc
 
-        try:
-            reports: list[dict] = response.json()["data"]
-        except (KeyError, ValueError) as exc:
-            raise SandboxUnavailableError(
-                f"Unexpected VT behaviours response format: {exc}"
-            ) from exc
+            _raise_for_vt_error(response, context="behaviours fetch")
 
-        if not reports:
-            logger.warning(
-                "No behavioral reports available for sha256=%s", sha256)
-            return {}
+            try:
+                reports: list[dict] = response.json()["data"]
+            except (KeyError, ValueError) as exc:
+                raise SandboxUnavailableError(
+                    f"Unexpected VT behaviours response format: {exc}"
+                ) from exc
 
-        # Pick the first report that has at least one populated signal field
-        for report in reports:
-            attrs = report.get("attributes", {})
-            if any(attrs.get(f) for f in _LIST_FIELDS):
-                return attrs
+            if not reports:
+                logger.debug(
+                    "No behavioral reports yet for sha256=%s (attempt %d/%d); waiting %ds.",
+                    sha256, attempt, self._behavior_max_polls, self._behavior_poll_interval_s,
+                )
+            else:
+                # Pick the first report with at least one populated signal field
+                for report in reports:
+                    attrs = report.get("attributes", {})
+                    if any(attrs.get(f) for f in _LIST_FIELDS):
+                        logger.info(
+                            "Behavioral data available for sha256=%s after %d poll(s).",
+                            sha256, attempt,
+                        )
+                        return attrs
 
-        # Fall back to the first report regardless
-        return reports[0].get("attributes", {})
+                logger.debug(
+                    "Behavioral reports present but no signal fields populated for "
+                    "sha256=%s (attempt %d/%d); waiting %ds.",
+                    sha256, attempt, self._behavior_max_polls, self._behavior_poll_interval_s,
+                )
+
+            if attempt < self._behavior_max_polls:
+                time.sleep(self._behavior_poll_interval_s)
+
+        logger.warning(
+            "No behavioral data found for sha256=%s after %d poll(s). "
+            "Storing partial result; will retry on next seeding pass.",
+            sha256, self._behavior_max_polls,
+        )
+        return {}
 
 
 # ---------------------------------------------------------------------------

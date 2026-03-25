@@ -1,0 +1,14 @@
+---
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import WorkersPage from '../../components/admin/workers/WorkersPage';
+import { getSession } from '../../lib/auth';
+
+const session = await getSession(Astro.request);
+if (!session || !session.user.is_admin) {
+  return Astro.redirect('/');
+}
+---
+
+<AdminLayout title="Workers" currentPage="workers">
+  <WorkersPage client:load />
+</AdminLayout>

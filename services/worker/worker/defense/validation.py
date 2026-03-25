@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import random
 from pathlib import Path
+
 import docker
+import httpx
 import requests
 from celery.utils.log import get_task_logger
+
+from worker.config import EvaluationConfig, HeuristicValidationConfig
+from worker.db import (
+    get_active_heurval_set,
+    get_heurval_samples,
+    insert_heurval_file_result,
+    upsert_heurval_result,
+)
+from worker.cache_handler import get_sample_path
+from worker.defense.evaluate import ContainerRestartError, evaluate_sample_against_container
 
 logger = get_task_logger(__name__)
 
@@ -147,8 +161,7 @@ def _validate_image_size(image_name: str, config: dict) -> None:
         size_mb = size_bytes / (1024 * 1024)
 
         # Get limit from config
-        worker_config = config.get('worker', {})
-        defense_job_config = worker_config.get('defense_job', {})
+        defense_job_config = config.get('defense_job', {})
         max_size_mb = defense_job_config.get('max_uncompressed_size_mb', 1024)
 
         logger.info(
@@ -199,8 +212,7 @@ def _validate_post_endpoint(container_url: str, config: dict) -> None:
         probe_data += b"\x00" * (4096 - len(probe_data))
 
     # Get timeout from config
-    worker_config = config.get('worker', {})
-    eval_config = worker_config.get('evaluation', {})
+    eval_config = config.get('evaluation', {})
     timeout = eval_config.get('requests_timeout_seconds', 5)
 
     # Send POST request direct to container (via gateway NAT)
@@ -250,30 +262,128 @@ def _validate_post_endpoint(container_url: str, config: dict) -> None:
         ) from e
 
 
-def validate_heuristic(
-    image_name: str,
+async def validate_heuristic(
+    defense_submission_id: str,
     container_url: str,
-    config: dict
+    container_name: str,
+    docker_client: docker.DockerClient,
+    eval_cfg: EvaluationConfig,
+    heurval_cfg: HeuristicValidationConfig,
 ) -> dict:
-    """
-    Perform heuristic validation on defense container.
+    """Run heuristic validation for a defense container against the active sample set.
 
-    Future implementation will include:
-    - Response time analysis
-    - Resource usage patterns
-    - Behavioral analysis
+    Sends every sample in the active heurval_sample_sets row to the container,
+    records per-file outcomes in heurval_file_results, then computes and stores
+    aggregated TPR/FPR metrics in heurval_results.
+
+    Returns an empty dict if no active sample set exists.
 
     Args:
-        image_name: Docker image name to validate
-        container_url: URL of running defense container
-        config: Configuration dict with worker settings
+        defense_submission_id: UUID of the defense submission being validated.
+        container_url: URL of the running defense container.
+        container_name: Docker container name for RAM monitoring.
+        docker_client: Docker SDK client.
+        eval_cfg: Evaluation resource limits (time, RAM, restarts).
+        heurval_cfg: Heuristic validation thresholds and flags.
 
     Returns:
-        Dictionary with heuristic metrics (currently empty)
-    """
-    logger.info(f"Heuristic validation (stub) for {image_name}")
+        dict with malware_tpr, malware_fpr, goodware_tpr, goodware_fpr,
+        or empty dict if no sample set is configured.
 
-    return {}
+    Raises:
+        ContainerRestartError: If the container exceeds defense_max_restarts.
+    """
+    sample_set = get_active_heurval_set()
+    if sample_set is None:
+        logger.warning(
+            "No active heurval sample set found; skipping heuristic validation "
+            "for defense %s.",
+            defense_submission_id,
+        )
+        return {}
+
+    samples = get_heurval_samples(sample_set["id"])
+    random.shuffle(samples)
+
+    result_id = upsert_heurval_result(
+        defense_submission_id=defense_submission_id,
+        sample_set_id=sample_set["id"],
+        malware_tpr=None,
+        malware_fpr=None,
+        goodware_tpr=None,
+        goodware_fpr=None,
+    )
+
+    restart_count_ref = [0]
+    malware_outputs: list[int] = []
+    goodware_outputs: list[int] = []
+
+    async with httpx.AsyncClient() as client:
+        for sample in samples:
+            sample_path = get_sample_path(sample["object_key"])
+            sample_content = Path(sample_path).read_bytes()
+
+            outcome = await evaluate_sample_against_container(
+                client=client,
+                container_url=container_url,
+                docker_client=docker_client,
+                container_name=container_name,
+                sample_content=sample_content,
+                eval_cfg=eval_cfg,
+                restart_count_ref=restart_count_ref,
+            )
+
+            insert_heurval_file_result(
+                heurval_result_id=result_id,
+                sample_id=sample["id"],
+                model_output=outcome.model_output,
+                evaded_reason=outcome.evaded_reason,
+                duration_ms=outcome.duration_ms,
+            )
+
+            effective_output = outcome.model_output if outcome.model_output is not None else 0
+            if sample["is_malware"]:
+                malware_outputs.append(effective_output)
+            else:
+                goodware_outputs.append(effective_output)
+
+    malware_tpr = (
+        sum(1 for o in malware_outputs if o == 1) / len(malware_outputs)
+        if malware_outputs else 0.0
+    )
+    malware_fpr = 1.0 - malware_tpr
+
+    goodware_tpr = (
+        sum(1 for o in goodware_outputs if o == 0) / len(goodware_outputs)
+        if goodware_outputs else 0.0
+    )
+    goodware_fpr = 1.0 - goodware_tpr
+
+    upsert_heurval_result(
+        defense_submission_id=defense_submission_id,
+        sample_set_id=sample_set["id"],
+        malware_tpr=malware_tpr,
+        malware_fpr=malware_fpr,
+        goodware_tpr=goodware_tpr,
+        goodware_fpr=goodware_fpr,
+    )
+
+    logger.info(
+        "Heuristic validation complete for defense %s: "
+        "malware_tpr=%.3f malware_fpr=%.3f goodware_tpr=%.3f goodware_fpr=%.3f",
+        defense_submission_id,
+        malware_tpr,
+        malware_fpr,
+        goodware_tpr,
+        goodware_fpr,
+    )
+
+    return {
+        "malware_tpr": malware_tpr,
+        "malware_fpr": malware_fpr,
+        "goodware_tpr": goodware_tpr,
+        "goodware_fpr": goodware_fpr,
+    }
 
 
 def validate_defense(submission_id: str, source_type: str, config: dict) -> None:

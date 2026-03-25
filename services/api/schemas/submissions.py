@@ -72,6 +72,29 @@ class SubmissionDetailsResponse(BaseModel):
     details: dict
 
 
+class SubmissionListItem(BaseModel):
+    """One entry in a user's submission list."""
+
+    submission_id: str
+    submission_type: str
+    status: str
+    is_functional: bool | None
+    functional_error: str | None
+    version: str
+    display_name: str | None
+    created_at: str
+    is_active: bool
+    heurval_tpr: float | None = None
+    heurval_fpr: float | None = None
+
+
+class SetActiveResponse(BaseModel):
+    """Response after setting an active submission."""
+
+    submission_id: str
+    submission_type: str
+
+
 class SubmissionHistoryItem(BaseModel):
     """History item for a user's submissions."""
 

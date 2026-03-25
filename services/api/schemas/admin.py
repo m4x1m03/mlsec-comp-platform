@@ -264,3 +264,18 @@ class AdminAssetRecord(BaseModel):
 class AdminAssetsResponse(BaseModel):
     count: int
     items: list[AdminAssetRecord]
+class AdminWorkerTaskRecord(BaseModel):
+    task_id: str
+    name: str
+    kwargs: dict | None = None
+
+
+class AdminWorkerRecord(BaseModel):
+    name: str
+    active_tasks: list[AdminWorkerTaskRecord]
+
+
+class AdminWorkersResponse(BaseModel):
+    workers: list[AdminWorkerRecord]
+    running_jobs: list[AdminJobLogRecord]
+    queued_jobs: list[AdminJobLogRecord]

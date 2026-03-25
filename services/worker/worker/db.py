@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-from sqlalchemy import create_engine, text  # type: ignore
-from sqlalchemy.engine import Engine
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
 
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
+    from sqlalchemy import create_engine
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")
@@ -16,6 +18,7 @@ def get_engine() -> Engine:
 
 
 def set_job_status(*, job_id: str, status: str, error: str | None = None) -> None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         if error is None:
@@ -47,6 +50,7 @@ def set_job_status(*, job_id: str, status: str, error: str | None = None) -> Non
 
 
 def get_defense_docker_image(*, submission_id: str) -> str | None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         # Assuming for now that docker_image is a text field with a dockerhub link
@@ -64,6 +68,7 @@ def get_defense_docker_image(*, submission_id: str) -> str | None:
 
 
 def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: str) -> str:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         result = conn.execute(
@@ -79,6 +84,23 @@ def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: s
         return str(result)
 
 
+def set_evaluation_run_status(evaluation_run_id: str, status: str) -> None:
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE evaluation_runs 
+                SET status = :status,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                """
+            ),
+            {"status": status, "id": evaluation_run_id},
+        )
+
+
 def upsert_evaluation(
     *,
     evaluation_run_id: str,
@@ -86,14 +108,16 @@ def upsert_evaluation(
     result: int | None = None,
     error: str | None = None,
     duration_ms: int | None = None,
+    evaded_reason: str | None = None,
 ) -> None:
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-                INSERT INTO evaluation_file_results (evaluation_run_id, attack_file_id, model_output, error, duration_ms)
-                VALUES (:run_id, :file_id, :out, :err, :dur)
+                INSERT INTO evaluation_file_results (evaluation_run_id, attack_file_id, model_output, error, duration_ms, evaded_reason)
+                VALUES (:run_id, :file_id, :out, :err, :dur, :evaded_reason)
                 """
             ),
             {
@@ -101,8 +125,58 @@ def upsert_evaluation(
                 "file_id": attack_file_id,
                 "out": result,
                 "err": error,
-                "dur": duration_ms
+                "dur": duration_ms,
+                "evaded_reason": evaded_reason,
             }
+        )
+
+
+def upsert_pair_score(
+    *,
+    evaluation_run_id: str,
+    defense_submission_id: str,
+    attack_submission_id: str,
+) -> None:
+    """Aggregate per-file results into evaluation_pair_scores for a completed run."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO evaluation_pair_scores (
+                    defense_submission_id,
+                    attack_submission_id,
+                    latest_evaluation_run_id,
+                    zip_score_avg,
+                    n_files_scored,
+                    n_files_error,
+                    computed_at
+                )
+                SELECT
+                    :def_id,
+                    :atk_id,
+                    :run_id,
+                    AVG(model_output::numeric)         FILTER (WHERE model_output IS NOT NULL),
+                    COUNT(*)                           FILTER (WHERE model_output IS NOT NULL),
+                    COUNT(*)                           FILTER (WHERE error IS NOT NULL),
+                    NOW()
+                FROM evaluation_file_results
+                WHERE evaluation_run_id = :run_id
+                ON CONFLICT (defense_submission_id, attack_submission_id)
+                DO UPDATE SET
+                    latest_evaluation_run_id = EXCLUDED.latest_evaluation_run_id,
+                    zip_score_avg            = EXCLUDED.zip_score_avg,
+                    n_files_scored           = EXCLUDED.n_files_scored,
+                    n_files_error            = EXCLUDED.n_files_error,
+                    computed_at              = EXCLUDED.computed_at
+                """
+            ),
+            {
+                "def_id": defense_submission_id,
+                "atk_id": attack_submission_id,
+                "run_id": evaluation_run_id,
+            },
         )
 
 
@@ -122,6 +196,7 @@ def get_defense_submission_source(submission_id: str) -> tuple[str, dict]:
     Raises:
         ValueError: If submission not found or invalid source_type
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -169,14 +244,14 @@ def get_all_validated_defenses() -> list[str]:
     Returns:
         List of defense submission IDs (UUIDs as strings)
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id FROM submissions 
-                WHERE submission_type = 'defense' 
-                AND is_functional = TRUE 
-                AND status = 'ready'
+                SELECT id FROM submissions
+                WHERE submission_type = 'defense'
+                AND is_functional = TRUE
                 AND deleted_at IS NULL
             """)
         ).fetchall()
@@ -194,13 +269,14 @@ def get_unevaluated_attacks(defense_submission_id: str) -> list[str]:
     Returns:
         List of attack submission IDs (UUIDs as strings)
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id FROM submissions 
-                WHERE submission_type = 'attack' 
-                AND status = 'ready'
+                SELECT id FROM submissions
+                WHERE submission_type = 'attack'
+                AND is_functional = TRUE
                 AND deleted_at IS NULL
                 AND id NOT IN (
                     SELECT attack_submission_id 
@@ -224,6 +300,7 @@ def check_if_needs_validation(defense_submission_id: str) -> bool:
     Returns:
         True if is_functional is NULL (not yet validated), False otherwise
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -243,17 +320,34 @@ def mark_defense_validated(defense_submission_id: str) -> None:
     Args:
         defense_submission_id: Defense submission UUID
     """
+    from sqlalchemy import text
+    from worker.redis_client import get_redis_client
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("""
-                UPDATE submissions 
+                UPDATE submissions
                 SET is_functional = TRUE,
-                    status = 'ready'
+                    status = 'validated'
                 WHERE id = :id
             """),
             {"id": defense_submission_id}
         )
+        conn.execute(
+            text("""
+                INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                SELECT user_id, 'defense', :id, NOW()
+                FROM submissions WHERE id = :id
+                ON CONFLICT (user_id, submission_type)
+                DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                              updated_at = EXCLUDED.updated_at
+            """),
+            {"id": defense_submission_id},
+        )
+    try:
+        get_redis_client().publish("leaderboard:updated", "defense_validated")
+    except Exception:
+        pass
 
 
 def mark_defense_failed(defense_submission_id: str, error: str) -> None:
@@ -264,17 +358,51 @@ def mark_defense_failed(defense_submission_id: str, error: str) -> None:
         defense_submission_id: Defense submission UUID
         error: Error message describing validation failure
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("""
-                UPDATE submissions 
+                UPDATE submissions
                 SET is_functional = FALSE,
                     functional_error = :error,
-                    status = 'failed'
+                    status = 'error'
                 WHERE id = :id
             """),
             {"id": defense_submission_id, "error": error}
+        )
+
+
+def mark_defense_validating(defense_submission_id: str) -> None:
+    """Set defense status to 'validating' when the worker begins validation checks."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'validating' WHERE id = :id"),
+            {"id": defense_submission_id},
+        )
+
+
+def mark_defense_evaluating(defense_submission_id: str) -> None:
+    """Set defense status to 'evaluating' when an evaluation run starts against it."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluating' WHERE id = :id"),
+            {"id": defense_submission_id},
+        )
+
+
+def mark_defense_evaluated(defense_submission_id: str) -> None:
+    """Set defense status to 'evaluated' when an evaluation run against it completes."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluated' WHERE id = :id"),
+            {"id": defense_submission_id},
         )
 
 
@@ -289,6 +417,7 @@ def get_attack_files(attack_submission_id: str) -> list[dict]:
     Returns:
         List of dicts with id, object_key, filename, sha256, is_malware
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -323,6 +452,7 @@ def is_evaluation_in_progress(defense_id: str, attack_id: str) -> bool:
     Returns:
         True if evaluation is queued or running, False otherwise
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -344,16 +474,34 @@ def mark_attack_validated(attack_submission_id: str) -> None:
     Args:
         attack_submission_id: Attack submission UUID
     """
+    from sqlalchemy import text
+    from worker.redis_client import get_redis_client
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("""
                 UPDATE submissions
-                SET status = 'ready'
+                SET status = 'validated',
+                    is_functional = TRUE
                 WHERE id = :id
             """),
             {"id": attack_submission_id}
         )
+        conn.execute(
+            text("""
+                INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                SELECT user_id, 'attack', :id, NOW()
+                FROM submissions WHERE id = :id
+                ON CONFLICT (user_id, submission_type)
+                DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                              updated_at = EXCLUDED.updated_at
+            """),
+            {"id": attack_submission_id},
+        )
+    try:
+        get_redis_client().publish("leaderboard:updated", "attack_validated")
+    except Exception:
+        pass
 
 
 def get_attack_submission_source(attack_submission_id: str) -> dict:
@@ -369,6 +517,7 @@ def get_attack_submission_source(attack_submission_id: str) -> dict:
     Raises:
         ValueError: If submission not found or missing data
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -399,17 +548,51 @@ def mark_attack_failed(attack_submission_id: str, error: str) -> None:
         attack_submission_id: Attack submission UUID
         error: Human-readable error message
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("""
                 UPDATE submissions
-                SET status = 'failed',
+                SET status = 'error',
                     is_functional = FALSE,
                     functional_error = :error
                 WHERE id = :id
             """),
             {"id": attack_submission_id, "error": error}
+        )
+
+
+def mark_attack_validating(attack_submission_id: str) -> None:
+    """Set attack status to 'validating' when the worker begins validation checks."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'validating' WHERE id = :id"),
+            {"id": attack_submission_id},
+        )
+
+
+def mark_attack_evaluating(attack_submission_id: str) -> None:
+    """Set attack status to 'evaluating' when evaluation dispatch begins."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluating' WHERE id = :id"),
+            {"id": attack_submission_id},
+        )
+
+
+def mark_attack_evaluated(attack_submission_id: str) -> None:
+    """Set attack status to 'evaluated' after all evaluations have been dispatched."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE submissions SET status = 'evaluated' WHERE id = :id"),
+            {"id": attack_submission_id},
         )
 
 
@@ -421,6 +604,7 @@ def get_template_reports() -> list[dict]:
         List of dicts with keys: filename, sha256, sandbox_report_ref, behash,
         behavioral_signals
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -443,6 +627,7 @@ def get_template_reports() -> list[dict]:
 
 
 def upsert_template_report(
+    template_id: str,
     filename: str,
     sha256: str,
     sandbox_report_ref: str | None,
@@ -450,9 +635,14 @@ def upsert_template_report(
     behavioral_signals: dict | None,
 ) -> None:
     """
-    Insert or update a template file report.
+    Update behavioral data on an existing template file report row.
+
+    Rows are created during template upload. This function only updates
+    sandbox_report_ref, behash, and behavioral_signals on a row that
+    already exists for the given (template_id, filename) pair.
 
     Args:
+        template_id: UUID of the attack_template row this report belongs to
         filename: Relative path within the attack template
         sha256: SHA-256 hex digest of the file
         sandbox_report_ref: Backend-specific analysis ID (e.g. VT analysis ID)
@@ -460,21 +650,22 @@ def upsert_template_report(
         behavioral_signals: Extracted behavioral indicators dict, or None
     """
     import json
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text("""
-                INSERT INTO template_file_reports
-                    (filename, sha256, sandbox_report_ref, behash, behavioral_signals)
-                VALUES (:filename, :sha256, :report_ref, :behash, CAST(:signals AS jsonb))
-                ON CONFLICT (filename) DO UPDATE
-                    SET sha256              = EXCLUDED.sha256,
-                        sandbox_report_ref  = EXCLUDED.sandbox_report_ref,
-                        behash              = EXCLUDED.behash,
-                        behavioral_signals  = EXCLUDED.behavioral_signals,
-                        evaluated_at        = CURRENT_TIMESTAMP
+                UPDATE template_file_reports
+                SET sha256             = :sha256,
+                    sandbox_report_ref = :report_ref,
+                    behash             = :behash,
+                    behavioral_signals = CAST(:signals AS jsonb),
+                    evaluated_at       = CURRENT_TIMESTAMP
+                WHERE template_id = CAST(:template_id AS uuid)
+                  AND filename    = :filename
             """),
             {
+                "template_id": template_id,
                 "filename": filename,
                 "sha256": sha256,
                 "report_ref": sandbox_report_ref,
@@ -497,6 +688,7 @@ def update_attack_file_behavior(
         behavior_status: One of 'unknown', 'same', 'different', 'error'
         report_ref: JSON string with TLSH hash and similarity score (may be None)
     """
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -507,6 +699,265 @@ def update_attack_file_behavior(
                 WHERE id = :id
             """),
             {"id": file_id, "status": behavior_status, "report_ref": report_ref}
+        )
+
+
+def get_active_template() -> dict | None:
+    """
+    Return the currently active attack template row, or None if none exists.
+
+    Returns:
+        dict with id, object_key, sha256, file_count, or None
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT id, object_key, sha256, file_count
+                FROM attack_template
+                WHERE is_active = TRUE
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            """)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": str(row[0]),
+        "object_key": row[1],
+        "sha256": row[2],
+        "file_count": row[3],
+    }
+
+
+def get_template_files(template_id: str) -> list[dict]:
+    """
+    Return all file entries for the given template.
+
+    Returns:
+        List of dicts with filename, object_key, sha256
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT filename, object_key, sha256
+                FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+                ORDER BY filename
+            """),
+            {"tid": template_id},
+        ).fetchall()
+    return [
+        {"filename": row[0], "object_key": row[1], "sha256": row[2]}
+        for row in rows
+    ]
+
+
+def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
+    """
+    Return filename-keyed behavioral reports for the given template.
+
+    All attempted files are included (sandbox_report_ref IS NOT NULL), even
+    those where the sandbox returned no behavioral signals. Callers should
+    check whether behavioral_signals is None before using a record for scoring.
+
+    Returns:
+        dict mapping filename to {sha256, sandbox_report_ref, behash, behavioral_signals}
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
+                FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+                  AND sandbox_report_ref IS NOT NULL
+            """),
+            {"tid": template_id},
+        ).fetchall()
+    return {
+        row[0]: {
+            "sha256": row[1],
+            "sandbox_report_ref": row[2],
+            "behash": row[3],
+            "behavioral_signals": row[4],
+        }
+        for row in rows
+    }
+
+
+def is_template_fully_seeded(template_id: str) -> bool:
+    """
+    Return True when every template_file_reports row for this template has been
+    attempted by the sandbox (sandbox_report_ref IS NOT NULL).
+
+    Files that were submitted to the sandbox but returned no behavioral signals
+    are considered attempted and do not block this check. Those files are skipped
+    during heuristic scoring with a warning.
+
+    # TODO: Add an admin endpoint to trigger a re-seed for a specific template,
+    # so operators can retry files that returned no behavioral signals without
+    # having to re-upload the template ZIP.
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        total = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+            """),
+            {"tid": template_id},
+        ).scalar() or 0
+        if total == 0:
+            return False
+        attempted = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM template_file_reports
+                WHERE template_id = CAST(:tid AS uuid)
+                  AND sandbox_report_ref IS NOT NULL
+            """),
+            {"tid": template_id},
+        ).scalar() or 0
+    return attempted >= total
+
+
+def get_active_heurval_set() -> dict | None:
+    """
+    Return the currently active heuristic validation sample set, or None.
+
+    Returns:
+        dict with id, malware_count, goodware_count, or None
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT id, malware_count, goodware_count
+                FROM heurval_sample_sets
+                WHERE is_active = TRUE
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            """)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": str(row[0]),
+        "malware_count": row[1],
+        "goodware_count": row[2],
+    }
+
+
+def get_heurval_samples(sample_set_id: str) -> list[dict]:
+    """
+    Return all samples belonging to the given heurval sample set.
+
+    Returns:
+        List of dicts with id, filename, object_key, sha256, is_malware
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT id, filename, object_key, sha256, is_malware
+                FROM heurval_samples
+                WHERE sample_set_id = CAST(:set_id AS uuid)
+                ORDER BY filename
+            """),
+            {"set_id": sample_set_id},
+        ).fetchall()
+    return [
+        {
+            "id": str(row[0]),
+            "filename": row[1],
+            "object_key": row[2],
+            "sha256": row[3],
+            "is_malware": row[4],
+        }
+        for row in rows
+    ]
+
+
+def upsert_heurval_result(
+    defense_submission_id: str,
+    sample_set_id: str,
+    malware_tpr: float | None,
+    malware_fpr: float | None,
+    goodware_tpr: float | None,
+    goodware_fpr: float | None,
+) -> str:
+    """
+    Insert or update a heurval_results row for a (defense, sample_set) pair.
+
+    Returns:
+        The UUID of the heurval_results row as a string
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        row_id = conn.execute(
+            text("""
+                INSERT INTO heurval_results
+                    (defense_submission_id, sample_set_id,
+                     malware_tpr, malware_fpr, goodware_tpr, goodware_fpr,
+                     computed_at)
+                VALUES
+                    (CAST(:def_id AS uuid), CAST(:set_id AS uuid),
+                     :m_tpr, :m_fpr, :g_tpr, :g_fpr,
+                     CURRENT_TIMESTAMP)
+                ON CONFLICT (defense_submission_id, sample_set_id) DO UPDATE
+                    SET malware_tpr  = EXCLUDED.malware_tpr,
+                        malware_fpr  = EXCLUDED.malware_fpr,
+                        goodware_tpr = EXCLUDED.goodware_tpr,
+                        goodware_fpr = EXCLUDED.goodware_fpr,
+                        computed_at  = CURRENT_TIMESTAMP
+                RETURNING id
+            """),
+            {
+                "def_id": defense_submission_id,
+                "set_id": sample_set_id,
+                "m_tpr": malware_tpr,
+                "m_fpr": malware_fpr,
+                "g_tpr": goodware_tpr,
+                "g_fpr": goodware_fpr,
+            },
+        ).scalar()
+    return str(row_id)
+
+
+def insert_heurval_file_result(
+    heurval_result_id: str,
+    sample_id: str,
+    model_output: int | None,
+    evaded_reason: str | None,
+    duration_ms: int | None,
+) -> None:
+    """Insert a per-sample heurval result row."""
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO heurval_file_results
+                    (heurval_result_id, sample_id, model_output, evaded_reason, duration_ms)
+                VALUES
+                    (CAST(:result_id AS uuid), CAST(:sample_id AS uuid),
+                     :model_output, :evaded_reason, :duration_ms)
+            """),
+            {
+                "result_id": heurval_result_id,
+                "sample_id": sample_id,
+                "model_output": model_output,
+                "evaded_reason": evaded_reason,
+                "duration_ms": duration_ms,
+            },
         )
 
 
@@ -529,6 +980,7 @@ def insert_attack_files(attack_submission_id: str, files: list[dict]) -> int:
     if not files:
         return 0
 
+    from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         for file_info in files:

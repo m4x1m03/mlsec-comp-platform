@@ -1,138 +1,209 @@
 ---
-import InputLink from "./InputLink.astro";
-import TextField from "./TextField.astro";
-import FileUpload from "./FileUpload.astro";
-import SubmissionForm from "./Form.astro";
 ---
 
-<div class="flex flex-col flex-1 bg-green-100 ml-6 mr-3 mt-6 mb-3 p-7 rounded-xl">
-  <h1 class="text-2xl font-semibold text-gray-900 pb-2">Model Submission</h1>
-  <SubmissionForm button_text="Submit Model">
-    <div class="flex flex-col">
-      <TextField title="Model Name" placeholder="Model Name" id="model-name" required/>
-      <TextField title="Model Version" placeholder="0.0.0" id="model-version" required/>
-      <div class="w-full max-w-md mx-auto p-6">
-        <label
-          for="submission-select"
-          class="block text-sm font-medium text-gray-700 mb-2"
-        >Submission Type: <span class="text-red-500 ml-0.5">*</span></label>
-        <div id="submission-select">
-          <input type="radio" id="docker" name="submission-type" value="DockerHub">
-          <label for="docker" class="text-sm font-medium text-gray-700">DockerHub Image</label><br>
-          <input type="radio" id="github" name="submission-type" value="GitHub">
-          <label for="github" class="text-sm font-medium text-gray-700">GitHub Link</label><br>
-          <input type="radio" id="zip" name="submission-type" value="ZIP">
-          <label for="zip" class="text-sm font-medium text-gray-700">ZIP File</label>
-        </div>
-      </div>
+<div class="flex flex-col flex-1 bg-white border border-gray-200 shadow-sm ml-6 mr-3 mt-6 mb-3 p-6 rounded-xl">
+  <h2 class="text-xl font-semibold text-gray-900 mb-5">Model Submission</h2>
 
-      <div id="docker-section" class="hidden">
-        <TextField title="Docker Hub Image:" placeholder="creator/image" id="docker-image"/>
-      </div>
-      <div id="github-section" class="hidden">
-        <InputLink title="GitHub Link:" placeholder="https://github.com/" submit_text="Submit Model"/>
-      </div>
-      <div id="file-section" class="hidden">
-        <FileUpload title="Upload Docker Image File:" subtext="" id="model-upload"/>
+  <form id="defense-form" class="flex flex-col gap-4">
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-2">Source</label>
+      <div class="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+        <button type="button" class="defense-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors bg-white text-gray-900 shadow-sm" data-tab="docker">DockerHub</button>
+        <button type="button" class="defense-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-gray-500 hover:text-gray-700" data-tab="github">GitHub</button>
+        <button type="button" class="defense-tab px-4 py-1.5 rounded-md text-sm font-semibold transition-colors text-gray-500 hover:text-gray-700" data-tab="zip">ZIP</button>
       </div>
     </div>
-  </SubmissionForm>
+
+    <div id="defense-panel-docker">
+      <label for="defense-docker" class="block text-sm font-medium text-gray-700 mb-1">DockerHub Image</label>
+      <input
+        type="text"
+        id="defense-docker"
+        name="docker_image"
+        placeholder="username/image:tag"
+        class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+      />
+    </div>
+
+    <div id="defense-panel-github" class="hidden">
+      <label for="defense-github" class="block text-sm font-medium text-gray-700 mb-1">GitHub Repository</label>
+      <input
+        type="url"
+        id="defense-github"
+        name="git_repo"
+        placeholder="https://github.com/org/repo"
+        class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+      />
+    </div>
+
+    <div id="defense-panel-zip" class="hidden">
+      <label class="block text-sm font-medium text-gray-700 mb-1">ZIP Archive</label>
+      <label
+        for="defense-file"
+        id="defense-file-label"
+        class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition"
+      >
+        <div id="defense-file-idle" class="flex flex-col items-center text-center px-4">
+          <svg class="w-8 h-8 mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6H16a5 5 0 011 9.9M12 12v9m0 0l-3-3m3 3l3-3" />
+          </svg>
+          <p class="text-sm text-gray-600">
+            <span class="font-medium text-primary">Click to upload</span> or drag and drop
+          </p>
+          <p class="text-xs text-gray-400 mt-0.5">ZIP file up to 10 MB</p>
+        </div>
+        <div id="defense-file-chosen" class="hidden flex-col items-center text-center px-4">
+          <svg class="w-8 h-8 mb-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p id="defense-file-name" class="text-sm font-medium text-gray-800 truncate max-w-xs"></p>
+          <p class="text-xs text-gray-400 mt-0.5">Click to change</p>
+        </div>
+        <input id="defense-file" name="file" type="file" accept=".zip" class="hidden" />
+      </label>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label for="defense-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+        <input
+          type="text"
+          id="defense-name"
+          name="display_name"
+          placeholder="My Defense"
+          class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+        />
+      </div>
+      <div>
+        <label for="defense-version" class="block text-sm font-medium text-gray-700 mb-1">Version</label>
+        <input
+          type="text"
+          id="defense-version"
+          name="version"
+          placeholder="1.0.0"
+          pattern="[0-9]+[.][0-9]+[.][0-9]+"
+          required
+          class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+        />
+      </div>
+    </div>
+
+    <div id="defense-feedback" class="hidden text-sm rounded-lg px-3 py-2"></div>
+
+    <button
+      type="submit"
+      class="w-full bg-primary hover:bg-secondary text-white font-semibold py-2.5 rounded-lg transition duration-200"
+    >
+      Submit Model
+    </button>
+
+  </form>
 </div>
 
 <script>
-  const radios = document.querySelectorAll('input[name="submission-type"]');
-  const sections: Record<string, string> = {
-    DockerHub: "docker-section",
-    GitHub: "github-section",
-    ZIP: "file-section",
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.defense-tab');
+  const panels: Record<string, HTMLElement | null> = {
+    docker: document.getElementById('defense-panel-docker'),
+    github: document.getElementById('defense-panel-github'),
+    zip:    document.getElementById('defense-panel-zip'),
   };
 
-  function updateVisibility(selectedValue: string) {
-    Object.entries(sections).forEach(([value, sectionId]) => {
-      const el = document.getElementById(sectionId);
-      if (el) {
-        el.classList.toggle("hidden", value !== selectedValue);
-      }
-    });
-  }
+  const fileInput    = document.getElementById('defense-file') as HTMLInputElement;
+  const idleView     = document.getElementById('defense-file-idle')!;
+  const chosenView   = document.getElementById('defense-file-chosen')!;
+  const fileNameEl   = document.getElementById('defense-file-name')!;
 
-  radios.forEach((radio) => {
-    radio.addEventListener("change", (e) => {
-      updateVisibility((e.target as HTMLInputElement).value);
-    });
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (file) {
+      fileNameEl.textContent = file.name;
+      idleView.classList.add('hidden');
+      chosenView.classList.remove('hidden');
+      chosenView.classList.add('flex');
+    } else {
+      idleView.classList.remove('hidden');
+      chosenView.classList.add('hidden');
+      chosenView.classList.remove('flex');
+    }
   });
 
-  const form = document.querySelector("form");
-  if (!form) throw new Error("Form not found");
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab!;
+      tabs.forEach(t => {
+        const active = t.dataset.tab === target;
+        t.classList.toggle('bg-white',      active);
+        t.classList.toggle('text-gray-900', active);
+        t.classList.toggle('shadow-sm',     active);
+        t.classList.toggle('text-gray-500', !active);
+      });
+      Object.entries(panels).forEach(([key, panel]) => {
+        panel?.classList.toggle('hidden', key !== target);
+      });
+    });
+  });
+</script>
 
-  form.addEventListener("submit", async (e) => {
+<script>
+  document.getElementById('defense-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const modelName = (document.getElementById("model-name") as HTMLInputElement)?.value.trim();
-    const modelVersion = (document.getElementById("model-version") as HTMLInputElement)?.value.trim();
-    const dockerImage = (document.getElementById("docker-image") as HTMLInputElement)?.value.trim();
-    const url = (document.getElementById("url") as HTMLInputElement)?.value.trim();
-    const file = (document.getElementById("model-upload") as HTMLInputElement)?.files?.[0];
+    const feedback = document.getElementById('defense-feedback')!;
+    const btn = document.querySelector<HTMLButtonElement>('#defense-form button[type="submit"]')!;
+    const version     = (document.getElementById('defense-version') as HTMLInputElement).value.trim();
+    const displayName = (document.getElementById('defense-name')    as HTMLInputElement).value.trim() || null;
+    const activeTab   = document.querySelector<HTMLButtonElement>('.defense-tab.bg-white')?.dataset.tab ?? 'docker';
 
-    const selectedType = (document.querySelector('input[name="submission-type"]:checked') as HTMLInputElement)?.value;
-
-    if (!selectedType) {
-      alert("Please select a submission type.");
-      return;
-    }
+    btn.disabled    = true;
+    btn.textContent = 'Submitting...';
+    feedback.className = 'hidden text-sm rounded-lg px-3 py-2';
 
     try {
-      let response: Response;
+      let res: Response;
 
-      if (selectedType === "ZIP" && file) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("version", modelVersion);
-        formData.append("display_name", modelName);
-
-        response = await fetch("/api/submissions/defense/zip", {
-          method: "POST",
-          body: formData,
+      if (activeTab === 'docker') {
+        const dockerImage = (document.getElementById('defense-docker') as HTMLInputElement).value.trim();
+        res = await fetch('/api/submissions/defense/docker', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ docker_image: dockerImage, version, display_name: displayName }),
         });
-
-      } else if (selectedType === "GitHub" && url) {
-        response = await fetch("/api/submissions/defense/github", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            git_repo: url,
-            version: modelVersion,
-            display_name: modelName,
-          }),
+      } else if (activeTab === 'github') {
+        const gitRepo = (document.getElementById('defense-github') as HTMLInputElement).value.trim();
+        res = await fetch('/api/submissions/defense/github', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ git_repo: gitRepo, version, display_name: displayName }),
         });
-
-      } else if (selectedType === "DockerHub" && dockerImage) {
-        response = await fetch("/api/submissions/defense/docker", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            docker_image: dockerImage,
-            version: modelVersion,
-            display_name: modelName,
-          }),
-        });
-
       } else {
-        alert("Please fill in the required field for your selected submission type.");
-        return;
+        const fileInput = document.getElementById('defense-file') as HTMLInputElement;
+        const file = fileInput.files?.[0];
+        if (!file) throw new Error('Please select a ZIP file.');
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('version', version);
+        if (displayName) fd.append('display_name', displayName);
+        res = await fetch('/api/submissions/defense/zip', { method: 'POST', body: fd });
       }
 
-      if (!response.ok) {
-        const error = await response.text();
-        alert(`Submission failed: ${error}`);
-        return;
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
 
-      alert("Model submitted successfully!");
-      form.reset();
+      feedback.textContent = `Submitted (ID: ${data.submission_id})`;
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
+      (e.target as HTMLFormElement).reset();
+      document.getElementById('defense-file-idle')!.classList.remove('hidden');
+      document.getElementById('defense-file-chosen')!.classList.add('hidden');
+      document.getElementById('defense-file-chosen')!.classList.remove('flex');
+      document.dispatchEvent(new CustomEvent('submission-created', { detail: { type: 'defense' } }));
 
-    } catch (err) {
-      alert(`Network error: ${(err as Error).message}`);
+    } catch (err: unknown) {
+      feedback.textContent = (err instanceof Error ? err.message : null) ?? 'Submission failed.';
+      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Submit Model';
     }
   });
 </script>

@@ -1,0 +1,14 @@
+---
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import CompetitionPage from '../../components/admin/competition/CompetitionPage';
+import { getSession } from '../../lib/auth';
+
+const session = await getSession(Astro.request);
+if (!session || !session.user.is_admin) {
+  return Astro.redirect('/');
+}
+---
+
+<AdminLayout title="Competition" currentPage="competition">
+  <CompetitionPage client:load />
+</AdminLayout>

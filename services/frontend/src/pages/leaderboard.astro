@@ -1,25 +1,26 @@
 ---
-
 import Navbar from "../components/Navbar.astro";
 import Footer from "../components/Footer.astro";
-import Health from "../components/health.astro";
+import EvaluationMatrix from "../components/EvaluationMatrix";
 ---
 
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>MLSEC Leaderboard</title>
-	</head>
-	<body class="flex flex-col min-h-screen">
-    <Navbar/>
-		<div class="flex-grow">
-			<h1>Leaderboard</h1>
-			<Health />
-		</div>
-		<Footer />
-	</body>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <title>MLSEC Leaderboard</title>
+  </head>
+  <body class="flex flex-col min-h-screen bg-gray-50">
+    <Navbar />
+    <div class="flex-grow max-w-7xl mx-auto w-full px-6 py-10">
+      <div class="mb-6">
+        <h1 class="text-2xl font-semibold text-gray-900">Evaluation Matrix</h1>
+      </div>
+      <EvaluationMatrix client:load />
+    </div>
+    <Footer />
+  </body>
 </html>

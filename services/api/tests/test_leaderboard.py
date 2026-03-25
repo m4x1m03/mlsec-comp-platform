@@ -1,426 +1,214 @@
-"""Leaderboard endpoint tests.
+"""Tests for GET /api/leaderboard.
 
-Validates sorting and pair filtering behavior.
+The leaderboard handler calls _fetch_leaderboard_sync() which opens its own
+SessionLocal() connection. Since test data lives in an uncommitted outer
+transaction (the db_session fixture), a raw SessionLocal() cannot see it.
+
+We patch SessionLocal in the leaderboard module with a factory that returns a
+thin wrapper around the test session. The wrapper forwards all calls but skips
+close() so the outer transaction is not disturbed.
 """
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import text
 
 
-def _create_user(db_session, *, username: str, email: str) -> str:
-    """Insert a user and return the new user id."""
+# ---------------------------------------------------------------------------
+# Helper: wrap db_session so _fetch_leaderboard_sync can use it
+# ---------------------------------------------------------------------------
+
+
+class _NonClosingSessionWrapper:
+    """Proxy a SQLAlchemy session while making close() a no-op."""
+
+    def __init__(self, session):
+        self._session = session
+
+    def execute(self, *args, **kwargs):
+        return self._session.execute(*args, **kwargs)
+
+    def close(self):
+        pass
+
+
+@pytest.fixture()
+def leaderboard_client(client, db_session, monkeypatch):
+    """
+    Provide a TestClient whose leaderboard queries run through db_session.
+
+    Monkeypatches routers.leaderboard.SessionLocal so that
+    _fetch_leaderboard_sync reads the same (uncommitted) test data that
+    db_session has written.
+    """
+    import routers.leaderboard as lb_module
+
+    monkeypatch.setattr(
+        lb_module,
+        "SessionLocal",
+        lambda: _NonClosingSessionWrapper(db_session),
+    )
+    return client
+
+
+# ---------------------------------------------------------------------------
+# Helpers to insert test data directly
+# ---------------------------------------------------------------------------
+
+
+def _make_user(db_session, *, username: str | None = None) -> str:
+    uid = str(uuid4())
+    uname = username or f"u_{uid[:8]}"
+    db_session.execute(
+        text(
+            """
+            INSERT INTO users (id, username, email)
+            VALUES (CAST(:id AS uuid), :username, :email)
+            """
+        ),
+        {"id": uid, "username": uname, "email": f"{uname}@example.com"},
+    )
+    return uid
+
+
+def _make_submission(db_session, *, user_id: str, submission_type: str) -> str:
     row = db_session.execute(
         text(
             """
-            INSERT INTO users (username, email, is_admin)
-            VALUES (:username, :email, false)
+            INSERT INTO submissions (submission_type, status, version, display_name, user_id)
+            VALUES (:type, 'validated', '1.0.0', :dname, CAST(:uid AS uuid))
             RETURNING id
             """
         ),
-        {"username": username, "email": email},
+        {
+            "type": submission_type,
+            "dname": f"{submission_type} v1",
+            "uid": user_id,
+        },
     ).fetchone()
-    assert row is not None
     return str(row[0])
 
 
-def _create_submission(
-    db_session,
-    *,
-    user_id: str,
-    submission_type: str,
-    version: str,
-    display_name: str,
-    status: str = "ready",
-) -> str:
-    """Insert a submission row and return its id."""
-    submission_id = str(uuid4())
+def _set_active(db_session, *, user_id: str, submission_type: str, submission_id: str):
     db_session.execute(
         text(
             """
-            INSERT INTO submissions (id, user_id, submission_type, version, display_name, status)
-            VALUES (:id, :user_id, :submission_type, :version, :display_name, :status)
+            INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+            VALUES (CAST(:uid AS uuid), :type, CAST(:sid AS uuid), NOW())
+            ON CONFLICT (user_id, submission_type)
+            DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                          updated_at = EXCLUDED.updated_at
             """
         ),
-        {
-            "id": submission_id,
-            "user_id": user_id,
-            "submission_type": submission_type,
-            "version": version,
-            "display_name": display_name,
-            "status": status,
-        },
+        {"uid": user_id, "type": submission_type, "sid": submission_id},
     )
-    return submission_id
 
 
-def _create_pair_score(
-    db_session,
-    *,
-    defense_submission_id: str,
-    attack_submission_id: str,
-    score: float,
-    n_files_scored: int,
-    n_files_error: int,
-) -> None:
-    """Insert a leaderboard pair score row."""
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+def test_leaderboard_empty(leaderboard_client):
+    """200 with empty lists and scores when no active submissions exist."""
+    response = leaderboard_client.get("/api/leaderboard")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["attackers"] == []
+    assert data["defenders"] == []
+    assert data["scores"] == {}
+
+
+def test_leaderboard_with_active_submissions(leaderboard_client, db_session):
+    """Correct structure returned when active submissions are present."""
+    attacker_id = _make_user(db_session, username="attacker1")
+    defender_id = _make_user(db_session, username="defender1")
+
+    atk_sub_id = _make_submission(db_session, user_id=attacker_id, submission_type="attack")
+    def_sub_id = _make_submission(db_session, user_id=defender_id, submission_type="defense")
+
+    _set_active(db_session, user_id=attacker_id, submission_type="attack", submission_id=atk_sub_id)
+    _set_active(db_session, user_id=defender_id, submission_type="defense", submission_id=def_sub_id)
+
+    response = leaderboard_client.get("/api/leaderboard")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["attackers"]) == 1
+    assert len(data["defenders"]) == 1
+    assert data["scores"] == {}
+
+    attacker = data["attackers"][0]
+    assert attacker["username"] == "attacker1"
+    assert attacker["submission_id"] == atk_sub_id
+    assert attacker["version"] == "1.0.0"
+    assert attacker["display_name"] == "attack v1"
+
+    defender = data["defenders"][0]
+    assert defender["username"] == "defender1"
+    assert defender["submission_id"] == def_sub_id
+
+
+def test_leaderboard_excludes_disabled_users(leaderboard_client, db_session):
+    """Users with disabled_at set do not appear on the leaderboard."""
+    user_id = _make_user(db_session, username="disabled_user")
+    sub_id = _make_submission(db_session, user_id=user_id, submission_type="attack")
+    _set_active(db_session, user_id=user_id, submission_type="attack", submission_id=sub_id)
+
     db_session.execute(
-        text(
-            """
-            INSERT INTO evaluation_pair_scores
-            (defense_submission_id, attack_submission_id, zip_score_avg, n_files_scored, n_files_error, computed_at)
-            VALUES (:defense_id, :attack_id, :score, :n_files_scored, :n_files_error, :computed_at)
-            """
-        ),
-        {
-            "defense_id": defense_submission_id,
-            "attack_id": attack_submission_id,
-            "score": score,
-            "n_files_scored": n_files_scored,
-            "n_files_error": n_files_error,
-            "computed_at": datetime.now(timezone.utc),
-        },
+        text("UPDATE users SET disabled_at = NOW() WHERE id = CAST(:uid AS uuid)"),
+        {"uid": user_id},
     )
 
-
-def test_leaderboard_defense_orders_by_score(client, db_session):
-    """Defense leaderboard should order entries by score."""
-    user1 = _create_user(db_session, username="leader_user1", email="leader1@example.com")
-    user2 = _create_user(db_session, username="leader_user2", email="leader2@example.com")
-
-    defense1 = _create_submission(
-        db_session,
-        user_id=user1,
-        submission_type="defense",
-        version="1.0.0",
-        display_name="Defense One",
-    )
-    defense2 = _create_submission(
-        db_session,
-        user_id=user2,
-        submission_type="defense",
-        version="1.0.1",
-        display_name="Defense Two",
-    )
-    attack = _create_submission(
-        db_session,
-        user_id=user1,
-        submission_type="attack",
-        version="0.1.0",
-        display_name="Attack One",
-    )
-
-    _create_pair_score(
-        db_session,
-        defense_submission_id=defense1,
-        attack_submission_id=attack,
-        score=0.8,
-        n_files_scored=10,
-        n_files_error=1,
-    )
-    _create_pair_score(
-        db_session,
-        defense_submission_id=defense2,
-        attack_submission_id=attack,
-        score=0.6,
-        n_files_scored=8,
-        n_files_error=0,
-    )
-
-    db_session.commit()
-
-    response = client.get("/api/leaderboard/defense")
-
+    response = leaderboard_client.get("/api/leaderboard")
     assert response.status_code == 200
     data = response.json()
-    assert data["submission_type"] == "defense"
-    assert data["total"] == 2
-    assert data["items"][0]["submission_id"] == defense1
-    assert data["items"][0]["pairs_evaluated"] == 1
-    assert data["items"][0]["files_scored"] == 10
-    assert data["items"][0]["files_error"] == 1
-    assert data["items"][0]["avg_score"] == pytest.approx(0.8)
+
+    usernames = [a["username"] for a in data["attackers"]]
+    assert "disabled_user" not in usernames
 
 
-def test_leaderboard_pairs_by_defense(client, db_session):
-    """Pair scores should be filterable by defense submission."""
-    user1 = _create_user(db_session, username="pair_user1", email="pair1@example.com")
-    user2 = _create_user(db_session, username="pair_user2", email="pair2@example.com")
+def test_leaderboard_scores(leaderboard_client, db_session):
+    """Scores dict contains an entry for an evaluated attack/defense pair."""
+    attacker_id = _make_user(db_session, username="score_attacker")
+    defender_id = _make_user(db_session, username="score_defender")
 
-    defense = _create_submission(
-        db_session,
-        user_id=user1,
-        submission_type="defense",
-        version="2.0.0",
-        display_name="Defense Pair",
-    )
-    attack = _create_submission(
-        db_session,
-        user_id=user2,
-        submission_type="attack",
-        version="0.2.0",
-        display_name="Attack Pair",
-    )
+    atk_sub_id = _make_submission(db_session, user_id=attacker_id, submission_type="attack")
+    def_sub_id = _make_submission(db_session, user_id=defender_id, submission_type="defense")
 
-    _create_pair_score(
-        db_session,
-        defense_submission_id=defense,
-        attack_submission_id=attack,
-        score=0.55,
-        n_files_scored=4,
-        n_files_error=0,
-    )
+    _set_active(db_session, user_id=attacker_id, submission_type="attack", submission_id=atk_sub_id)
+    _set_active(db_session, user_id=defender_id, submission_type="defense", submission_id=def_sub_id)
 
-    db_session.commit()
-
-    response = client.get(f"/api/leaderboard/pairs?defense_submission_id={defense}")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["total"] == 1
-    item = data["items"][0]
-    assert item["defense_submission_id"] == defense
-    assert item["attack_submission_id"] == attack
-    assert item["defense"]["submission_id"] == defense
-    assert item["attack"]["submission_id"] == attack
-
-
-def test_leaderboard_attack_orders_by_score(client, db_session):
-    user1 = _create_user(db_session, username="attack_user1", email="attack1@example.com")
-    user2 = _create_user(db_session, username="attack_user2", email="attack2@example.com")
-
-    defense = _create_submission(
-        db_session,
-        user_id=user1,
-        submission_type="defense",
-        version="1.0.0",
-        display_name="Defense",
-    )
-    attack1 = _create_submission(
-        db_session,
-        user_id=user1,
-        submission_type="attack",
-        version="0.1.0",
-        display_name="Attack One",
-    )
-    attack2 = _create_submission(
-        db_session,
-        user_id=user2,
-        submission_type="attack",
-        version="0.2.0",
-        display_name="Attack Two",
-    )
-
-    _create_pair_score(
-        db_session,
-        defense_submission_id=defense,
-        attack_submission_id=attack1,
-        score=0.2,
-        n_files_scored=4,
-        n_files_error=0,
-    )
-    _create_pair_score(
-        db_session,
-        defense_submission_id=defense,
-        attack_submission_id=attack2,
-        score=0.8,
-        n_files_scored=6,
-        n_files_error=1,
-    )
-    db_session.commit()
-
-    response = client.get("/api/leaderboard/attack")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["submission_type"] == "attack"
-    assert data["total"] == 2
-    assert data["items"][0]["submission_id"] == attack2
-
-
-def test_leaderboard_pairs_requires_filter(client):
-    response = client.get("/api/leaderboard/pairs")
-    assert response.status_code == 400
-
-
-def test_leaderboard_pairs_filters_by_attack_and_behavior(client, db_session):
-    defense_user = _create_user(db_session, username="pair_def", email="pair_def@example.com")
-    attack_user = _create_user(db_session, username="pair_att", email="pair_att@example.com")
-
-    defense = _create_submission(
-        db_session,
-        user_id=defense_user,
-        submission_type="defense",
-        version="1.0.0",
-        display_name="Defense Pair",
-    )
-    attack = _create_submission(
-        db_session,
-        user_id=attack_user,
-        submission_type="attack",
-        version="0.1.0",
-        display_name="Attack Pair",
-    )
-
+    computed = datetime.now(timezone.utc)
     db_session.execute(
         text(
             """
             INSERT INTO evaluation_pair_scores
-            (defense_submission_id, attack_submission_id, zip_score_avg, n_files_scored, n_files_error, include_behavior_different)
-            VALUES (:defense_id, :attack_id, :score, :n_files_scored, :n_files_error, :include_behavior_different)
+                (attack_submission_id, defense_submission_id,
+                 zip_score_avg, n_files_scored, n_files_error, computed_at)
+            VALUES
+                (CAST(:atk AS uuid), CAST(:def AS uuid),
+                 0.75, 10, 1, :computed_at)
             """
         ),
         {
-            "defense_id": defense,
-            "attack_id": attack,
-            "score": 0.42,
-            "n_files_scored": 3,
-            "n_files_error": 0,
-            "include_behavior_different": True,
+            "atk": atk_sub_id,
+            "def": def_sub_id,
+            "computed_at": computed,
         },
     )
-    db_session.commit()
 
-    response = client.get(
-        f"/api/leaderboard/pairs?attack_submission_id={attack}&include_behavior_different=true"
-    )
-
+    response = leaderboard_client.get("/api/leaderboard")
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 1
-    assert data["items"][0]["attack_submission_id"] == attack
-    assert data["include_behavior_different"] is True
 
-
-def test_leaderboard_helpers_invalid_values():
-    from routers.leaderboard import _normalize_order, _normalize_statuses, _resolve_sort, _build_status_filter
-
-    with pytest.raises(HTTPException):
-        _normalize_order("sideways")
-
-    with pytest.raises(HTTPException):
-        _normalize_statuses(["ready", "unknown"])
-
-    with pytest.raises(HTTPException):
-        _resolve_sort("bad", {"ok": "ok"})
-
-    clause, params = _build_status_filter([])
-    assert clause == ""
-    assert params == {}
-
-
-def test_leaderboard_active_scope_filters_results(client, db_session):
-    user_id = _create_user(db_session, username="active_user", email="active@example.com")
-
-    active_defense = _create_submission(
-        db_session,
-        user_id=user_id,
-        submission_type="defense",
-        version="1.0.0",
-        display_name="Active Defense",
-    )
-    inactive_defense = _create_submission(
-        db_session,
-        user_id=user_id,
-        submission_type="defense",
-        version="1.1.0",
-        display_name="Inactive Defense",
-    )
-    attack = _create_submission(
-        db_session,
-        user_id=user_id,
-        submission_type="attack",
-        version="0.1.0",
-        display_name="Attack",
-    )
-
-    _create_pair_score(
-        db_session,
-        defense_submission_id=active_defense,
-        attack_submission_id=attack,
-        score=0.9,
-        n_files_scored=2,
-        n_files_error=0,
-    )
-
-    db_session.execute(
-        text(
-            """
-            INSERT INTO active_submissions (user_id, submission_type, submission_id)
-            VALUES (:user_id, 'defense', :submission_id)
-            """
-        ),
-        {"user_id": user_id, "submission_id": active_defense},
-    )
-    db_session.commit()
-
-    response = client.get("/api/leaderboard/defense?scope=active")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 1
-    assert payload["items"][0]["submission_id"] == active_defense
-    assert payload["items"][0]["submission_id"] != inactive_defense
-
-
-def test_compute_leaderboard_snapshot(monkeypatch, db_session):
-    from routers import leaderboard as leaderboard_module
-
-    user_id = _create_user(db_session, username="snap_user", email="snap@example.com")
-    defense = _create_submission(
-        db_session,
-        user_id=user_id,
-        submission_type="defense",
-        version="1.0.0",
-        display_name="Snap Defense",
-    )
-    attack = _create_submission(
-        db_session,
-        user_id=user_id,
-        submission_type="attack",
-        version="0.1.0",
-        display_name="Snap Attack",
-    )
-
-    _create_pair_score(
-        db_session,
-        defense_submission_id=defense,
-        attack_submission_id=attack,
-        score=0.5,
-        n_files_scored=1,
-        n_files_error=0,
-    )
-    db_session.commit()
-
-    monkeypatch.setattr(leaderboard_module, "SessionLocal", lambda: nullcontext(db_session))
-
-    snapshot = leaderboard_module._compute_leaderboard_snapshot()
-    assert snapshot["type"] == "leaderboard_snapshot"
-    assert "defense" in snapshot
-    assert "attack" in snapshot
-
-
-def test_start_stop_leaderboard_stream(monkeypatch):
-    from routers import leaderboard as leaderboard_module
-
-    calls = {"start": False, "stop": False}
-
-    class _FakeStream:
-        def start(self, *, loop):
-            calls["start"] = True
-
-        def stop(self):
-            calls["stop"] = True
-
-    monkeypatch.setattr(leaderboard_module, "_leaderboard_stream", _FakeStream())
-    monkeypatch.setattr(leaderboard_module, "should_enable_leaderboard_stream", lambda: True)
-
-    leaderboard_module.start_leaderboard_stream(loop=None)
-    leaderboard_module.stop_leaderboard_stream()
-
-    assert calls["start"] is True
-    assert calls["stop"] is True
+    key = f"{atk_sub_id}/{def_sub_id}"
+    assert key in data["scores"]
+    score_entry = data["scores"][key]
+    assert abs(score_entry["score"] - 0.75) < 1e-9
+    assert score_entry["n_files_scored"] == 10
+    assert score_entry["n_files_error"] == 1

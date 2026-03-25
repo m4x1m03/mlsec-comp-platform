@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     admin_action_token_ttl_minutes: int = 15
 
     cors_allow_origins: list[str] = [
+        "http://localhost",
+        "http://localhost:80",
         "http://localhost:4321",
         "http://127.0.0.1:4321",
     ]

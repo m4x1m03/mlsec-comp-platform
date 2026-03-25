@@ -7,22 +7,36 @@ worker:
     max_uncompressed_size_mb: 1024
   evaluation:
     requests_timeout_seconds: 5
+    batch_size: 4
+    defense_max_ram: 1024        # MB - soft RAM threshold; sample marked evaded and container restarted if exceeded
+    defense_max_time: 5000       # ms - per-sample time limit; exceeded = evaded
+    defense_max_timeout: 20000   # ms - forced restart threshold (must be >= defense_max_time)
+    defense_max_restarts: 3      # max container restarts before error state
+  heuristic_validation:
+    enable_heuristic_validation: true
+    heurval_malware_fpr_minimum: 0.0
+    heurval_malware_tpr_minimum: 0.30
+    heurval_goodware_fpr_minimum: 0.0
+    heurval_goodware_tpr_minimum: 0.30
+    reject_heurval_failures: true
   source:
     # Resource limits
     max_zip_size_mb: 512
+    max_uncompressed_zip_size_mb: 2048
     max_build_time_seconds: 300
     build_mem_limit: "2g"
     temp_build_dir: "/tmp/mlsec-builds"  # Inside container only - NOT mounted from host
-    
+
     # Security settings for build isolation
     use_buildkit: true                    # Enable Docker BuildKit security features
-    network_disabled: true                # Prevent network access during builds
+    network_disabled: false               # Allow network access during builds (needed for pip install)
     no_cache: true                        # Prevent cache poisoning
     build_cpu_quota: 100000               # Limit CPU usage to 1 core (prevent resource spamming)
     max_dockerfile_size_kb: 100           # Limit Dockerfile size (negotiable, we can remove this)
-    
+
     # Cleanup settings
     cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
+    cleanup_pulled_images: true           # Remove pulled images after evaluation (Docker Hub sources only)
   minio:
     bucket_name: "mlsec-submissions"
     endpoint: "minio:9000"
@@ -30,15 +44,14 @@ worker:
     secret_key: "mlsec_minio_password_change_in_production"
     secure: false
   attack:
-    check_similarity: true           # false = skip evaluation, accept all validated attacks
-    reject_dissimilar_attacks: true  # only applies when check_similarity=true
+    check_similarity: false           # false = skip evaluation, accept all validated attacks
+    reject_dissimilar_attacks: false  # only applies when check_similarity=true
                                      #   true  = reject if score < minimum_attack_similarity
                                      #   false = log score but accept regardless
-    minimum_attack_similarity: 50    # 0–100 threshold (used when check_similarity=true)
-    template_path: "/app/attack-template"
+    minimum_attack_similarity: 50    # 0-100 threshold (used when check_similarity=true)
     max_zip_size_mb: 100
     sandbox_backend: "virustotal"    # "virustotal" | "local"
+    cache_persistence_duration: 300  # seconds of inactivity before clearing the sample cache
 
-
-application: 
+application:
   login_code: 'ABC'

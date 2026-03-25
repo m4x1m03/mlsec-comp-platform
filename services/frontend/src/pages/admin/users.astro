@@ -1,0 +1,14 @@
+---
+import AdminLayout from '../../components/admin/AdminLayout.astro';
+import UsersPage from '../../components/admin/users/UsersPage';
+import { getSession } from '../../lib/auth';
+
+const session = await getSession(Astro.request);
+if (!session || !session.user.is_admin) {
+  return Astro.redirect('/');
+}
+---
+
+<AdminLayout title="Users" currentPage="users">
+  <UsersPage client:load currentUserId={session.user.id.toString()} />
+</AdminLayout>
