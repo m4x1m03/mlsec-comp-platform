@@ -1311,6 +1311,48 @@ def issue_action_token(
     return AdminActionTokenResponse(token=token, expires_at=expires_at)
 
 
+@router.get("/workers", response_model=AdminWorkersResponse)
+def get_workers(
+    db: Session = Depends(get_db),
+    _: AuthenticatedUser = Depends(require_admin_user),
+) -> AdminWorkersResponse:
+    """Return active Celery workers and pending/running jobs."""
+    rows = (
+        db.execute(
+            text("""
+                SELECT id, job_type, status, requested_by_user_id, payload, created_at, updated_at
+                FROM jobs
+                WHERE status IN ('running', 'queued')
+                ORDER BY created_at
+            """)
+        )
+        .mappings()
+        .all()
+    )
+
+    from schemas.admin import AdminJobLogRecord
+    running_jobs = [AdminJobLogRecord(**row) for row in rows if row["status"] == "running"]
+    queued_jobs  = [AdminJobLogRecord(**row) for row in rows if row["status"] == "queued"]
+
+    workers: list[AdminWorkerRecord] = []
+    try:
+        active = get_celery().control.inspect(timeout=2).active() or {}
+        for worker_name, tasks in active.items():
+            task_records = [
+                AdminWorkerTaskRecord(
+                    task_id=t.get("id", ""),
+                    name=t.get("name", ""),
+                    kwargs=t.get("kwargs"),
+                )
+                for t in (tasks or [])
+            ]
+            workers.append(AdminWorkerRecord(name=worker_name, active_tasks=task_records))
+    except Exception:
+        logger.warning("Celery inspect timed out or failed; returning empty worker list")
+
+    return AdminWorkersResponse(workers=workers, running_jobs=running_jobs, queued_jobs=queued_jobs)
+
+
 @router.post("/users/{user_id}/disable", response_model=AdminUserActionResponse)
 def disable_user(
     user_id: UUID,
