@@ -53,7 +53,7 @@ def _mock_response(result: int, status_code: int = 200) -> MagicMock:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 URL = "http://localhost:8080"

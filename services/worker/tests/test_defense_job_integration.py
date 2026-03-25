@@ -302,15 +302,10 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     def mock_validate_fail(*args):
         raise ValueError("Defense failed health check")
 
-    monkeypatch.setattr(
-        "worker.defense.validation.validate_functional", mock_validate_fail)
+    monkeypatch.setattr("worker.tasks.validate_functional", mock_validate_fail)
 
-    from worker import tasks as worker_tasks
-    monkeypatch.setattr(worker_tasks.run_batch_defense_job, "max_retries", 0)
-
-    # Run defense job (should fail)
-    with pytest.raises(ValueError, match="Validation failed for"):
-        run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+    # Run defense job (validation failure is per-defense; the batch job still completes)
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
     # Verify defense marked as failed
     result = db_session.execute(
@@ -322,12 +317,12 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     assert result[1] == "error"
     assert "Defense failed health check" in result[2]
 
-    # Verify job failed
+    # Batch job completes as done since per-defense failures do not abort the batch
     job_status = db_session.execute(
         text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
         {"id": job_id}
     ).scalar()
-    assert job_status == "failed"
+    assert job_status == "done"
 
 
 def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
@@ -381,22 +376,29 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
     monkeypatch.setattr(
         "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
-    # Reduce timeout for faster test
-    config_dict["worker"]["defense_job"]["container_timeout"] = 2
+    # Patch the config singleton so the readiness poll times out quickly
+    from worker import config as worker_config_module
+    monkeypatch.setattr(
+        worker_config_module.get_config().worker.defense_job, "container_timeout", 2
+    )
 
-    from worker import tasks as worker_tasks
-    monkeypatch.setattr(worker_tasks.run_batch_defense_job, "max_retries", 0)
+    # Run defense job (container failure is per-defense; the batch job still completes)
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
-    # Run defense job (should fail)
-    with pytest.raises(ValueError, match="failed to start"):
-        run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+    # Verify defense marked as failed
+    result = db_session.execute(
+        text("SELECT is_functional, status, functional_error FROM submissions WHERE id = CAST(:id AS uuid)"),
+        {"id": defense_id}
+    ).fetchone()
+    assert result[1] == "error"
+    assert "timeout" in result[2].lower()
 
-    # Verify job failed
+    # Batch job completes as done since per-defense failures do not abort the batch
     job_status = db_session.execute(
         text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
         {"id": job_id}
     ).scalar()
-    assert job_status == "failed"
+    assert job_status == "done"
 
 
 def test_defense_job_github_source(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
