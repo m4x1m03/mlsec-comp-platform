@@ -315,12 +315,13 @@ async def validate_heuristic(
     )
 
     restart_count_ref = [0]
+    heurval_ctx: dict = {}
     malware_outputs: list[int] = []
     goodware_outputs: list[int] = []
 
     async with httpx.AsyncClient() as client:
         for sample in samples:
-            sample_path = get_sample_path(sample["object_key"])
+            sample_path = await get_sample_path(sample["object_key"])
             sample_content = Path(sample_path).read_bytes()
 
             outcome = await evaluate_sample_against_container(
@@ -331,6 +332,7 @@ async def validate_heuristic(
                 sample_content=sample_content,
                 eval_cfg=eval_cfg,
                 restart_count_ref=restart_count_ref,
+                ctx=heurval_ctx,
             )
 
             insert_heurval_file_result(

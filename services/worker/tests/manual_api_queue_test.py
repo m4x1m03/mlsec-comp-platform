@@ -55,6 +55,7 @@ def api_auth_setup():
     
     return token, sub_id
 
+@pytest.mark.manual
 def test_queue_endpoint(api_auth_setup):
     """Integration test for queue endpoint - requires running API service with auth."""
     token, sub_id = api_auth_setup

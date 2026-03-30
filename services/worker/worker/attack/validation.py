@@ -22,6 +22,7 @@ Public API
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import zipfile
 
@@ -341,7 +342,7 @@ def ensure_template_seeded(
 
     # All template_file_reports rows share the same object_key (the ZIP).
     zip_object_key = template_files[0]["object_key"]
-    zip_local_path = get_sample_path(zip_object_key)
+    zip_local_path = asyncio.run(get_sample_path(zip_object_key))
 
     with tempfile.TemporaryDirectory() as extract_dir_str:
         extract_dir = Path(extract_dir_str)

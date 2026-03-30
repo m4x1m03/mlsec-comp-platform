@@ -57,7 +57,7 @@ def _outcome(output: int | None, evaded_reason: str | None = None) -> EvalOutcom
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 DEFENSE_ID = "defense-uuid-1"

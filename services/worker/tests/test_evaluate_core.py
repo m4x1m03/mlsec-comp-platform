@@ -78,7 +78,7 @@ def test_normal_response_returns_correct_model_output():
             )
         ) as client:
             return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref
+                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
             )
 
     outcome = _run(run())
@@ -99,7 +99,7 @@ def test_normal_response_result_zero():
             )
         ) as client:
             return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0]
+                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
             )
 
     outcome = _run(run())
@@ -136,7 +136,7 @@ def test_timeout_returns_time_limit_evaded():
                 ],
             ):
                 return await evaluate_sample_against_container(
-                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0]
+                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
                 )
 
     outcome = _run(run())
@@ -165,7 +165,7 @@ def test_full_timeout_triggers_restart():
                 ],
             ):
                 return await evaluate_sample_against_container(
-                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref
+                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
                 )
 
     outcome = _run(run())
@@ -197,7 +197,7 @@ def test_full_timeout_raises_when_max_restarts_exceeded():
                 ],
             ):
                 return await evaluate_sample_against_container(
-                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref
+                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
                 )
 
     with pytest.raises(ContainerRestartError):
@@ -220,7 +220,7 @@ def test_ram_overuse_returns_ram_limit_evaded():
             )
         ) as client:
             return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0]
+                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
             )
 
     outcome = _run(run())
@@ -242,7 +242,7 @@ def test_ram_overuse_raises_when_max_restarts_exceeded():
             )
         ) as client:
             return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref
+                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
             )
 
     with pytest.raises(ContainerRestartError):
@@ -261,7 +261,7 @@ def test_ram_within_limit_does_not_evade():
             )
         ) as client:
             return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0]
+                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
             )
 
     outcome = _run(run())
@@ -296,7 +296,7 @@ def test_docker_stats_failure_does_not_crash():
             )
         ) as client:
             return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0]
+                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
             )
 
     outcome = _run(run())
