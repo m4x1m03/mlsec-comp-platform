@@ -91,9 +91,13 @@ services:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
       REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
+      MINIO_SECURE: "false"
       ADMIN_ALLOWED_HOSTS: '["172.22.0.1"]' # Docker bridge gateway for localhost SSH tunnel access
-    ports:
-      - "8000:8000"
+      ADMIN_TRUSTED_PROXY_HOSTS: '["127.0.0.1", "::1", "172.16.0.0/12"]' # Trust nginx on any Docker bridge subnet
+      ADMIN_ALLOWED_NETWORKS: '["172.16.0.0/12"]' # Allow Docker bridge gateway as effective client (localhost dev access)
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -117,12 +121,11 @@ services:
     networks:
       - defense_net
 
-  # Placeholder worker container (Celery wiring added in a later step. Unless we want to have persistent workers?)
+  # Worker Container (Celery)
   worker:
     build:
       context: ./services/worker
       dockerfile: Dockerfile
-    container_name: mlsec-worker
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
@@ -132,9 +135,12 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      CELERY_CONCURRENCY: "${WORKER_CONCURRENCY:-4}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
+      - worker_cache:/app/cache
     group_add:
       - "${DOCKER_GID:-999}" # Allows Worker container to interact with Docker Engine
     networks:
@@ -153,20 +159,39 @@ services:
       dockerfile: Dockerfile
     container_name: mlsec-frontend
     environment:
-      PUBLIC_API_URL: http://api:8000
-      API_PROXY_TARGET: http://api:8000
+      PUBLIC_API_URL: ""
+      API_INTERNAL_URL: http://api:8000
     volumes:
       - ./services/frontend:/app
       - /app/node_modules
-    ports:
-      - "4321:4321"
     networks:
       - backend_net
     depends_on:
       - api
-  # TODO: Adminer (Nice to have, not necessary)
-  # adminer:
 
+  nginx:
+    image: nginx:alpine
+    container_name: mlsec-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./services/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - backend_net
+    depends_on:
+      - api
+      - frontend
+
+  # Adminer (Can remove in production if we dont need it)
+  adminer:
+    image: adminer:latest
+    container_name: mlsec-adminer
+    ports:
+      - "8081:8080"
+    networks:
+      - backend_net
+    depends_on:
+      - postgres
 
 networks:
   # TODO: Secure communication network for evaluation end.
@@ -183,5 +208,6 @@ volumes:
   rabbitmqdata:
   redisdata:
   miniodata:
+  worker_cache:
 
 

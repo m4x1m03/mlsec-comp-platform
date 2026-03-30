@@ -1,10 +1,3 @@
-"""FastAPI application entrypoint and lifecycle wiring.
-
-Creates the API app with routers and middleware, and manages startup/shutdown
-tasks such as ensuring the MinIO bucket exists and starting/stopping the
-leaderboard stream listener.
-"""
-
 import logging
 from contextlib import asynccontextmanager
 import asyncio
@@ -16,11 +9,7 @@ from core.settings import get_settings
 from routers.admin import router as admin_router
 from routers.auth import router as auth_router
 from routers.health import router as health_router
-from routers.leaderboard import (
-    router as leaderboard_router,
-    start_leaderboard_stream,
-    stop_leaderboard_stream,
-)
+from routers.leaderboard import router as leaderboard_router, start_redis_subscriber
 from routers.queue import router as queue_router
 from routers.submissions import router as submissions_router
 
@@ -41,19 +30,15 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize MinIO: {e}")
         # Continue startup (may fail later on upload, but allows API to start)
 
-    try:
-        start_leaderboard_stream(loop=asyncio.get_running_loop())
-    except Exception as e:
-        logger.error(f"Failed to start leaderboard stream: {e}")
+    subscriber_task = asyncio.create_task(start_redis_subscriber())
 
     yield  # Application runs here
 
-    # NOTE: Cleanup code would go here
+    subscriber_task.cancel()
     try:
-        stop_leaderboard_stream()
-    except Exception as e:
-        logger.error(f"Failed to stop leaderboard stream: {e}")
-
+        await subscriber_task
+    except (asyncio.CancelledError, Exception):
+        pass
     logger.info("API shutting down...")
 
 
@@ -82,7 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(queue_router)
     app.include_router(submissions_router, prefix="/api")
-    app.include_router(leaderboard_router, prefix="/api")
+    app.include_router(leaderboard_router)
     app.include_router(admin_router)
     return app
 

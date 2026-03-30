@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from core.auth import AuthenticatedUser, get_authenticated_user
 from core.database import get_db
+from core.redis_client import get_redis_client
 from core.settings import get_settings
 from core.storage import upload_attack_zip, upload_defense_zip
 from core.submissions import (
@@ -29,6 +30,8 @@ from schemas.jobs import JobType
 from schemas.submissions import (
     CreateDefenseDockerRequest,
     CreateDefenseGitHubRequest,
+    SetActiveResponse,
+    SubmissionListItem,
     SubmissionHistoryResponse,
     SubmissionResponse,
 )
@@ -566,4 +569,158 @@ async def create_attack_zip(
         display_name=display_name,
         created_at=created_at.isoformat() if created_at else datetime.utcnow().isoformat(),
         job_id=str(job_id),
+    )
+
+
+@router.get(
+    "/mine",
+    response_model=list[SubmissionListItem],
+    status_code=200,
+)
+def list_my_submissions(
+    type: str | None = None,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> list[SubmissionListItem]:
+    """
+    Return all submissions for the authenticated user.
+    Optionally filter by type ('attack' or 'defense').
+    Each item includes an is_active flag indicating whether it is the
+    user's currently active submission of that type.
+    """
+    if type is not None and type not in ("attack", "defense"):
+        raise HTTPException(
+            status_code=400, detail="type must be 'attack' or 'defense'"
+        )
+
+    query_filter = ""
+    params: dict = {"user_id": str(current_user.user_id)}
+    if type is not None:
+        query_filter = "AND s.submission_type = :submission_type"
+        params["submission_type"] = type
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT
+                s.id,
+                s.submission_type,
+                s.status,
+                s.is_functional,
+                s.functional_error,
+                s.version,
+                s.display_name,
+                s.created_at,
+                (a.submission_id IS NOT NULL) AS is_active,
+                hr.malware_tpr,
+                hr.goodware_fpr
+            FROM submissions s
+            LEFT JOIN active_submissions a
+                ON a.submission_id = s.id
+                AND a.user_id = s.user_id
+            LEFT JOIN LATERAL (
+                SELECT malware_tpr, goodware_fpr
+                FROM heurval_results
+                WHERE defense_submission_id = s.id
+                ORDER BY computed_at DESC NULLS LAST
+                LIMIT 1
+            ) hr ON s.submission_type = 'defense'
+            WHERE s.user_id = :user_id
+              AND s.deleted_at IS NULL
+              {query_filter}
+            ORDER BY s.created_at DESC
+            """
+        ),
+        params,
+    ).fetchall()
+
+    return [
+        SubmissionListItem(
+            submission_id=str(row[0]),
+            submission_type=row[1],
+            status=row[2],
+            is_functional=row[3],
+            functional_error=row[4],
+            version=row[5],
+            display_name=row[6],
+            created_at=row[7].isoformat() if row[7] else "",
+            is_active=bool(row[8]),
+            heurval_tpr=float(row[9]) if row[9] is not None else None,
+            heurval_fpr=float(row[10]) if row[10] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+@router.put(
+    "/{submission_id}/active",
+    response_model=SetActiveResponse,
+    status_code=200,
+)
+def set_active_submission(
+    submission_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SetActiveResponse:
+    """
+    Mark a submission as the user's active submission for its type.
+    Replaces any existing active submission of the same type for this user.
+    The submission must belong to the authenticated user.
+    """
+    row = db.execute(
+        text(
+            """
+            SELECT id, submission_type, status
+            FROM submissions
+            WHERE id = :id
+              AND user_id = :user_id
+              AND deleted_at IS NULL
+            """
+        ),
+        {"id": submission_id, "user_id": str(current_user.user_id)},
+    ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    sub_type = row[1]
+    status = row[2]
+
+    if status not in ("validated", "evaluated"):
+        raise HTTPException(
+            status_code=409,
+            detail="Submission must be validated or evaluated before it can be set as active",
+        )
+
+    db.execute(
+        text(
+            """
+            INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+            VALUES (:user_id, :submission_type, :submission_id, NOW())
+            ON CONFLICT (user_id, submission_type)
+            DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                          updated_at = EXCLUDED.updated_at
+            """
+        ),
+        {
+            "user_id": str(current_user.user_id),
+            "submission_type": sub_type,
+            "submission_id": submission_id,
+        },
+    )
+    db.commit()
+
+    logger.info(
+        f"User {current_user.user_id} set active {sub_type} submission to {submission_id}"
+    )
+
+    try:
+        r = get_redis_client()
+        r.publish("leaderboard:updated", "active_changed")
+    except Exception:
+        logger.warning("Failed to publish leaderboard update after active submission change")
+
+    return SetActiveResponse(
+        submission_id=submission_id,
+        submission_type=sub_type,
     )

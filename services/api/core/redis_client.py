@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def get_redis_client() -> redis.Redis:
     """Get Redis client instance."""
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-    return redis.from_url(redis_url, decode_responses=True)
+    return redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2)
 
 
 class WorkerRegistry:

@@ -296,8 +296,12 @@ def test_virustotal_analyze_file_polls_multiple_times(vt, sample_file):
     assert report.report_ref == "analysis-abc123"
 
 
-def test_virustotal_analyze_file_empty_behaviours(vt, sample_file):
+def test_virustotal_analyze_file_empty_behaviours(sample_file):
     """Empty behaviours list → behavioral_signals=None, behash=None."""
+    vt_local = VirusTotalBackend(
+        api_key="test-key", poll_interval_s=0, max_polls=3, timeout=5,
+        behavior_max_polls=1,
+    )
     with patch("worker.attack.sandbox.virustotal.requests.post") as mock_post, \
          patch("worker.attack.sandbox.virustotal.requests.get") as mock_get, \
          patch("worker.attack.sandbox.virustotal.time.sleep"):
@@ -308,7 +312,7 @@ def test_virustotal_analyze_file_empty_behaviours(vt, sample_file):
             _make_response(200, {"data": []}),
         ]
 
-        report = vt.analyze_file(sample_file)
+        report = vt_local.analyze_file(sample_file)
 
     assert report.behavioral_signals is None
     assert report.behash is None

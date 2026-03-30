@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     display_name TEXT,
 
     status TEXT NOT NULL CHECK (
-        status IN ('submitted', 'evaluating', 'ready', 'failed')
+        status IN ('submitted', 'validating', 'validated', 'evaluating', 'evaluated', 'error')
     ),
 
     is_functional BOOLEAN,
@@ -199,12 +199,32 @@ ON attack_files(attack_submission_id);
 
 
 --------------------------------------------------
+-- ATTACK TEMPLATE
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS attack_template (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    object_key  TEXT NOT NULL,
+    sha256      TEXT NOT NULL,
+    file_count  INT  NOT NULL DEFAULT 0,
+    uploaded_by UUID REFERENCES users(id),
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX idx_attack_template_active ON attack_template(is_active, uploaded_at DESC);
+
+
+--------------------------------------------------
 -- TEMPLATE FILE REPORTS
 --------------------------------------------------
 CREATE TABLE IF NOT EXISTS template_file_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
+    template_id UUID NOT NULL
+        REFERENCES attack_template(id) ON DELETE CASCADE,
+
     filename TEXT NOT NULL,           -- relative path within the attack template
+    object_key TEXT NOT NULL,         -- MinIO path for this template file
     sha256 TEXT NOT NULL,
     sandbox_report_ref TEXT,          -- backend-specific analysis ID (e.g. VT analysis ID)
     behash TEXT,                      -- VT behavioral hash; NULL until analysis completes
@@ -212,8 +232,10 @@ CREATE TABLE IF NOT EXISTS template_file_reports (
 
     evaluated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    UNIQUE(filename)
+    UNIQUE(template_id, filename)
 );
+
+CREATE INDEX idx_template_file_reports_template ON template_file_reports(template_id);
 
 
 --------------------------------------------------
@@ -282,6 +304,7 @@ CREATE TABLE IF NOT EXISTS evaluation_file_results (
     model_output SMALLINT, -- 0 benign / 1 malware
     score FLOAT,
     error TEXT,
+    evaded_reason TEXT,   -- NULL | 'ram_limit' | 'time_limit'
     duration_ms INT,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -372,3 +395,73 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX idx_jobs_status ON jobs(status);
+
+
+--------------------------------------------------
+-- HEURVAL SAMPLE SETS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS heurval_sample_sets (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    object_key     TEXT NOT NULL,
+    sha256         TEXT NOT NULL,
+    malware_count  INT  NOT NULL DEFAULT 0,
+    goodware_count INT  NOT NULL DEFAULT 0,
+    uploaded_by    UUID REFERENCES users(id),
+    uploaded_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_active      BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX idx_heurval_sets_active ON heurval_sample_sets(is_active, uploaded_at DESC);
+
+
+--------------------------------------------------
+-- HEURVAL SAMPLES
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS heurval_samples (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sample_set_id UUID NOT NULL
+        REFERENCES heurval_sample_sets(id) ON DELETE CASCADE,
+    filename      TEXT NOT NULL,
+    object_key    TEXT NOT NULL,
+    sha256        TEXT NOT NULL,
+    is_malware    BOOLEAN NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_heurval_samples_set ON heurval_samples(sample_set_id);
+
+
+--------------------------------------------------
+-- HEURVAL RESULTS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS heurval_results (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    defense_submission_id UUID NOT NULL
+        REFERENCES submissions(id) ON DELETE CASCADE,
+    sample_set_id         UUID NOT NULL
+        REFERENCES heurval_sample_sets(id),
+    malware_tpr           NUMERIC,
+    malware_fpr           NUMERIC,
+    goodware_tpr          NUMERIC,
+    goodware_fpr          NUMERIC,
+    computed_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(defense_submission_id, sample_set_id)
+);
+
+
+--------------------------------------------------
+-- HEURVAL FILE RESULTS
+--------------------------------------------------
+CREATE TABLE IF NOT EXISTS heurval_file_results (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    heurval_result_id UUID NOT NULL
+        REFERENCES heurval_results(id) ON DELETE CASCADE,
+    sample_id         UUID NOT NULL
+        REFERENCES heurval_samples(id),
+    model_output      SMALLINT,
+    evaded_reason     TEXT,
+    duration_ms       INT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_heurval_file_results_result ON heurval_file_results(heurval_result_id);

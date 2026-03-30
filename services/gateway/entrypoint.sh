@@ -19,5 +19,10 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+# Handle SIGTERM for graceful shutdown
+trap "exit" SIGTERM
+
 # Keep the container running
-exec tail -f /dev/null
+while true; do
+  sleep 1 & wait $!
+done

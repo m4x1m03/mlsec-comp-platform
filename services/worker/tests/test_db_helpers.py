@@ -24,14 +24,14 @@ def test_get_all_validated_defenses(db_session, test_helpers):
         source_type="docker",
         docker_image="user/defense:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     def2_id = test_helpers.create_defense(
         source_type="github",
         git_repo="https://github.com/user/defense",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # Defense with is_functional=False (should be excluded)
@@ -39,7 +39,7 @@ def test_get_all_validated_defenses(db_session, test_helpers):
         source_type="docker",
         docker_image="user/failed:latest",
         is_functional=False,
-        status="failed"
+        status="error"
     )
 
     # Defense with is_functional=NULL (should be excluded)
@@ -65,7 +65,7 @@ def test_get_all_validated_defenses_filters_deleted(db_session, test_helpers):
         source_type="docker",
         docker_image="user/defense:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # Mark as deleted
@@ -225,14 +225,20 @@ def test_mark_defense_validated(db_session, test_helpers):
     # Mark as validated
     mark_defense_validated(defense_id)
 
-    # Verify is_functional set to TRUE and status is 'ready'
+    # Verify is_functional set to TRUE and status is 'validated'
     result = db_session.execute(
         text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": defense_id}
     ).fetchone()
 
     assert result[0] is True
-    assert result[1] == "ready"
+    assert result[1] == "validated"
+
+    # Verify active_submissions row was created
+    active = db_session.execute(
+        text("SELECT submission_id FROM active_submissions WHERE submission_type = 'defense'"),
+    ).scalar()
+    assert str(active) == defense_id
 
 
 def test_mark_defense_failed(db_session, test_helpers):
@@ -261,7 +267,7 @@ def test_mark_defense_failed(db_session, test_helpers):
     ).fetchone()
 
     assert result[0] is False
-    assert result[1] == "failed"
+    assert result[1] == "error"
     assert result[2] == error_msg
 
 
@@ -291,7 +297,7 @@ def test_get_attack_files_empty(db_session, test_helpers):
     # Create attack submission without files
     attack_id = test_helpers.create_submission(
         submission_type="attack",
-        status="ready"
+        status="validated"
     )
 
     # Query should return empty list
@@ -305,7 +311,7 @@ def test_get_attack_files_ordered_by_created_at(db_session, test_helpers):
     # Create attack
     attack_id = test_helpers.create_submission(
         submission_type="attack",
-        status="ready"
+        status="validated"
     )
 
     # Manually create files in specific order with delays
@@ -436,7 +442,13 @@ def test_mark_attack_validated(db_session, test_helpers):
         {"id": attack_id}
     ).scalar()
 
-    assert result == "ready"
+    assert result == "validated"
+
+    # Verify active_submissions row was created
+    active = db_session.execute(
+        text("SELECT submission_id FROM active_submissions WHERE submission_type = 'attack'"),
+    ).scalar()
+    assert str(active) == attack_id
 
 
 def test_database_helper_functions_with_transactions(db_session, test_helpers):
@@ -458,6 +470,12 @@ def test_database_helper_functions_with_transactions(db_session, test_helpers):
     ).scalar()
     assert result is True
 
+    # Verify active_submissions upsert ran within the same transaction
+    active = db_session.execute(
+        text("SELECT submission_id FROM active_submissions WHERE submission_type = 'defense'"),
+    ).scalar()
+    assert str(active) == defense_id
+
     # After test, transaction is rolled back (verified by fixture)
 
 
@@ -468,13 +486,13 @@ def test_multiple_defenses_and_attacks(db_session, test_helpers):
         source_type="docker",
         docker_image="user/def1:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
     def2_id = test_helpers.create_defense(
         source_type="github",
         git_repo="https://github.com/user/def2",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # Create 3 attacks
@@ -502,3 +520,103 @@ def test_multiple_defenses_and_attacks(db_session, test_helpers):
     assert len(def2_unevaluated) == 2
     assert attack2_id in def2_unevaluated
     assert attack3_id in def2_unevaluated
+
+
+def test_mark_defense_validated_replaces_active_submission(db_session, test_helpers):
+    """Test that validating a second defense replaces the active defense (DO UPDATE, not DO NOTHING)."""
+    import uuid
+
+    user_id = str(uuid.uuid4())
+    db_session.execute(
+        text("""
+            INSERT INTO users (id, username, email)
+            VALUES (CAST(:id AS uuid), :username, :email)
+        """),
+        {"id": user_id, "username": f"u_{user_id[:8]}", "email": f"u_{user_id[:8]}@example.com"},
+    )
+    db_session.commit()
+
+    # First defense: validate, check active points to it
+    defense1_id = test_helpers.create_submission(
+        submission_type="defense",
+        status="submitted",
+        is_functional=None,
+        user_id=user_id,
+    )
+    mark_defense_validated(defense1_id)
+
+    active = db_session.execute(
+        text("""
+            SELECT submission_id FROM active_submissions
+            WHERE user_id = CAST(:uid AS uuid) AND submission_type = 'defense'
+        """),
+        {"uid": user_id},
+    ).scalar()
+    assert str(active) == defense1_id
+
+    # Second defense for same user: validate, check active is updated
+    defense2_id = test_helpers.create_submission(
+        submission_type="defense",
+        status="submitted",
+        is_functional=None,
+        user_id=user_id,
+    )
+    mark_defense_validated(defense2_id)
+
+    active = db_session.execute(
+        text("""
+            SELECT submission_id FROM active_submissions
+            WHERE user_id = CAST(:uid AS uuid) AND submission_type = 'defense'
+        """),
+        {"uid": user_id},
+    ).scalar()
+    assert str(active) == defense2_id
+
+
+def test_mark_attack_validated_replaces_active_submission(db_session, test_helpers):
+    """Test that validating a second attack replaces the active attack (DO UPDATE, not DO NOTHING)."""
+    import uuid
+
+    user_id = str(uuid.uuid4())
+    db_session.execute(
+        text("""
+            INSERT INTO users (id, username, email)
+            VALUES (CAST(:id AS uuid), :username, :email)
+        """),
+        {"id": user_id, "username": f"u_{user_id[:8]}", "email": f"u_{user_id[:8]}@example.com"},
+    )
+    db_session.commit()
+
+    # First attack: validate, check active points to it
+    attack1_id = test_helpers.create_submission(
+        submission_type="attack",
+        status="submitted",
+        user_id=user_id,
+    )
+    mark_attack_validated(attack1_id)
+
+    active = db_session.execute(
+        text("""
+            SELECT submission_id FROM active_submissions
+            WHERE user_id = CAST(:uid AS uuid) AND submission_type = 'attack'
+        """),
+        {"uid": user_id},
+    ).scalar()
+    assert str(active) == attack1_id
+
+    # Second attack for same user: validate, check active is updated
+    attack2_id = test_helpers.create_submission(
+        submission_type="attack",
+        status="submitted",
+        user_id=user_id,
+    )
+    mark_attack_validated(attack2_id)
+
+    active = db_session.execute(
+        text("""
+            SELECT submission_id FROM active_submissions
+            WHERE user_id = CAST(:uid AS uuid) AND submission_type = 'attack'
+        """),
+        {"uid": user_id},
+    ).scalar()
+    assert str(active) == attack2_id

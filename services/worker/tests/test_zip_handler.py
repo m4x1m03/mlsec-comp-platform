@@ -11,6 +11,9 @@ from worker.defense.zip_handler import build_from_zip_archive
 
 def test_build_from_real_zip_file(config_dict, mock_minio_client, defense_zip_file):
     """Test building image from actual ZIP file: good_defense.zip."""
+    # Allow network access so pip install can run inside the build
+    config_dict.setdefault('source', {})['network_disabled'] = False
+
     # Upload the real ZIP file to fake MinIO
     zip_path = defense_zip_file
 
@@ -57,6 +60,8 @@ def test_build_from_real_zip_file(config_dict, mock_minio_client, defense_zip_fi
 
 def test_zip_image_runnable(config_dict, mock_minio_client, defense_zip_file):
     """Test that image built from ZIP can be instantiated."""
+    config_dict.setdefault('source', {})['network_disabled'] = False
+
     # Upload the real ZIP file
     zip_path = defense_zip_file
     with open(zip_path, 'rb') as f:
@@ -100,6 +105,8 @@ def test_zip_image_runnable(config_dict, mock_minio_client, defense_zip_file):
 
 def test_zip_size_validation(config_dict, mock_minio_client, defense_zip_file):
     """Test that ZIP size limits are enforced."""
+    config_dict.setdefault('source', {})['network_disabled'] = False
+
     # Upload the ZIP file
     zip_path = defense_zip_file
     with open(zip_path, 'rb') as f:

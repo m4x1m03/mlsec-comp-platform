@@ -18,14 +18,23 @@ from worker.attack.sandbox.base import SandboxUnavailableError
 def _mock_functional_validation(monkeypatch):
     """Monkeypatch validate_attack_functional to be a no-op."""
     monkeypatch.setattr(
-        "worker.tasks.validate_attack_functional",
+        "worker.attack.validation.validate_functional",
         lambda *args, **kwargs: None,
     )
+
+
+def _mock_no_check_similarity(monkeypatch):
+    """Patch config.worker.attack to disable similarity check."""
+    mock_attack_cfg = Mock()
+    mock_attack_cfg.check_similarity = False
+    mock_attack_cfg.max_zip_size_mb = 100
+    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
 
 
 def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch):
     """Test basic attack job flow: validate and enqueue to existing workers."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -41,19 +50,19 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
         source_type="docker",
         docker_image="user/defense1:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
     def2_id = test_helpers.create_defense(
         source_type="docker",
         docker_image="user/defense2:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # Register workers for both defenses
     registry = WorkerRegistry()
-    registry.register("worker_1", def1_id, "job_1")
-    registry.register("worker_2", def2_id, "job_2")
+    registry.register("worker_1", [def1_id], "job_1")
+    registry.register("worker_2", [def2_id], "job_2")
 
     # Create attack (with attack_submission_details and attack_files)
     attack_id = test_helpers.create_attack()
@@ -78,7 +87,7 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client to create fake ZIP file
     def mock_fget_object(bucket, object_key, file_path):
@@ -90,17 +99,17 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
 
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
 
-    # Verify attack marked as validated
+    # Verify attack marked as evaluated
     status = db_session.execute(
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id}
     ).scalar()
-    assert status == "ready"
+    assert status == "evaluated"
 
     # Verify attacks added to both workers' queues
     queue1 = fake_redis.lrange("worker:worker_1:attacks", 0, -1)
@@ -123,6 +132,8 @@ def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch
 def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job creates new defense jobs when no workers available."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
+    monkeypatch.setattr(tasks_mod.config.worker.evaluation, "batch_size", 1)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -138,13 +149,13 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
         source_type="docker",
         docker_image="user/defense1:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
     def2_id = test_helpers.create_defense(
         source_type="docker",
         docker_image="user/defense2:latest",
         is_functional=True,
-        status="ready"
+        status="validated"
     )
 
     # No workers registered (closed queues)
@@ -166,7 +177,7 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client
     def mock_fget_object(bucket, object_key, file_path):
@@ -175,7 +186,7 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
             zf.writestr("sample2.exe", b"fake_content_2")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -184,7 +195,7 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
     assert len(enqueued_tasks) == 2
 
     # Verify defense submission IDs match
-    defense_ids = {task["defense_submission_id"] for task in enqueued_tasks}
+    defense_ids = {task["defense_submission_ids"][0] for task in enqueued_tasks}
     assert defense_ids == {def1_id, def2_id}
 
     # Verify job IDs are UUIDs
@@ -196,6 +207,7 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
 def test_attack_job_skips_in_progress_evaluations(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job skips defenses with evaluations already in progress."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -233,7 +245,7 @@ def test_attack_job_skips_in_progress_evaluations(db_session, fake_redis, test_h
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client
     def mock_fget_object(bucket, object_key, file_path):
@@ -243,7 +255,7 @@ def test_attack_job_skips_in_progress_evaluations(db_session, fake_redis, test_h
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -262,6 +274,7 @@ def test_attack_job_skips_in_progress_evaluations(db_session, fake_redis, test_h
 def test_attack_job_uses_redis_atomic_marking(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job uses Redis SETNX for atomic evaluation marking."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -300,7 +313,7 @@ def test_attack_job_uses_redis_atomic_marking(db_session, fake_redis, test_helpe
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client
     def mock_fget_object(bucket, object_key, file_path):
@@ -310,7 +323,7 @@ def test_attack_job_uses_redis_atomic_marking(db_session, fake_redis, test_helpe
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -322,6 +335,7 @@ def test_attack_job_uses_redis_atomic_marking(db_session, fake_redis, test_helpe
 def test_attack_job_handles_multiple_workers_same_defense(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job adds to first available worker when multiple workers for same defense."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -341,9 +355,9 @@ def test_attack_job_handles_multiple_workers_same_defense(db_session, fake_redis
 
     # Register multiple workers for same defense
     registry = WorkerRegistry()
-    registry.register("worker_1", defense_id, "job_1")
-    registry.register("worker_2", defense_id, "job_2")
-    registry.register("worker_3", defense_id, "job_3")
+    registry.register("worker_1", [defense_id], "job_1")
+    registry.register("worker_2", [defense_id], "job_2")
+    registry.register("worker_3", [defense_id], "job_3")
 
     # Create attack
     attack_id = test_helpers.create_attack()
@@ -362,7 +376,7 @@ def test_attack_job_handles_multiple_workers_same_defense(db_session, fake_redis
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client
     def mock_fget_object(bucket, object_key, file_path):
@@ -372,7 +386,7 @@ def test_attack_job_handles_multiple_workers_same_defense(db_session, fake_redis
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -397,6 +411,8 @@ def test_attack_job_handles_multiple_workers_same_defense(db_session, fake_redis
 def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job handles mix of open and closed workers."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
+    monkeypatch.setattr(tasks_mod.config.worker.evaluation, "batch_size", 1)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -426,8 +442,8 @@ def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpe
 
     # Register workers
     registry = WorkerRegistry()
-    registry.register("worker_1", def1_id, "job_1")  # Open
-    registry.register("worker_2", def2_id, "job_2")  # Will be closed
+    registry.register("worker_1", [def1_id], "job_1")  # Open
+    registry.register("worker_2", [def2_id], "job_2")  # Will be closed
     # def3 has no worker
 
     # Close worker_2's queue
@@ -450,7 +466,7 @@ def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpe
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client
     def mock_fget_object(bucket, object_key, file_path):
@@ -460,7 +476,7 @@ def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpe
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -475,13 +491,15 @@ def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpe
 
     # Verify new defense jobs enqueued for def2 and def3 (closed/no worker)
     assert len(enqueued_tasks) == 2
-    defense_ids = {task["defense_submission_id"] for task in enqueued_tasks}
+    defense_ids = {task["defense_submission_ids"][0] for task in enqueued_tasks}
     assert defense_ids == {def2_id, def3_id}
 
 
 def test_attack_job_error_handling(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job handles errors gracefully."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
+    monkeypatch.setattr(run_attack_job, "max_retries", 0)
 
     # Monkeypatch Redis client to raise error
     from worker import tasks
@@ -497,7 +515,7 @@ def test_attack_job_error_handling(db_session, fake_redis, test_helpers, monkeyp
 
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     def fake_init(self):
         raise RuntimeError("Redis connection failed")
@@ -522,6 +540,7 @@ def test_attack_job_error_handling(db_session, fake_redis, test_helpers, monkeyp
 def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, monkeypatch):
     """Test attack job completes successfully when no validated defenses exist."""
     _mock_functional_validation(monkeypatch)
+    _mock_no_check_similarity(monkeypatch)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -549,7 +568,7 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
         enqueued_tasks.append(kwargs)
         return None
 
-    monkeypatch.setattr(tasks.run_defense_job, "apply_async", mock_apply_async)
+    monkeypatch.setattr(tasks.run_batch_defense_job, "apply_async", mock_apply_async)
 
     # Mock MinIO client
     def mock_fget_object(bucket, object_key, file_path):
@@ -559,7 +578,7 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
             zf.writestr("sample3.exe", b"fake_content_3")
     mock_minio_client = Mock()
     mock_minio_client.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio_client)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio_client)
 
     # Run attack job
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
@@ -569,7 +588,7 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id}
     ).scalar()
-    assert status == "ready"
+    assert status == "validated"
 
     # Verify no defense jobs enqueued
     assert len(enqueued_tasks) == 0
@@ -608,10 +627,16 @@ def _common_setup(db_session, fake_redis, test_helpers, monkeypatch):
 
     mock_minio = Mock()
     mock_minio.fget_object = mock_fget_object
-    monkeypatch.setattr("worker.tasks.get_minio_client", lambda: mock_minio)
+    monkeypatch.setattr("worker.minio_client.get_minio_client", lambda: mock_minio)
+
+    # Disable similarity check to prevent early return when no active template
+    mock_attack_cfg = Mock()
+    mock_attack_cfg.check_similarity = False
+    mock_attack_cfg.max_zip_size_mb = 100
+    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
 
     # Silence defense-job enqueuing
-    monkeypatch.setattr(tasks_mod.run_defense_job, "apply_async", lambda kw: None)
+    monkeypatch.setattr(tasks_mod.run_batch_defense_job, "apply_async", lambda kw: None)
 
     return attack_id, job_id
 
@@ -621,7 +646,7 @@ def test_attack_job_functional_validation_failure(db_session, fake_redis, test_h
     attack_id, job_id = _common_setup(db_session, fake_redis, test_helpers, monkeypatch)
 
     monkeypatch.setattr(
-        "worker.tasks.validate_attack_functional",
+        "worker.attack.validation.validate_functional",
         lambda *a, **kw: (_ for _ in ()).throw(
             AttackValidationError("ZIP file cannot be decrypted with password 'infected'.")
         ),
@@ -641,7 +666,7 @@ def test_attack_job_functional_validation_failure(db_session, fake_redis, test_h
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "failed"
+    assert sub_status == "error"
 
 
 def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_helpers, monkeypatch):
@@ -649,18 +674,36 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
     attack_id, job_id = _common_setup(db_session, fake_redis, test_helpers, monkeypatch)
     _mock_functional_validation(monkeypatch)
 
+    # Override config: enable similarity check
+    mock_attack_cfg = Mock()
+    mock_attack_cfg.check_similarity = True
+    mock_attack_cfg.reject_dissimilar_attacks = True
+    mock_attack_cfg.minimum_attack_similarity = 50
+    mock_attack_cfg.max_zip_size_mb = 100
+    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
+
+    # Provide an active template so the seeding check and heuristic block run
+    monkeypatch.setattr(
+        "worker.tasks.get_active_template",
+        lambda: {"id": "00000000-0000-0000-0000-000000000001"},
+    )
+    monkeypatch.setattr(
+        "worker.tasks.is_template_fully_seeded",
+        lambda tid: True,
+    )
+
     # Provide a non-empty template reports list so heuristic runs
     monkeypatch.setattr(
-        "worker.tasks.get_template_reports",
-        lambda: [{"filename": "sample1.exe", "behash": "abc", "behavioral_signals": {"tags": ["T1"]}}],
+        "worker.tasks.get_template_reports_for_template",
+        lambda tid: [{"filename": "sample1.exe", "behash": "abc", "behavioral_signals": {"tags": ["T1"]}}],
     )
     monkeypatch.setattr(
-        "worker.tasks.get_sandbox_backend",
+        "worker.attack.sandbox.get_sandbox_backend",
         lambda cfg: Mock(),
     )
-    # Heuristic returns 20% — below the 50% threshold in config
+    # Heuristic returns 20% -- below the 50% threshold in config
     monkeypatch.setattr(
-        "worker.tasks.validate_heuristic",
+        "worker.attack.validation.validate_heuristic",
         lambda *a, **kw: 20.0,
     )
 
@@ -676,24 +719,41 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "failed"
+    assert sub_status == "error"
 
 
 def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_helpers, monkeypatch):
     """SandboxUnavailableError during heuristic validation marks attack failed and re-raises."""
     attack_id, job_id = _common_setup(db_session, fake_redis, test_helpers, monkeypatch)
     _mock_functional_validation(monkeypatch)
+    monkeypatch.setattr(run_attack_job, "max_retries", 0)
+
+    # Override config: enable similarity check
+    mock_attack_cfg = Mock()
+    mock_attack_cfg.check_similarity = True
+    mock_attack_cfg.reject_dissimilar_attacks = True
+    mock_attack_cfg.minimum_attack_similarity = 50
+    mock_attack_cfg.max_zip_size_mb = 100
+    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
 
     monkeypatch.setattr(
-        "worker.tasks.get_template_reports",
-        lambda: [{"filename": "sample1.exe", "behash": None, "behavioral_signals": None}],
+        "worker.tasks.get_active_template",
+        lambda: {"id": "00000000-0000-0000-0000-000000000001"},
     )
     monkeypatch.setattr(
-        "worker.tasks.get_sandbox_backend",
+        "worker.tasks.is_template_fully_seeded",
+        lambda tid: True,
+    )
+    monkeypatch.setattr(
+        "worker.tasks.get_template_reports_for_template",
+        lambda tid: [{"filename": "sample1.exe", "behash": None, "behavioral_signals": None}],
+    )
+    monkeypatch.setattr(
+        "worker.attack.sandbox.get_sandbox_backend",
         lambda cfg: Mock(),
     )
     monkeypatch.setattr(
-        "worker.tasks.validate_heuristic",
+        "worker.attack.validation.validate_heuristic",
         lambda *a, **kw: (_ for _ in ()).throw(
             SandboxUnavailableError("VirusTotal unreachable")
         ),
@@ -706,7 +766,7 @@ def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_h
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "failed"
+    assert sub_status == "error"
 
 
 def test_attack_job_heuristic_skipped_no_template_reports(db_session, fake_redis, test_helpers, monkeypatch):
@@ -714,10 +774,7 @@ def test_attack_job_heuristic_skipped_no_template_reports(db_session, fake_redis
     attack_id, job_id = _common_setup(db_session, fake_redis, test_helpers, monkeypatch)
     _mock_functional_validation(monkeypatch)
 
-    # Explicitly return empty template reports
-    monkeypatch.setattr("worker.tasks.get_template_reports", lambda: [])
-
-    # validate_heuristic must NOT be called
+    # validate_heuristic must NOT be called (check_similarity=False from _common_setup)
     def must_not_be_called(*a, **kw):
         raise AssertionError("validate_heuristic should not be called")
 
@@ -737,34 +794,36 @@ def test_attack_job_heuristic_accepted_despite_low_score(db_session, fake_redis,
     attack_id, job_id = _common_setup(db_session, fake_redis, test_helpers, monkeypatch)
     _mock_functional_validation(monkeypatch)
 
+    # Provide an active template so heuristic block is entered
     monkeypatch.setattr(
-        "worker.tasks.get_template_reports",
-        lambda: [{"filename": "sample1.exe", "behash": "abc", "behavioral_signals": {"tags": ["T1"]}}],
+        "worker.tasks.get_active_template",
+        lambda: {"id": "00000000-0000-0000-0000-000000000001"},
     )
     monkeypatch.setattr(
-        "worker.tasks.get_sandbox_backend",
+        "worker.tasks.is_template_fully_seeded",
+        lambda tid: True,
+    )
+    monkeypatch.setattr(
+        "worker.tasks.get_template_reports_for_template",
+        lambda tid: [{"filename": "sample1.exe", "behash": "abc", "behavioral_signals": {"tags": ["T1"]}}],
+    )
+    monkeypatch.setattr(
+        "worker.attack.sandbox.get_sandbox_backend",
         lambda cfg: Mock(),
     )
-    # Similarity is 20% — below 50% threshold, but reject_dissimilar_attacks=False
+    # Similarity is 20% -- below 50% threshold, but reject_dissimilar_attacks=False
     monkeypatch.setattr(
-        "worker.tasks.validate_heuristic",
+        "worker.attack.validation.validate_heuristic",
         lambda *a, **kw: 20.0,
     )
 
-    # Patch config so reject_dissimilar_attacks=False
-    real_config = tasks_mod.config
+    # Patch config so reject_dissimilar_attacks=False and check_similarity=True
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = True
     mock_attack_cfg.reject_dissimilar_attacks = False
     mock_attack_cfg.minimum_attack_similarity = 50
-    mock_attack_cfg.template_path = "/fake/template"
     mock_attack_cfg.max_zip_size_mb = 100
-
-    mock_config = Mock(wraps=real_config)
-    mock_config.worker = Mock(wraps=real_config.worker)
-    mock_config.worker.attack = mock_attack_cfg
-
-    monkeypatch.setattr("worker.tasks.config", mock_config)
+    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
 
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
 
@@ -778,4 +837,4 @@ def test_attack_job_heuristic_accepted_despite_low_score(db_session, fake_redis,
         text("SELECT status FROM submissions WHERE id = CAST(:id AS uuid)"),
         {"id": attack_id},
     ).scalar()
-    assert sub_status == "ready"
+    assert sub_status == "validated"

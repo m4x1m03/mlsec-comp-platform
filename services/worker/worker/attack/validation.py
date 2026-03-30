@@ -8,7 +8,7 @@ are outright rejections via :exc:`AttackValidationError`.
 
 **Heuristic validation** submits the extracted files to a behavioral sandbox
 and compares the resulting execution profile against the stored template
-profiles.  A similarity score (0–100) is returned; whether a low score
+profiles.  A similarity score (0-100) is returned; whether a low score
 causes rejection is controlled by config flags in the caller.
 
 Public API
@@ -22,16 +22,19 @@ Public API
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import zipfile
 
-import pyzipper
 from pathlib import Path, PurePosixPath
 
 import logging
 
+import tempfile
+
 from .sandbox.base import SandboxBackend, SandboxReport
-from worker.db import get_template_reports, upsert_template_report
+from worker.db import upsert_template_report, get_template_reports_for_template
+from worker.cache_handler import get_sample_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,26 +50,6 @@ class AttackValidationError(Exception):
 # ===========================================================================
 # Shared internal helpers
 # ===========================================================================
-
-def _get_template_inner_structure(template_dir: str) -> set[str]:
-    """Return the set of inner file paths that a submission must contain.
-
-    Walks *template_dir*, strips the single top-level folder, and returns
-    the remaining relative paths the paths a competitor's ZIP must
-    reproduce (after stripping its own common prefix).
-    """
-    root = Path(template_dir)
-    inner: set[str] = set()
-    for file_path in root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        rel = file_path.relative_to(root)
-        parts = rel.parts
-        if len(parts) > 1:
-            inner.add("/".join(parts[1:]))
-        else:
-            inner.add(parts[0])
-    return inner
 
 
 def _strip_common_prefix(paths: list[str]) -> set[str]:
@@ -157,6 +140,7 @@ def validate_zip_password(zip_path: str) -> None:
         AttackValidationError: If the password is wrong or extraction fails.
     """
     try:
+        import pyzipper
         with pyzipper.AESZipFile(zip_path, "r") as zf:
             zf.setpassword(b"infected")
             for entry in zf.infolist():
@@ -216,27 +200,25 @@ def validate_zip_safety(zip_path: str, max_uncompressed_mb: int) -> None:
         )
 
 
-def validate_zip_structure(zip_path: str, template_dir: str) -> None:
+def validate_zip_structure(zip_path: str, expected_files: set[str]) -> None:
     """Verify that the ZIP's file structure matches the attack template.
 
     Algorithm:
 
-    1. Build the *template inner structure* (paths relative to the template's
-       own top-level directory).
+    1. Receive *expected_files*, the set of inner filenames from the active template.
     2. Collect all file entries from the ZIP (directories excluded).
     3. Strip the longest common path prefix shared by all entries.
-    4. Compare the stripped set to the template inner structure.
+    4. Compare the stripped set to *expected_files*.
 
     This allows one arbitrary wrapping folder at any depth, as long as all
     files share that prefix.
 
     Raises:
-        AttackValidationError: If the structure does not match.
+        AttackValidationError: If the structure does not match or expected_files is empty.
     """
-    template_inner = _get_template_inner_structure(template_dir)
-    if not template_inner:
+    if not expected_files:
         raise AttackValidationError(
-            f"Template directory '{template_dir}' is empty or contains no files."
+            "No attack template is configured. Cannot validate ZIP structure."
         )
 
     try:
@@ -252,9 +234,9 @@ def validate_zip_structure(zip_path: str, template_dir: str) -> None:
 
     stripped = _strip_common_prefix(submission_files)
 
-    if stripped != template_inner:
-        missing = sorted(template_inner - stripped)
-        extra = sorted(stripped - template_inner)
+    if stripped != expected_files:
+        missing = sorted(expected_files - stripped)
+        extra = sorted(stripped - expected_files)
         parts: list[str] = []
         if missing:
             parts.append(f"missing: {missing[:5]}" + (" …" if len(missing) > 5 else ""))
@@ -269,16 +251,18 @@ def validate_zip_structure(zip_path: str, template_dir: str) -> None:
 
 def validate_functional(
     zip_path: str,
-    template_dir: str,
+    expected_files: set[str],
     max_uncompressed_mb: int,
 ) -> None:
     """Run all functional validation checks in order, failing fast.
 
-    Order: openable → password → safety → structure.
+    Order: openable -> password -> safety -> structure.
 
     Args:
         zip_path: Path to the downloaded attack ZIP.
-        template_dir: Path to the attack-template directory on disk.
+        expected_files: Set of inner filenames the ZIP must contain,
+            derived from the active attack template in the database.
+            An empty set causes the structure check to raise immediately.
         max_uncompressed_mb: Maximum allowed total uncompressed size.
 
     Raises:
@@ -287,92 +271,128 @@ def validate_functional(
     validate_zip_openable(zip_path)
     validate_zip_password(zip_path)
     validate_zip_safety(zip_path, max_uncompressed_mb)
-    validate_zip_structure(zip_path, template_dir)
+    validate_zip_structure(zip_path, expected_files)
 
 
 # ===========================================================================
-# Heuristic validation template seeding (startup)
+# Heuristic validation template seeding
 # ===========================================================================
 
-def ensure_template_seeded(template_dir: str, sandbox: SandboxBackend) -> None:
+def _build_extracted_file_map(extract_dir: Path) -> dict[str, Path]:
+    """Map inner filenames (longest-common-prefix stripped) to local paths.
+
+    Mirrors the prefix stripping applied to ZIP entries in the admin endpoint
+    so the resulting keys match the filenames stored in template_file_reports.
+    """
+    all_files = sorted(p for p in extract_dir.rglob("*") if p.is_file())
+    if not all_files:
+        return {}
+
+    rel_strs = [p.relative_to(extract_dir).as_posix() for p in all_files]
+    all_parts = [PurePosixPath(r).parts for r in rel_strs]
+    min_depth = min(len(p) for p in all_parts)
+
+    prefix_len = 0
+    for i in range(min_depth - 1):
+        if len({p[i] for p in all_parts}) == 1:
+            prefix_len += 1
+        else:
+            break
+
+    return {
+        "/".join(PurePosixPath(r).parts[prefix_len:]): local_path
+        for r, local_path in zip(rel_strs, all_files)
+    }
+
+
+def ensure_template_seeded(
+    template_id: str,
+    template_files: list[dict],
+    sandbox: SandboxBackend,
+) -> None:
     """Ensure every template file has a behavioral report stored in the DB.
 
-    Called once on worker startup.  Handles edge cases gracefully:
-
-    * *template_dir* does not exist or is empty logs a warning and returns
-      early.  Heuristic validation will also be skipped at job time when no
-      template reports are present.
-    * A file already has a non-NULL ``behavioral_signals`` row skipped.
-    * Analysis returns ``behavioral_signals=None`` warning is logged and
-      the partial result is stored; it will be retried on next startup.
+    Downloads the template ZIP from MinIO, extracts it, and submits each
+    unseeded file to the sandbox.  Already-seeded files (rows with non-NULL
+    ``behavioral_signals``) are skipped.
 
     Args:
-        template_dir: Path to the attack-template directory on disk.
+        template_id: UUID of the attack_template row to seed.
+        template_files: List of file records from
+            :func:`~worker.db.get_template_files`, each with keys
+            ``filename``, ``object_key``, and ``sha256``.
         sandbox: Configured :class:`~sandbox.base.SandboxBackend` instance.
 
     Raises:
         SandboxUnavailableError: If the sandbox backend fails (propagated so
-            the worker startup can surface the error).
+            the Celery task can surface the error).
     """
-    root = Path(template_dir)
-
-    if not root.exists():
+    if not template_files:
         logger.warning(
-            "Template directory '%s' does not exist skipping heuristic "
-            "validation seeding. Heuristic validation will be skipped at job time.",
-            template_dir,
+            "Template %s has no files; skipping seeding.", template_id
         )
         return
 
-    all_files = [p for p in sorted(root.rglob("*")) if p.is_file()]
-    if not all_files:
-        logger.warning(
-            "Template directory '%s' is empty skipping heuristic "
-            "validation seeding. Heuristic validation will be skipped at job time.",
-            template_dir,
-        )
+    already_seeded = get_template_reports_for_template(template_id)
+    unseeded = [f for f in template_files if f["filename"] not in already_seeded]
+
+    if not unseeded:
+        logger.info("Template %s is already fully seeded.", template_id)
         return
 
-    existing: dict[str, dict] = {r["filename"]: r for r in get_template_reports()}
+    # All template_file_reports rows share the same object_key (the ZIP).
+    zip_object_key = template_files[0]["object_key"]
+    zip_local_path = asyncio.run(get_sample_path(zip_object_key))
 
-    for file_path in all_files:
-        inner_name = _inner_filename(file_path, root)
+    with tempfile.TemporaryDirectory() as extract_dir_str:
+        extract_dir = Path(extract_dir_str)
+        with zipfile.ZipFile(str(zip_local_path), "r") as zf:
+            zf.extractall(extract_dir)
 
-        record = existing.get(inner_name)
-        if record and record.get("behavioral_signals") is not None:
-            logger.debug("Template file '%s' already seeded skipping.", inner_name)
-            continue
+        name_to_path = _build_extracted_file_map(extract_dir)
 
-        sha256 = _sha256_of_file(file_path)
-        logger.info(
-            "Submitting template file '%s' (sha256=%s) to sandbox for seeding.",
-            inner_name,
-            sha256,
-        )
+        for file_info in unseeded:
+            inner_name = file_info["filename"]
+            local_path = name_to_path.get(inner_name)
 
-        report = sandbox.analyze_file(str(file_path))
+            if local_path is None:
+                logger.warning(
+                    "Template file '%s' not found in extracted ZIP; skipping.",
+                    inner_name,
+                )
+                continue
 
-        if report.behavioral_signals is None:
-            logger.warning(
-                "Template file '%s' returned no behavioral signals "
-                "(report_ref=%s). Storing partial result; will retry on next startup.",
+            sha256 = _sha256_of_file(local_path)
+            logger.info(
+                "Submitting template file '%s' (sha256=%s) to sandbox for seeding.",
                 inner_name,
-                report.report_ref,
+                sha256,
             )
 
-        upsert_template_report(
-            filename=inner_name,
-            sha256=sha256,
-            sandbox_report_ref=report.report_ref,
-            behash=report.behash,
-            behavioral_signals=report.behavioral_signals,
-        )
-        logger.info(
-            "Template file '%s' seeded (behash=%s, signals=%s).",
-            inner_name,
-            report.behash,
-            "present" if report.behavioral_signals else "absent",
-        )
+            report = sandbox.analyze_file(str(local_path))
+
+            if report.behavioral_signals is None:
+                logger.warning(
+                    "Template file '%s' returned no behavioral signals "
+                    "(report_ref=%s). Storing partial result; will retry on next seeding pass.",
+                    inner_name,
+                    report.report_ref,
+                )
+
+            upsert_template_report(
+                template_id=template_id,
+                filename=inner_name,
+                sha256=sha256,
+                sandbox_report_ref=report.report_ref,
+                behash=report.behash,
+                behavioral_signals=report.behavioral_signals,
+            )
+            logger.info(
+                "Template file '%s' seeded (behash=%s, signals=%s).",
+                inner_name,
+                report.behash,
+                "present" if report.behavioral_signals else "absent",
+            )
 
 
 # ===========================================================================
@@ -395,7 +415,7 @@ def validate_heuristic(
             typically from :func:`~worker.db.get_template_reports`.
 
     Returns:
-        Average similarity score (0.0–100.0) across all matched files.
+        Average similarity score (0.0-100.0) across all matched files.
         Returns ``0.0`` if no files could be matched or analysed.
 
     Raises:
@@ -415,6 +435,15 @@ def validate_heuristic(
                 inner_name,
             )
             scores.append(0.0)
+            continue
+
+        if template_record.get("behavioral_signals") is None:
+            logger.warning(
+                "Template file '%s' was submitted to sandbox but returned no behavioral "
+                "signals (report_ref=%s). Skipping file in similarity scoring.",
+                inner_name,
+                template_record.get("sandbox_report_ref"),
+            )
             continue
 
         template_report = SandboxReport(
@@ -454,7 +483,7 @@ def validate_heuristic(
 
 def validate_attack(
     zip_path: str,
-    template_dir: str,
+    expected_files: set[str],
     max_uncompressed_mb: int,
     submission_files: list[tuple[str, str]],
     sandbox: SandboxBackend,
@@ -468,7 +497,8 @@ def validate_attack(
 
     Args:
         zip_path: Path to the downloaded attack ZIP.
-        template_dir: Path to the attack-template directory on disk.
+        expected_files: Set of inner filenames the ZIP must contain,
+            derived from the active attack template in the database.
         max_uncompressed_mb: Maximum allowed total uncompressed size.
         submission_files: List of ``(inner_filename, local_path)`` tuples for
             the extracted submission files.
@@ -477,12 +507,12 @@ def validate_attack(
             inner filename.
 
     Returns:
-        Average behavioral similarity score (0.0–100.0).
+        Average behavioral similarity score (0.0-100.0).
 
     Raises:
         AttackValidationError: If functional validation fails.
         SandboxUnavailableError: If the sandbox backend fails during heuristic
             validation.
     """
-    validate_functional(zip_path, template_dir, max_uncompressed_mb)
+    validate_functional(zip_path, expected_files, max_uncompressed_mb)
     return validate_heuristic(submission_files, sandbox, template_reports)

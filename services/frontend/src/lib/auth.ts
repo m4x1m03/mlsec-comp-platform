@@ -2,11 +2,8 @@
 export async function getSession(request: Request) {
   const cookie = request.headers.get('cookie') ?? '';
 
-  const apiBase =
-    import.meta.env.PUBLIC_API_URL?.replace(/\/+$/, '') ??
-    'http://localhost:8000';
-
-  const res = await fetch(`${apiBase}/auth/me`, {
+  const apiUrl = process.env.API_INTERNAL_URL ?? 'http://localhost:8000';
+  const res = await fetch(`${apiUrl}/auth/me`, {
     headers: { cookie }, // forward the browser's cookie to FastAPI
   });
 

@@ -18,24 +18,24 @@ const session = await getSession(Astro.request);
     <a
       href="/rules"
       class:list={[
-        "font-bold hover:text-gray-300 transition-colors",
-        currentPath === '/rules' ? 'text-blue-400' : 'text-white'
+        "font-semibold transition-colors",
+        currentPath === '/rules' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
       ]}>
       Rules
     </a>
     <a
       href="/submission"
       class:list={[
-        "font-bold hover:text-gray-300 transition-colors",
-        currentPath === '/submission' ? 'text-blue-400' : 'text-white'
+        "font-semibold transition-colors",
+        currentPath === '/submission' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
       ]}>
       Submission
     </a>
     <a
       href="/leaderboard"
       class:list={[
-        "font-bold hover:text-gray-300 transition-colors",
-        currentPath === '/leaderboard' ? 'text-blue-400' : 'text-white'
+        "font-semibold transition-colors",
+        currentPath === '/leaderboard' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
       ]}>
       Leaderboard
     </a>

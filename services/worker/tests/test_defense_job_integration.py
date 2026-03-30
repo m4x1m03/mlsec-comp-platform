@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
-from unittest.mock import Mock, MagicMock
+from unittest.mock import AsyncMock, Mock, MagicMock
 
 from worker.tasks import run_defense_job
 
@@ -129,14 +129,9 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
     monkeypatch.setattr(
         "worker.defense.docker_handler.pull_and_resolve_docker_image", mock_pull_and_resolve_docker_image)
 
-    # Mock evaluation function
-    evaluation_called = []
-
-    def mock_evaluate(*args, **kwargs):
-        evaluation_called.append(kwargs)
-
+    eval_mock = AsyncMock()
     monkeypatch.setattr(
-        "worker.tasks.evaluate_defense_with_redis", mock_evaluate)
+        "worker.defense.evaluate.evaluate_defenses_async", eval_mock)
 
     # Run defense job
     run_defense_job(
@@ -144,13 +139,9 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
         defense_submission_id=defense_id
     )
 
-    # Verify worker registered and unregistered
-    worker_id = f"worker_{job_id}_" + (
-        evaluation_called[0]["worker_id"].split("_")[-1] if evaluation_called else "0")
-
-    # Worker should be unregistered (not in active set)
+    # Worker should be unregistered after job
     active_workers = fake_redis.smembers("active_workers")
-    assert all(worker_id not in w.decode() for w in active_workers)
+    assert len(active_workers) == 0
 
     # Verify defense validated
     result = db_session.execute(
@@ -158,7 +149,7 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
         {"id": defense_id}
     ).fetchone()
     assert result[0] is True
-    assert result[1] == "ready"
+    assert result[1] == "validated"
 
     # Verify job completed
     job_status = db_session.execute(
@@ -167,9 +158,10 @@ def test_defense_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatc
     ).scalar()
     assert job_status == "done"
 
-    # Verify evaluation function called
-    assert len(evaluation_called) == 1
-    assert evaluation_called[0]["defense_submission_id"] == defense_id
+    # Verify evaluation called with correct defense
+    assert eval_mock.call_count == 1
+    defense_contexts = eval_mock.call_args.kwargs["defense_contexts"]
+    assert defense_contexts[0]["defense_submission_id"] == defense_id
 
 
 def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
@@ -232,15 +224,9 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
     monkeypatch.setattr(
         "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
-    # Mock evaluation
-    evaluation_called = []
-
-    def mock_evaluate(worker_id, *args, **kwargs):
-        # Capture worker_id for verification
-        evaluation_called.append(worker_id)
-
+    eval_mock = AsyncMock()
     monkeypatch.setattr(
-        "worker.tasks.evaluate_defense_with_redis", mock_evaluate)
+        "worker.defense.evaluate.evaluate_defenses_async", eval_mock)
 
     # Mock unregister to preserve queue for assertion
     monkeypatch.setattr(WorkerRegistry, "unregister",
@@ -249,10 +235,8 @@ def test_defense_job_populates_internal_queue(db_session, fake_redis, test_helpe
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
-    # Verify worker registered
-    worker_id = evaluation_called[0]
-
     # Verify INTERNAL_QUEUE contains attack2 and attack3 (not attack1)
+    worker_id = eval_mock.call_args.kwargs["worker_id"]
     queue_key = f"worker:{worker_id}:attacks"
     queue_items = fake_redis.lrange(queue_key, 0, -1)
     queue_attacks = {item.decode() for item in queue_items}
@@ -318,12 +302,10 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     def mock_validate_fail(*args):
         raise ValueError("Defense failed health check")
 
-    monkeypatch.setattr(
-        "worker.tasks.validate_functional", mock_validate_fail)
+    monkeypatch.setattr("worker.tasks.validate_functional", mock_validate_fail)
 
-    # Run defense job (should fail)
-    with pytest.raises(ValueError, match="Defense validation failed"):
-        run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+    # Run defense job (validation failure is per-defense; the batch job still completes)
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
     # Verify defense marked as failed
     result = db_session.execute(
@@ -332,15 +314,15 @@ def test_defense_job_validation_failure(db_session, fake_redis, test_helpers, mo
     ).fetchone()
 
     assert result[0] is False
-    assert result[1] == "failed"
+    assert result[1] == "error"
     assert "Defense failed health check" in result[2]
 
-    # Verify job failed
+    # Batch job completes as done since per-defense failures do not abort the batch
     job_status = db_session.execute(
         text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
         {"id": job_id}
     ).scalar()
-    assert job_status == "failed"
+    assert job_status == "done"
 
 
 def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
@@ -394,19 +376,29 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
     monkeypatch.setattr(
         "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
-    # Reduce timeout for faster test
-    config_dict["worker"]["defense_job"]["container_timeout"] = 2
+    # Patch the config singleton so the readiness poll times out quickly
+    from worker import config as worker_config_module
+    monkeypatch.setattr(
+        worker_config_module.get_config().worker.defense_job, "container_timeout", 2
+    )
 
-    # Run defense job (should fail)
-    with pytest.raises(ValueError, match="Defense container failed to start"):
-        run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+    # Run defense job (container failure is per-defense; the batch job still completes)
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
-    # Verify job failed
+    # Verify defense marked as failed
+    result = db_session.execute(
+        text("SELECT is_functional, status, functional_error FROM submissions WHERE id = CAST(:id AS uuid)"),
+        {"id": defense_id}
+    ).fetchone()
+    assert result[1] == "error"
+    assert "timeout" in result[2].lower()
+
+    # Batch job completes as done since per-defense failures do not abort the batch
     job_status = db_session.execute(
         text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
         {"id": job_id}
     ).scalar()
-    assert job_status == "failed"
+    assert job_status == "done"
 
 
 def test_defense_job_github_source(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
@@ -616,12 +608,11 @@ def test_defense_job_cleanup_on_error(db_session, fake_redis, test_helpers, monk
     monkeypatch.setattr(
         "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
-    # Mock evaluation to fail
-    def mock_evaluate_fail(*args, **kwargs):
-        raise RuntimeError("Evaluation crashed")
-
+    monkeypatch.setattr("worker.tasks.create_eval_network",
+                        lambda *args, **kwargs: fake_network)
     monkeypatch.setattr(
-        "worker.tasks.evaluate_defense_with_redis", mock_evaluate_fail)
+        "worker.defense.evaluate.evaluate_defenses_async",
+        AsyncMock(side_effect=RuntimeError("Evaluation crashed")))
 
     # Run defense job (should fail but cleanup)
     with pytest.raises(RuntimeError, match="Evaluation crashed"):
@@ -683,12 +674,9 @@ def test_defense_job_unregisters_worker_on_error(db_session, fake_redis, test_he
     monkeypatch.setattr(
         "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x)
 
-    # Mock evaluation to fail
-    def mock_evaluate_fail(*args, **kwargs):
-        raise RuntimeError("Evaluation error")
-
     monkeypatch.setattr(
-        "worker.tasks.evaluate_defense_with_redis", mock_evaluate_fail)
+        "worker.defense.evaluate.evaluate_defenses_async",
+        AsyncMock(side_effect=RuntimeError("Evaluation error")))
 
     # Run defense job (should fail)
     with pytest.raises(RuntimeError, match="Evaluation error"):
@@ -760,41 +748,8 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
         lambda *args, **kwargs: None
     )
 
-    # Mock pop_next_attack to return one attack then None (3 times for termination)
-    call_count = {"value": 0}
-
-    def mock_pop_next_attack(self, worker_id):
-        call_count["value"] += 1
-        if call_count["value"] == 1:
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
-                        mock_pop_next_attack)
-
-    # Mock MinIO download
-    mock_minio_response = Mock()
-    mock_minio_response.read.return_value = b"fake file content"
-    mock_minio_response.close = Mock()
-    mock_minio_response.release_conn = Mock()
-    mock_minio_client_eval = Mock()
-    mock_minio_client_eval.get_object.return_value = mock_minio_response
-
     monkeypatch.setattr(
-        "worker.tasks.get_minio_client",
-        lambda: Mock(fget_object=Mock())
-    )
-    monkeypatch.setattr(
-        "worker.defense.evaluate.get_minio_client",
-        lambda: mock_minio_client_eval
-    )
-
-    # Mock requests.post for evaluation
-    mock_post_response = Mock()
-    mock_post_response.status_code = 200
-    mock_post_response.json.return_value = {"result": 0}
-    monkeypatch.setattr("requests.post", lambda *args,
-                        **kwargs: mock_post_response)
+        "worker.defense.evaluate.evaluate_defenses_async", AsyncMock())
 
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
@@ -804,15 +759,19 @@ def test_defense_job_cleanup_built_images(db_session, fake_redis, test_helpers, 
         test_image, force=True)
 
 
-def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
-    """Test that Docker Hub images are NOT removed after evaluation."""
-    from worker import tasks
+def test_defense_job_removes_docker_hub_images(db_session, fake_redis, test_helpers, monkeypatch):
+    """Test that Docker Hub images ARE removed after evaluation when cleanup_pulled_images is true."""
+    import worker.tasks
     from worker.redis_client import WorkerRegistry
 
     def fake_init(self):
         self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    patched_config = worker.tasks.config.model_copy(deep=True)
+    patched_config.worker.source.cleanup_pulled_images = True
+    monkeypatch.setattr(worker.tasks, "config", patched_config)
 
     # Create Docker Hub defense
     defense_id = test_helpers.create_defense(
@@ -838,7 +797,7 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
     mock_docker_client.containers.run.return_value = fake_container
     mock_docker_client.containers.get.return_value = Mock()
     mock_docker_client.networks.create.return_value = fake_network
-    mock_docker_client.images.remove = Mock()  # Track cleanup
+    mock_docker_client.images.remove = Mock()
 
     # Mock Docker image for size validation
     mock_image = Mock()
@@ -864,46 +823,88 @@ def test_defense_job_keeps_docker_hub_images(db_session, fake_redis, test_helper
         lambda *args, **kwargs: None
     )
 
-    # Mock pop_next_attack to return one attack then None (3 times for termination)
-    call_count = {"value": 0}
-
-    def mock_pop_next_attack(self, worker_id):
-        call_count["value"] += 1
-        if call_count["value"] == 1:
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
-                        mock_pop_next_attack)
-
-    # Mock MinIO download
-    mock_minio_response = Mock()
-    mock_minio_response.read.return_value = b"fake file content"
-    mock_minio_response.close = Mock()
-    mock_minio_response.release_conn = Mock()
-    mock_minio_client_eval = Mock()
-    mock_minio_client_eval.get_object.return_value = mock_minio_response
-
     monkeypatch.setattr(
-        "worker.tasks.get_minio_client",
-        lambda: Mock(fget_object=Mock())
-    )
-    monkeypatch.setattr(
-        "worker.defense.evaluate.get_minio_client",
-        lambda: mock_minio_client_eval
-    )
-
-    # Mock requests.post for evaluation
-    mock_post_response = Mock()
-    mock_post_response.status_code = 200
-    mock_post_response.json.return_value = {"result": 0}
-    monkeypatch.setattr("requests.post", lambda *args,
-                        **kwargs: mock_post_response)
+        "worker.defense.evaluate.evaluate_defenses_async", AsyncMock())
 
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
 
-    # Verify image cleanup was NOT called
+    # Verify pulled image was removed
+    mock_docker_client.images.remove.assert_called_once_with(
+        "user/defense:latest", force=True)
+
+
+def test_defense_job_keeps_docker_hub_images_when_disabled(db_session, fake_redis, test_helpers, monkeypatch):
+    """Test that Docker Hub images are NOT removed when cleanup_pulled_images is false."""
+    import worker.tasks
+    from worker.redis_client import WorkerRegistry
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    patched_config = worker.tasks.config.model_copy(deep=True)
+    patched_config.worker.source.cleanup_pulled_images = False
+    monkeypatch.setattr(worker.tasks, "config", patched_config)
+
+    # Create Docker Hub defense
+    defense_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense:latest",
+        is_functional=True
+    )
+
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_id
+    )
+
+    # Create attack
+    attack_id = test_helpers.create_attack()
+
+    # Mock Docker
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork(f"eval_net_{job_id}")
+
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    mock_docker_client.images.remove = Mock()
+
+    # Mock Docker image for size validation
+    mock_image = Mock()
+    mock_image.attrs = {'Size': 500 * 1024 * 1024}  # 500 MB
+    mock_docker_client.images.get.return_value = mock_image
+
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    # Mock HTTP requests
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    # Mock docker handler
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image",
+        lambda x: x
+    )
+
+    # Mock validation
+    monkeypatch.setattr(
+        "worker.defense.validation.validate_functional",
+        lambda *args, **kwargs: None
+    )
+
+    monkeypatch.setattr(
+        "worker.defense.evaluate.evaluate_defenses_async", AsyncMock())
+
+    # Run defense job
+    run_defense_job(job_id=job_id, defense_submission_id=defense_id)
+
+    # Verify image removal was NOT called
     mock_docker_client.images.remove.assert_not_called()
 
 
@@ -974,37 +975,10 @@ def test_defense_job_cleanup_on_container_stop_failure(db_session, fake_redis, t
         lambda *args, **kwargs: None
     )
 
-    # Mock pop_next_attack to return one attack then None (3 times for termination)
-    call_count = {"value": 0}
-
-    def mock_pop_next_attack(self, worker_id):
-        call_count["value"] += 1
-        if call_count["value"] == 1:
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
-                        mock_pop_next_attack)
-
-    # Mock MinIO download
-    mock_minio_response = Mock()
-    mock_minio_response.read.return_value = b"fake file content"
-    mock_minio_response.close = Mock()
-    mock_minio_response.release_conn = Mock()
-    mock_minio_client_eval = Mock()
-    mock_minio_client_eval.get_object.return_value = mock_minio_response
-
+    monkeypatch.setattr("worker.tasks.create_eval_network",
+                        lambda *args, **kwargs: fake_network)
     monkeypatch.setattr(
-        "worker.defense.evaluate.get_minio_client",
-        lambda: mock_minio_client_eval
-    )
-
-    # Mock requests.post for evaluation
-    mock_post_response = Mock()
-    mock_post_response.status_code = 200
-    mock_post_response.json.return_value = {"result": 0}
-    monkeypatch.setattr("requests.post", lambda *args,
-                        **kwargs: mock_post_response)
+        "worker.defense.evaluate.evaluate_defenses_async", AsyncMock())
 
     # Run defense job (should complete despite container cleanup failure)
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
@@ -1096,37 +1070,8 @@ def test_defense_job_respects_cleanup_config(db_session, fake_redis, test_helper
         lambda *args, **kwargs: None
     )
 
-    # Mock pop_next_attack to return one attack then None (3 times for termination)
-    call_count = {"value": 0}
-
-    def mock_pop_next_attack(self, worker_id):
-        call_count["value"] += 1
-        if call_count["value"] == 1:
-            return attack_id
-        return None
-
-    monkeypatch.setattr(WorkerRegistry, "pop_next_attack",
-                        mock_pop_next_attack)
-
-    # Mock MinIO download
-    mock_minio_response = Mock()
-    mock_minio_response.read.return_value = b"fake file content"
-    mock_minio_response.close = Mock()
-    mock_minio_response.release_conn = Mock()
-    mock_minio_client_eval = Mock()
-    mock_minio_client_eval.get_object.return_value = mock_minio_response
-
     monkeypatch.setattr(
-        "worker.defense.evaluate.get_minio_client",
-        lambda: mock_minio_client_eval
-    )
-
-    # Mock requests.post for evaluation
-    mock_post_response = Mock()
-    mock_post_response.status_code = 200
-    mock_post_response.json.return_value = {"result": 0}
-    monkeypatch.setattr("requests.post", lambda *args,
-                        **kwargs: mock_post_response)
+        "worker.defense.evaluate.evaluate_defenses_async", AsyncMock())
 
     # Run defense job
     run_defense_job(job_id=job_id, defense_submission_id=defense_id)
@@ -1140,3 +1085,158 @@ def test_defense_job_respects_cleanup_config(db_session, fake_redis, test_helper
         {"job_id": job_id}
     ).fetchone()
     assert job_status[0] == "done"
+
+
+def test_batch_partial_validation_failure(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """One defense fails functional validation; the other passes and is evaluated."""
+    from worker.redis_client import WorkerRegistry
+    from worker.tasks import run_batch_defense_job
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    defense_a_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_a:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    defense_b_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_b:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_a_id,
+    )
+
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork("eval_net_test")
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x
+    )
+
+    def selective_validate(image_name, url, cfg):
+        if "defense_a" in image_name:
+            raise ValueError("Defense A failed health check")
+
+    monkeypatch.setattr("worker.tasks.validate_functional", selective_validate)
+
+    eval_mock = AsyncMock()
+    monkeypatch.setattr("worker.defense.evaluate.evaluate_defenses_async", eval_mock)
+
+    run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_a_id, defense_b_id])
+
+    result_a = db_session.execute(
+        text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
+        {"id": defense_a_id},
+    ).fetchone()
+    assert result_a[0] is False
+    assert result_a[1] == "error"
+
+    result_b = db_session.execute(
+        text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
+        {"id": defense_b_id},
+    ).fetchone()
+    assert result_b[0] is True
+    assert result_b[1] == "validated"
+
+    assert eval_mock.call_count == 1
+    evaluated_ids = {
+        ctx["defense_submission_id"]
+        for ctx in eval_mock.call_args.kwargs["defense_contexts"]
+    }
+    assert defense_b_id in evaluated_ids
+    assert defense_a_id not in evaluated_ids
+
+    job_status = db_session.execute(
+        text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
+        {"id": job_id},
+    ).scalar()
+    assert job_status == "done"
+
+
+def test_batch_all_validation_failure(db_session, fake_redis, test_helpers, monkeypatch, config_dict):
+    """All defenses fail validation; evaluate is skipped and job completes as done."""
+    from worker.redis_client import WorkerRegistry
+    from worker.tasks import run_batch_defense_job
+
+    def fake_init(self):
+        self.client = fake_redis
+
+    monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
+
+    defense_a_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_a:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    defense_b_id = test_helpers.create_defense(
+        source_type="docker",
+        docker_image="user/defense_b:latest",
+        is_functional=None,
+        status="submitted",
+    )
+    job_id = test_helpers.create_job(
+        job_type="defense",
+        status="queued",
+        defense_submission_id=defense_a_id,
+    )
+
+    fake_container = FakeContainer()
+    fake_network = FakeNetwork("eval_net_test")
+    mock_docker_client = Mock()
+    mock_docker_client.containers.run.return_value = fake_container
+    mock_docker_client.containers.get.return_value = Mock()
+    mock_docker_client.networks.create.return_value = fake_network
+    monkeypatch.setattr("docker.from_env", lambda: mock_docker_client)
+
+    mock_response = Mock()
+    mock_response.status_code = 200
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: mock_response)
+
+    monkeypatch.setattr(
+        "worker.defense.docker_handler.pull_and_resolve_docker_image", lambda x: x
+    )
+
+    monkeypatch.setattr(
+        "worker.tasks.validate_functional",
+        lambda *args: (_ for _ in ()).throw(ValueError("All defenses broken")),
+    )
+
+    eval_mock = AsyncMock()
+    monkeypatch.setattr("worker.defense.evaluate.evaluate_defenses_async", eval_mock)
+
+    run_batch_defense_job(job_id=job_id, defense_submission_ids=[defense_a_id, defense_b_id])
+
+    for defense_id in (defense_a_id, defense_b_id):
+        result = db_session.execute(
+            text("SELECT is_functional, status FROM submissions WHERE id = CAST(:id AS uuid)"),
+            {"id": defense_id},
+        ).fetchone()
+        assert result[0] is False
+        assert result[1] == "error"
+
+    eval_mock.assert_not_called()
+
+    job_status = db_session.execute(
+        text("SELECT status FROM jobs WHERE id = CAST(:id AS uuid)"),
+        {"id": job_id},
+    ).scalar()
+    assert job_status == "done"
