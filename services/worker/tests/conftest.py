@@ -373,6 +373,25 @@ def test_helpers(db_session):
                 }
             ).scalar()
             db_session.commit()
+
+            # Populate active_submissions for all validated submissions
+            if status == "validated":
+                db_session.execute(
+                    text("""
+                        INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                        VALUES (CAST(:user_id AS uuid), :type, CAST(:id AS uuid), NOW())
+                        ON CONFLICT (user_id, submission_type)
+                        DO UPDATE SET submission_id = EXCLUDED.submission_id,
+                                      updated_at = EXCLUDED.updated_at
+                    """),
+                    {
+                        "user_id": user_id,
+                        "type": submission_type,
+                        "id": str(result)
+                    }
+                )
+                db_session.commit()
+
             return str(result)
 
         @staticmethod
