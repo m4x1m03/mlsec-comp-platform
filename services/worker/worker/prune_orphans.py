@@ -1,12 +1,25 @@
-import logging
+import docker
+import docker.errors
+from celery.utils.log import get_task_logger
 from worker.db import get_engine
+from worker.redis_client import get_redis_client
 
-logger = logging.getLogger(__name__)
+logger = get_task_logger(__name__)
 
 def prune_orphans():
     """Find and remove any orphaned evaluation resources (networks, containers, and gateway rules)."""
+    # Lock to ensure only one worker runs pruning at a time on startup.
     try:
-        import docker
+        redis_client = get_redis_client()
+        lock_key = "lock:prune_orphans"
+        if not redis_client.set(lock_key, "1", nx=True, ex=60):
+            logger.info("Skipping orphaned resource pruning: another worker is already running it.")
+            return
+    except Exception as e:
+        print(f"Redis connection failed in prune_orphans: {e}")
+        return
+
+    try:
         from sqlalchemy import text
         client = docker.from_env()
         engine = get_engine()
@@ -34,45 +47,56 @@ def prune_orphans():
                         # Prune if job is finished, failed, or missing from DB
                         if not res or res[0] in ['done', 'failed']:
                             logger.info(f"Pruning orphaned evaluation container: {name} (Job Status: {res[0] if res else 'Not Found'})")
-                            container.remove(force=True)
+                            try:
+                                container.remove(force=True)
+                            except docker.errors.NotFound:
+                                pass # Already removed by another worker
                     except Exception as e:
                         logger.debug(f"Could not remove container {container.name}: {e}")
         except Exception as e:
             logger.error(f"Error during orphaned container pruning: {e}")
 
         # Prune orphaned evaluation networks
-        networks = client.networks.list()
-        pruned_net_count = 0
-        
-        for net in networks:
-            if net.name.startswith("eval_net_") and net.name != "eval_net":
-                # Reload to get latest container info
-                net.reload()
-                containers = net.attrs.get('Containers', {})
-                
-                # If no containers OR only mlsec-gateway is connected, it's orphaned
-                student_containers = [
-                    c_info.get('Name') 
-                    for c_info in containers.values() 
-                    if c_info.get('Name').strip('/') != 'mlsec-gateway'
-                ]
-                
-                if not student_containers:
-                    logger.info(f"Pruning orphaned evaluation network: {net.name}")
+        try:
+            networks = client.networks.list()
+            pruned_net_count = 0
+            
+            for net in networks:
+                if net.name.startswith("eval_net_") and net.name != "eval_net":
                     try:
-                        for c_id in list(containers.keys()):
-                            try:
-                                net.disconnect(c_id, force=True)
-                            except:
-                                pass
+                        # Reload to get latest container info
+                        net.reload()
+                        containers = net.attrs.get('Containers', {})
                         
-                        net.remove()
-                        pruned_net_count += 1
+                        # If no containers OR only mlsec-gateway is connected, it's orphaned
+                        student_containers = [
+                            c_info.get('Name') 
+                            for c_info in containers.values() 
+                            if c_info.get('Name').strip('/') != 'mlsec-gateway'
+                        ]
+                        
+                        if not student_containers:
+                            logger.info(f"Pruning orphaned evaluation network: {net.name}")
+                            for c_id in list(containers.keys()):
+                                try:
+                                    net.disconnect(c_id, force=True)
+                                except (docker.errors.NotFound, Exception):
+                                    pass
+                            
+                            try:
+                                net.remove()
+                                pruned_net_count += 1
+                            except docker.errors.NotFound:
+                                pass # Already removed
+                    except docker.errors.NotFound:
+                        continue # Network disappeared
                     except Exception as e:
                         logger.warning(f"Failed to remove orphaned network {net.name}: {e}")
-        
-        if pruned_net_count > 0:
-            logger.info(f"Successfully pruned {pruned_net_count} orphaned evaluation networks")
+            
+            if pruned_net_count > 0:
+                logger.info(f"Successfully pruned {pruned_net_count} orphaned evaluation networks")
+        except Exception as e:
+            logger.error(f"Error during orphaned network pruning: {e}")
 
         # Prune orphaned iptables rules on gateway
         try:
@@ -100,8 +124,10 @@ def prune_orphans():
                                 gateway.exec_run(f"iptables -t {table} {delete_rule}")
                         except (ValueError, IndexError):
                             continue
-        except Exception as e:
+        except (docker.errors.NotFound, Exception) as e:
             logger.warning(f"Failed to prune orphaned iptables rules: {e}")
             
     except Exception as e:
         logger.error(f"Error during orphaned resource pruning: {e}")
+    finally:
+        pass

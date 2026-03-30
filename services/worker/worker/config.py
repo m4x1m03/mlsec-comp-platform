@@ -22,6 +22,7 @@ class EvaluationConfig(BaseModel):
     requests_timeout_seconds: int = 5
     max_empty_polls: int = 3  # Close queue after N consecutive empty polls
     batch_size: int = 4
+    stats_sampling_rate: int = 10
 
     defense_max_ram: int = 1024      # MB - sample marked evaded and container restarted if exceeded
     defense_max_time: int = 5000     # ms - per-sample time limit; exceeded = evaded

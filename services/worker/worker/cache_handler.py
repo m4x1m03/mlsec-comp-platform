@@ -6,6 +6,7 @@ import os
 import shutil
 import uuid
 import logging
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = Path(os.getenv("CACHE_DIR", "/app/cache"))
 
 
-def get_sample_path(object_key: str) -> Path:
+async def get_sample_path(object_key: str) -> Path:
     """
     Get local path for a given sample, downloads from MinIO if not cached.
     Uses atomic rename to prevent corruption from multiple workers.
@@ -30,10 +31,10 @@ def get_sample_path(object_key: str) -> Path:
     # Create valid local filename from object key
     local_path = CACHE_DIR / object_key
     
-    if local_path.exists():
+    if await asyncio.to_thread(local_path.exists):
         return local_path
         
-    local_path.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
     
     # Download to temporary file
     temp_path = local_path.with_suffix(f".tmp.{uuid.uuid4()}")
@@ -43,15 +44,15 @@ def get_sample_path(object_key: str) -> Path:
         bucket_name = get_bucket_name()
         
         logger.info(f"Downloading {object_key} from MinIO")
-        minio_client.fget_object(bucket_name, object_key, str(temp_path))
+        await asyncio.to_thread(minio_client.fget_object, bucket_name, object_key, str(temp_path))
 
-        os.rename(temp_path, local_path)
+        await asyncio.to_thread(os.rename, temp_path, local_path)
         logger.info(f"Cached {object_key}")
         
     except Exception as e:
         logger.error(f"Failed to cache sample {object_key}: {e}")
-        if temp_path.exists():
-            os.unlink(temp_path)
+        if await asyncio.to_thread(temp_path.exists):
+            await asyncio.to_thread(os.unlink, temp_path)
         raise
         
     return local_path

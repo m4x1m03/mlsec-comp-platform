@@ -47,6 +47,8 @@ async def evaluate_sample_against_container(
     sample_content: bytes,
     eval_cfg: EvaluationConfig,
     restart_count_ref: list[int],
+    ctx: dict[str, Any],
+    file_index: int = 0,
 ) -> EvalOutcome:
     """Evaluate a single sample against a running defense container.
 
@@ -92,37 +94,42 @@ async def evaluate_sample_against_container(
             headers=headers,
             timeout=short_timeout,
         )
+        should_check_stats = (file_index % eval_cfg.stats_sampling_rate == 0)
 
-        # Check container RAM usage after receiving a response.
-        # defense_max_ram is the soft monitoring threshold; the Docker
-        # mem_limit in DefenseJobConfig is the hard ceiling enforced by Docker.
-        try:
-            container = docker_client.containers.get(container_name)
-            stats = container.stats(stream=False)
-            usage_bytes = stats.get("memory_stats", {}).get("usage", 0)
-            usage_mb = usage_bytes / (1024 * 1024)
-            if usage_mb > eval_cfg.defense_max_ram:
-                evaded_reason = "ram_limit"
-                model_output = 0
-                logger.warning(
-                    "Container %s exceeded RAM soft limit (%.1f MB > %d MB); restarting.",
-                    container_name,
-                    usage_mb,
-                    eval_cfg.defense_max_ram,
-                )
-                restart_count_ref[0] += 1
-                if restart_count_ref[0] > eval_cfg.defense_max_restarts:
-                    raise ContainerRestartError(
-                        f"Container {container_name!r} exceeded maximum restarts "
-                        f"({eval_cfg.defense_max_restarts})."
+        if should_check_stats:
+            try:
+                if "container_obj" not in ctx:
+                    ctx["container_obj"] = await asyncio.to_thread(docker_client.containers.get, container_name)
+
+                # Check container RAM usage after receiving a response.
+                # defense_max_ram is the soft monitoring threshold; the Docker
+                # mem_limit in DefenseJobConfig is the hard ceiling enforced by Docker.
+                container = ctx["container_obj"]
+                stats = await asyncio.to_thread(container.stats, stream=False)
+                usage_bytes = stats.get("memory_stats", {}).get("usage", 0)
+                usage_mb = usage_bytes / (1024 * 1024)
+                if usage_mb > eval_cfg.defense_max_ram:
+                    evaded_reason = "ram_limit"
+                    model_output = 0
+                    logger.warning(
+                        "Container %s exceeded RAM soft limit (%.1f MB > %d MB); restarting.",
+                        container_name,
+                        usage_mb,
+                        eval_cfg.defense_max_ram,
                     )
-                container.restart()
-        except ContainerRestartError:
-            raise
-        except Exception as exc:
-            logger.warning(
-                "Could not read container stats for %s: %s", container_name, exc
-            )
+                    restart_count_ref[0] += 1
+                    if restart_count_ref[0] > eval_cfg.defense_max_restarts:
+                        raise ContainerRestartError(
+                            f"Container {container_name!r} exceeded maximum restarts "
+                            f"({eval_cfg.defense_max_restarts})."
+                        )
+                    await asyncio.to_thread(container.restart)
+            except ContainerRestartError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Could not read container stats or restart %s: %s", container_name, exc
+                )
 
         if evaded_reason is None:
             if response.status_code == 200:
@@ -174,8 +181,10 @@ async def evaluate_sample_against_container(
                     f"({eval_cfg.defense_max_restarts})."
                 )
             try:
-                container = docker_client.containers.get(container_name)
-                container.restart()
+                if "container_obj" not in ctx:
+                    ctx["container_obj"] = await asyncio.to_thread(docker_client.containers.get, container_name)
+                container = ctx["container_obj"]
+                await asyncio.to_thread(container.restart)
             except Exception as exc:
                 logger.warning(
                     "Failed to restart container %s: %s", container_name, exc
@@ -200,6 +209,7 @@ async def _evaluate_single_sample(
     run_id: str,
     file_id: str,
     eval_cfg: EvaluationConfig,
+    file_index: int = 0,
 ) -> None:
     """Evaluate a single sample against a single defense and record result.
 
@@ -214,6 +224,8 @@ async def _evaluate_single_sample(
         sample_content=sample_content,
         eval_cfg=eval_cfg,
         restart_count_ref=ctx["restart_count_ref"],
+        ctx=ctx,
+        file_index=file_index,
     )
     upsert_evaluation(
         evaluation_run_id=run_id,
@@ -291,12 +303,12 @@ async def evaluate_defenses_async(
 
             # Process attack files
             attack_files = get_attack_files(attack_id)
-            for file_info in attack_files:
+            for f_idx, file_info in enumerate(attack_files):
                 file_id = file_info["id"]
                 object_key = file_info["object_key"]
 
                 try:
-                    local_path = get_sample_path(object_key)
+                    local_path = await get_sample_path(object_key)
                     with open(local_path, "rb") as f:
                         sample_content = f.read()
                 except Exception as e:
@@ -319,6 +331,7 @@ async def evaluate_defenses_async(
                         run_id=runs[i],
                         file_id=file_id,
                         eval_cfg=eval_cfg,
+                        file_index=f_idx,
                     )
                     for i, ctx in enumerate(active_contexts)
                 ]

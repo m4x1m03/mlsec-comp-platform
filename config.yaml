@@ -13,6 +13,7 @@ worker:
     defense_max_time: 5000       # ms - per-sample time limit; exceeded = evaded
     defense_max_timeout: 20000   # ms - forced restart threshold (must be >= defense_max_time)
     defense_max_restarts: 3      # max container restarts before error state
+    stats_sampling_rate: 25      # Number of samples evaluated before checking container stats again (This has a massive impact on total evaluation time)
   heuristic_validation:
     enable_heuristic_validation: true
     heurval_malware_fpr_minimum: 0.0
