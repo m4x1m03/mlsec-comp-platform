@@ -249,10 +249,11 @@ def get_all_validated_defenses() -> list[str]:
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id FROM submissions
-                WHERE submission_type = 'defense'
-                AND is_functional = TRUE
-                AND deleted_at IS NULL
+                SELECT s.id FROM submissions s
+                JOIN active_submissions asub ON s.id = asub.submission_id
+                WHERE s.submission_type = 'defense'
+                AND s.is_functional = TRUE
+                AND s.deleted_at IS NULL
             """)
         ).fetchall()
         return [str(row[0]) for row in result]
@@ -274,11 +275,12 @@ def get_unevaluated_attacks(defense_submission_id: str) -> list[str]:
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id FROM submissions
-                WHERE submission_type = 'attack'
-                AND is_functional = TRUE
-                AND deleted_at IS NULL
-                AND id NOT IN (
+                SELECT s.id FROM submissions s
+                JOIN active_submissions asub ON s.id = asub.submission_id
+                WHERE s.submission_type = 'attack'
+                AND s.is_functional = TRUE
+                AND s.deleted_at IS NULL
+                AND s.id NOT IN (
                     SELECT attack_submission_id 
                     FROM evaluation_runs 
                     WHERE defense_submission_id = :def_id
