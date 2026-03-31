@@ -149,6 +149,7 @@ def _hash_token(token: str) -> str:
 
 def require_admin_origin(request: Request, *, require_present: bool = True) -> None:
     """Ensure Origin/Referer points to localhost (and is present if required)."""
+    settings = get_settings()
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
 
