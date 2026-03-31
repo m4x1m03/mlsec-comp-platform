@@ -148,43 +148,42 @@ def _hash_token(token: str) -> str:
 
 
 def require_admin_origin(request: Request, *, require_present: bool = True) -> None:
-    """Ensure Origin/Referer points to localhost (and is present if required)."""
+    """Ensure Origin/Referer points to a trusted host (localhost or allowlist)."""
     settings = get_settings()
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
 
-    def _origin_host(value: str) -> str | None:
+    def _get_host(value: str | None) -> str | None:
+        if not value:
+            return None
         try:
             parsed = urlparse(value)
             return parsed.hostname
         except Exception:
             return None
 
-    if require_present and not origin and not referer:
+    origin_host = _get_host(origin)
+    referer_host = _get_host(referer)
+
+    if require_present and not origin_host and not referer_host:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin actions require a localhost browser origin",
+            detail="Admin actions require a trusted origin or referer header",
         )
 
-    if origin:
-        origin_host = _origin_host(origin)
-        if not _is_loopback_host(origin_host) and not _is_in_allowed_hosts(
-            origin_host, settings.admin_allowed_hosts
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin actions require localhost or allowed origin",
-            )
+    # Allow if either header matches a trusted host
+    for host in [origin_host, referer_host]:
+        if not host:
+            continue
+        if _is_loopback_host(host):
+            return
+        if _is_in_allowed_hosts(host, settings.admin_allowed_hosts):
+            return
 
-    if referer:
-        referer_host = _origin_host(referer)
-        if not _is_loopback_host(referer_host) and not _is_in_allowed_hosts(
-            referer_host, settings.admin_allowed_hosts
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin actions require localhost or allowed origin",
-            )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Origin '{origin_host}' or Referer '{referer_host}' is not trusted for admin actions",
+    )
 
 
 def issue_admin_action_token(
