@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: password123
       POSTGRES_DB: mlsec
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
       - ./services/postgres/init:/docker-entrypoint-initdb.d
     networks:
       - backend_net
@@ -63,6 +63,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
       MINIO_SECURE: "false"
       # Production-specific settings
+      ADMIN_LOCALHOST_ONLY: "false"
       ADMIN_ALLOWED_HOSTS: '["mlsec2.com", "api:8000"]'
       ADMIN_TRUSTED_PROXY_HOSTS: '["127.0.0.1", "::1", "172.16.0.0/12", "172.17.0.0/12", "172.18.0.0/12", "172.19.0.0/12", "172.20.0.0/12", "172.21.0.0/12", "172.22.0.0/12"]'
       ADMIN_ALLOWED_NETWORKS: '["172.16.0.0/12"]'

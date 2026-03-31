@@ -8,7 +8,8 @@
  */
 
 export async function adminFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(path, {
+  const apiPath = path.startsWith('/admin') ? `/api${path}` : path;
+  return fetch(apiPath, {
     ...init,
     credentials: 'include',
   });
