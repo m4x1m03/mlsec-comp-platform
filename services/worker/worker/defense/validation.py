@@ -320,7 +320,7 @@ async def validate_heuristic(
     goodware_outputs: list[int] = []
 
     async with httpx.AsyncClient() as client:
-        for sample in samples:
+        for i, sample in enumerate(samples):
             sample_path = await get_sample_path(sample["object_key"])
             sample_content = Path(sample_path).read_bytes()
 
@@ -333,6 +333,7 @@ async def validate_heuristic(
                 eval_cfg=eval_cfg,
                 restart_count_ref=restart_count_ref,
                 ctx=heurval_ctx,
+                file_index=i,
             )
 
             insert_heurval_file_result(
