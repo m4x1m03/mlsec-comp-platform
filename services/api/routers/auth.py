@@ -6,8 +6,11 @@ cookie management and session persistence.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import hashlib
+import json
 import logging
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import text
@@ -18,6 +21,8 @@ from core.audit import log_audit_event
 from core.auth import AuthenticatedUser, create_session, get_authenticated_user, revoke_session_by_id
 from core.config import get_config
 from core.database import get_db
+from core.emailer import send_login_code_email
+from core.redis_client import get_redis_client
 from core.settings import get_settings
 from schemas.auth import (
     JOIN_CODE_FIELD,
@@ -28,6 +33,7 @@ from schemas.auth import (
     JoinCodeValidationResponse,
     LoginRequest,
     LoginResponse,
+    LoginVerifyRequest,
     RegisterRequest,
     SessionInfoResponse,
     SessionResponse,
@@ -88,6 +94,76 @@ def _clear_session_cookie(response: Response) -> None:
         httponly=settings.auth_session_cookie_httponly,
         samesite=settings.auth_session_cookie_samesite,
     )
+
+
+def _login_code_key(email: str) -> str:
+    """Redis key for a pending login code."""
+    return f"auth:login_code:{email}"
+
+
+def _hash_login_code(code: str) -> str:
+    """Hash a login code for storage."""
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _generate_login_code() -> str:
+    """Generate a six-digit login code."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _ttl_seconds(expires_at: datetime) -> int:
+    """Compute remaining TTL in seconds (minimum 1)."""
+    now = datetime.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    expires_at = expires_at.astimezone(timezone.utc)
+    return max(int((expires_at - now).total_seconds()), 1)
+
+
+def _parse_expires_at(value: str | None) -> datetime | None:
+    """Parse ISO timestamps from stored payloads."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _store_login_challenge(*, email: str, user_id: str, code: str, expires_at: datetime) -> None:
+    """Persist login code metadata in Redis."""
+    client = get_redis_client()
+    payload = {
+        "code_hash": _hash_login_code(code),
+        "user_id": user_id,
+        "expires_at": expires_at.isoformat(),
+        "attempts": 0,
+    }
+    client.setex(_login_code_key(email), _ttl_seconds(expires_at), json.dumps(payload))
+
+
+def _get_login_challenge(email: str) -> dict | None:
+    """Fetch login code metadata from Redis."""
+    client = get_redis_client()
+    raw = client.get(_login_code_key(email))
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _update_login_challenge(*, email: str, payload: dict, expires_at: datetime) -> None:
+    """Update login code metadata while preserving TTL."""
+    client = get_redis_client()
+    client.setex(_login_code_key(email), _ttl_seconds(expires_at), json.dumps(payload))
+
+
+def _clear_login_challenge(email: str) -> None:
+    """Remove login code metadata from Redis."""
+    client = get_redis_client()
+    client.delete(_login_code_key(email))
 
 
 def _normalize_join_code(value: str | None) -> str | None:
@@ -189,19 +265,154 @@ def login(
             required_registration_fields=REQUIRED_REGISTRATION_FIELDS,
         )
 
+    settings = get_settings()
+
+    if not settings.auth_email_mfa_enabled:
+        session_token = create_session(db, user_id=row["id"])
+        _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
+
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.login",
+            user_id=row["id"],
+            email=row["email"],
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=True,
+        )
+        logger.info("Login success for user %s (admin=%s)", row["id"], row["is_admin"])
+        return LoginResponse(
+            authenticated=True,
+            requires_registration=False,
+            expires_at=session_token.expires_at,
+            user=_to_user_response(
+                user_id=row["id"],
+                email=row["email"],
+                username=row["username"],
+                is_admin=row["is_admin"],
+            ),
+        )
+
+    code = _generate_login_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.auth_email_mfa_code_ttl_minutes)
+    try:
+        _store_login_challenge(email=req.email, user_id=str(row["id"]), code=code, expires_at=expires_at)
+        send_login_code_email(to_email=row["email"], code=code, expires_at=expires_at)
+    except Exception:
+        _clear_login_challenge(req.email)
+        logger.exception("Failed to issue login code for %s", row["email"])
+        raise HTTPException(status_code=500, detail="Failed to send login code") from None
+
+    client_ip, user_agent = _request_meta(request)
+    log_audit_event(
+        event_type="auth.login.challenge",
+        user_id=row["id"],
+        email=row["email"],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        message="verification code sent",
+    )
+    logger.info("Login challenge issued for user %s", row["id"])
+    return LoginResponse(
+        authenticated=False,
+        requires_registration=False,
+        verification_required=True,
+        verification_delivery="email",
+        verification_expires_at=expires_at,
+    )
+
+
+@router.post("/login/verify", response_model=LoginResponse)
+def verify_login(
+    req: LoginVerifyRequest,
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> LoginResponse:
+    """Verify a login code and issue a session token."""
+    settings = get_settings()
+    if not settings.auth_email_mfa_enabled:
+        raise HTTPException(status_code=400, detail="Email verification is not enabled")
+
+    challenge = _get_login_challenge(req.email)
+    if challenge is None:
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.login.verify",
+            email=req.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="verification expired",
+        )
+        raise HTTPException(status_code=401, detail="Verification code expired")
+
+    expires_at = _parse_expires_at(challenge.get("expires_at"))
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        _clear_login_challenge(req.email)
+        raise HTTPException(status_code=401, detail="Verification code expired")
+
+    attempts = int(challenge.get("attempts", 0))
+    if attempts >= settings.auth_email_mfa_max_attempts:
+        _clear_login_challenge(req.email)
+        raise HTTPException(status_code=429, detail="Too many verification attempts")
+
+    if _hash_login_code(req.code) != challenge.get("code_hash"):
+        challenge["attempts"] = attempts + 1
+        _update_login_challenge(email=req.email, payload=challenge, expires_at=expires_at)
+        client_ip, user_agent = _request_meta(request)
+        log_audit_event(
+            event_type="auth.login.verify",
+            email=req.email,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="invalid verification code",
+        )
+        raise HTTPException(status_code=401, detail="Invalid verification code")
+
+    row = (
+        db.execute(
+            text(
+                """
+                SELECT id, email, username, is_admin, disabled_at
+                FROM users
+                WHERE lower(email) = :email
+                """
+            ),
+            {"email": req.email},
+        )
+        .mappings()
+        .fetchone()
+    )
+
+    if row is None:
+        _clear_login_challenge(req.email)
+        raise HTTPException(status_code=401, detail="Verification failed")
+
+    if row.get("disabled_at") is not None:
+        _clear_login_challenge(req.email)
+        raise HTTPException(status_code=403, detail="User account is disabled")
+
+    if str(row["id"]) != str(challenge.get("user_id")):
+        _clear_login_challenge(req.email)
+        raise HTTPException(status_code=401, detail="Verification failed")
+
+    _clear_login_challenge(req.email)
     session_token = create_session(db, user_id=row["id"])
     _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
     client_ip, user_agent = _request_meta(request)
     log_audit_event(
-        event_type="auth.login",
+        event_type="auth.login.verify",
         user_id=row["id"],
         email=row["email"],
         ip_address=client_ip,
         user_agent=user_agent,
         success=True,
     )
-    logger.info("Login success for user %s (admin=%s)", row["id"], row["is_admin"])
+    logger.info("Login verification success for user %s", row["id"])
     return LoginResponse(
         authenticated=True,
         requires_registration=False,

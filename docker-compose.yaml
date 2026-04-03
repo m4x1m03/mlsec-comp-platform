@@ -87,6 +87,8 @@ services:
       context: ./services/api
       dockerfile: Dockerfile
     container_name: mlsec-api
+    env_file:
+      - ./services/api/.env
     environment:
       DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//

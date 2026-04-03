@@ -12,6 +12,7 @@ from uuid import uuid4
 from sqlalchemy import text
 
 from core.settings import get_settings
+from routers import auth as auth_router
 
 
 def _session_cookie_name() -> str:
@@ -36,6 +37,7 @@ def test_login_unknown_email_requires_registration(client, db_session):
     assert body["authenticated"] is False
     assert body["requires_registration"] is True
     assert body["required_registration_fields"] == ["username"]
+    assert body["verification_required"] is False
     assert body["user"] is None
     assert "set-cookie" not in resp.headers
 
@@ -102,8 +104,8 @@ def test_register_creates_user_identity_and_session(client, db_session):
     assert session_row[1] is None
 
 
-def test_login_registered_user_issues_session_token(client, db_session):
-    """Registered users should receive a valid session cookie."""
+def test_login_registered_user_verifies_code_and_issues_session_token(client, db_session, fake_redis, monkeypatch):
+    """Registered users should verify the email code before receiving a session cookie."""
     user_row = db_session.execute(
         text(
             """
@@ -115,17 +117,32 @@ def test_login_registered_user_issues_session_token(client, db_session):
     ).fetchone()
     assert user_row is not None
 
+    monkeypatch.setattr(auth_router, "get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr(auth_router, "_generate_login_code", lambda: "123456")
+    monkeypatch.setattr(auth_router, "send_login_code_email", lambda **_kwargs: None)
+
     resp = client.post("/auth/login", json={"email": "existing-user@example.com"})
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["authenticated"] is True
+    assert body["authenticated"] is False
     assert body["requires_registration"] is False
-    assert body["user"]["email"] == "existing-user@example.com"
-    assert body["expires_at"] is not None
-    assert "set-cookie" in resp.headers
-    assert f"{_session_cookie_name()}=" in resp.headers["set-cookie"]
-    _assert_session_cookie_flags(resp.headers["set-cookie"])
+    assert body["verification_required"] is True
+    assert body["verification_expires_at"] is not None
+    assert "set-cookie" not in resp.headers
+
+    verify_resp = client.post(
+        "/auth/login/verify",
+        json={"email": "existing-user@example.com", "code": "123456"},
+    )
+    assert verify_resp.status_code == 200
+    verify_body = verify_resp.json()
+    assert verify_body["authenticated"] is True
+    assert verify_body["user"]["email"] == "existing-user@example.com"
+    assert verify_body["expires_at"] is not None
+    assert "set-cookie" in verify_resp.headers
+    assert f"{_session_cookie_name()}=" in verify_resp.headers["set-cookie"]
+    _assert_session_cookie_flags(verify_resp.headers["set-cookie"])
 
     session_cookie = client.cookies.get(_session_cookie_name())
     assert session_cookie is not None
