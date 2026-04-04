@@ -185,6 +185,15 @@ def _join_code_required() -> bool:
     return _configured_join_code() is not None
 
 
+def _email_mfa_enabled() -> bool:
+    """Return whether email MFA is enabled (config.yaml overrides env)."""
+    settings = get_settings()
+    config = get_config()
+    if config.application.email_mfa_enabled is None:
+        return settings.auth_email_mfa_enabled
+    return bool(config.application.email_mfa_enabled)
+
+
 def _validate_join_code_or_raise(submitted_code: str | None) -> None:
     """Validate the provided join code against configuration."""
     required_code = _configured_join_code()
@@ -267,7 +276,7 @@ def login(
 
     settings = get_settings()
 
-    if not settings.auth_email_mfa_enabled:
+    if not _email_mfa_enabled():
         session_token = create_session(db, user_id=row["id"])
         _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
 
@@ -332,7 +341,7 @@ def verify_login(
 ) -> LoginResponse:
     """Verify a login code and issue a session token."""
     settings = get_settings()
-    if not settings.auth_email_mfa_enabled:
+    if not _email_mfa_enabled():
         raise HTTPException(status_code=400, detail="Email verification is not enabled")
 
     challenge = _get_login_challenge(req.email)
