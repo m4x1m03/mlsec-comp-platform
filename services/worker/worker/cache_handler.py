@@ -106,6 +106,79 @@ def clear_cache() -> None:
         logger.exception("Failed to clear cache")
     finally:
         try:
-            get_redis_client().delete("lock:cache_clearing")
+            redis_client.delete("lock:cache_clearing")
+        except Exception:
+            pass
+
+def get_cache_size_bytes() -> int:
+    """Return total size of samples in the cache directory."""
+    if not CACHE_DIR.exists():
+        return 0
+    return sum(f.stat().st_size for f in CACHE_DIR.glob("**/*") if f.is_file())
+
+def prune_cache(max_size_bytes: int) -> None:
+    """Oldest-file-first pruning to keep cache under size limit."""
+    try:
+        redis_client = get_redis_client()
+        if not redis_client.set("lock:cache_clearing", "1", nx=True, ex=300):
+            logger.info("Skipping cache prune: clearing lock already held")
+            return
+
+        wait_start = time.time()
+        while int(redis_client.get("cache:readers") or 0) > 0:
+            if time.time() - wait_start > 60:
+                logger.warning("Pruner timed out waiting for readers, proceeding anyway")
+                break
+            time.sleep(0.5)
+
+        files = []
+        for f in CACHE_DIR.glob("**/*"):
+            if f.is_file():
+                try:
+                    stat = f.stat()
+                    files.append((f, stat.st_atime or stat.st_mtime, stat.st_size))
+                except Exception:
+                    continue
+
+        # Sort by time
+        files.sort(key=lambda x: x[1])
+        current_size = sum(f[2] for f in files)
+
+        if current_size <= max_size_bytes:
+            return
+
+        logger.info(
+            f"Pruning cache: {current_size/1e6:.2f}MB exceeds limit {max_size_bytes/1e6:.2f}MB"
+        )
+
+        deleted_count = 0
+        deleted_size = 0
+        for f_path, _, f_size in files:
+            if current_size <= max_size_bytes:
+                break
+            try:
+                f_path.unlink()
+                current_size -= f_size
+                deleted_size += f_size
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to prune {f_path}: {e}")
+
+        for d in sorted(CACHE_DIR.glob("**/*"), key=lambda x: len(str(x)), reverse=True):
+            if d.is_dir() and not any(d.iterdir()):
+                try:
+                    d.rmdir()
+                except Exception:
+                    pass
+
+        logger.info(
+            f"Cache pruning complete: deleted {deleted_count} files ({deleted_size/1e6:.2f}MB)"
+        )
+
+    except Exception:
+        logger.exception("Error during cache pruning")
+    finally:
+        try:
+            redis_client.delete("lock:cache_clearing")
         except Exception:
             pass

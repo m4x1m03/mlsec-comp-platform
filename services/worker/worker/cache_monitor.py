@@ -26,10 +26,17 @@ class CacheMonitor:
         monitor.on_job_end()     # call from task_postrun signal
     """
 
-    def __init__(self, celery_app, queue_name: str, persistence_duration: int) -> None:
+    def __init__(
+        self,
+        celery_app: Celery,
+        persistence_duration: int,
+        max_size_gb: float,
+        queue_name: str = "mlsec"
+    ) -> None:
         self._celery_app = celery_app
         self._queue_name = queue_name
         self._persistence_duration = persistence_duration
+        self._max_size_gb = max_size_gb
 
         self._lock = threading.Lock()
         self._active_job_count: int = 0
@@ -102,6 +109,7 @@ class CacheMonitor:
     def _run(self) -> None:
         redis_client = get_redis_client()
         lock_key = "lock:cache_monitor"
+        max_size_bytes = int(self._max_size_gb * 1024 * 1024 * 1024)
 
         while not self._stop_event.wait(_POLL_INTERVAL):
             # Refresh owner lock
@@ -110,6 +118,15 @@ class CacheMonitor:
                 redis_client.expire(lock_key, 60)
             except Exception:
                 logger.warning("Failed to refresh cache monitor lock")
+
+            try:
+                from worker.cache_handler import get_cache_size_bytes, prune_cache
+
+                current_size = get_cache_size_bytes()
+                if current_size > max_size_bytes:
+                    prune_cache(max_size_bytes)
+            except Exception:
+                logger.error("Failed to perform disk quota check")
 
             with self._lock:
                 local_active = self._active_job_count
