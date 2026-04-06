@@ -1568,6 +1568,9 @@ def activate_submission(
         db.commit()
 
         # Setting to active mimics an initial submission
+        from routers.queue import _insert_job, _publish_task
+        from schemas.jobs import JobType
+
         if submission_type == "defense":
             j_type = JobType.DEFENSE
             payload = {"defense_submission_id": submission_id}
