@@ -194,6 +194,7 @@ function SubmissionSection() {
             <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
               Schedule Auto-Close
             </p>
+            <p className="text-xs font-small text-gray-400 tracking-wide">Opening submissions after scheduled auto-close will empty the auto-close date.</p>
             {status.close_at && (
               <p className="text-sm text-gray-500">
                 Scheduled:{' '}

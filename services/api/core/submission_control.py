@@ -91,7 +91,12 @@ def set_manual_closed(
     closed: bool,
     updated_by: str | None,
 ) -> SubmissionControl:
-    """Toggle the manual close flag and return the updated control state."""
+    """Toggle the manual close flag and return the updated control state.
+
+    When opening submissions (closed=False), also clears a lapsed scheduled
+    close time so the submission window is actually open afterwards.
+    """
+    now = _utcnow()
     row = (
         db.execute(
             text(
@@ -100,6 +105,11 @@ def set_manual_closed(
                 VALUES (1, :manual_closed, :updated_at, :updated_by)
                 ON CONFLICT (id) DO UPDATE
                 SET manual_closed = EXCLUDED.manual_closed,
+                    close_at = CASE
+                        WHEN NOT :manual_closed AND submission_control.close_at <= :now
+                        THEN NULL
+                        ELSE submission_control.close_at
+                    END,
                     updated_at = EXCLUDED.updated_at,
                     updated_by = EXCLUDED.updated_by
                 RETURNING manual_closed, close_at, updated_at, updated_by
@@ -107,8 +117,9 @@ def set_manual_closed(
             ),
             {
                 "manual_closed": closed,
-                "updated_at": _utcnow(),
+                "updated_at": now,
                 "updated_by": updated_by,
+                "now": now,
             },
         )
         .mappings()
