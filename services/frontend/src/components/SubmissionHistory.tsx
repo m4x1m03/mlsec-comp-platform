@@ -247,7 +247,10 @@ export default function SubmissionHistory({ type, title }: Props) {
                     <span className="text-xs text-gray-400">{formatDate(sub.created_at)}</span>
                   </div>
 
-                  <span className="text-xs font-mono bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0">
+                  <span
+                    className="text-xs font-mono bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded flex-shrink-0 max-w-[6rem] truncate block"
+                    title={`v${sub.version}`}
+                  >
                     v{sub.version}
                   </span>
 

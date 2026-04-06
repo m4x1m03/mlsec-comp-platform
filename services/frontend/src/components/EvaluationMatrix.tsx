@@ -136,13 +136,14 @@ export default function EvaluationMatrix() {
               {attackers.map(atk => (
                 <th
                   key={atk.submission_id}
-                  className="border-b border-r border-gray-200 px-4 py-3 text-center bg-gray-50 whitespace-nowrap"
+                  className="border-b border-r border-gray-200 px-4 py-3 text-center bg-gray-50 max-w-[120px]"
+                  title={[atk.username, atk.display_name, `v${atk.version}`].filter(Boolean).join(' · ')}
                 >
-                  <div className="text-xs font-semibold text-gray-700">{atk.username}</div>
+                  <div className="text-xs font-semibold text-gray-700 truncate">{atk.username}</div>
                   {atk.display_name && (
-                    <div className="text-xs font-normal text-gray-400 mt-0.5">{atk.display_name}</div>
+                    <div className="text-xs font-normal text-gray-400 mt-0.5 truncate">{atk.display_name}</div>
                   )}
-                  <div className="text-xs font-mono font-normal text-gray-400">v{atk.version}</div>
+                  <div className="text-xs font-mono font-normal text-gray-400 truncate">v{atk.version}</div>
                 </th>
               ))}
             </tr>
@@ -150,12 +151,15 @@ export default function EvaluationMatrix() {
           <tbody>
             {defenders.map((def, di) => (
               <tr key={def.submission_id} className={di % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
-                <td className="sticky left-0 z-10 border-b border-r border-gray-200 px-4 py-3 whitespace-nowrap bg-inherit">
-                  <div className="text-xs font-semibold text-gray-700">{def.username}</div>
+                <td
+                  className="sticky left-0 z-10 border-b border-r border-gray-200 px-4 py-3 bg-inherit max-w-[140px]"
+                  title={[def.username, def.display_name, `v${def.version}`].filter(Boolean).join(' · ')}
+                >
+                  <div className="text-xs font-semibold text-gray-700 truncate">{def.username}</div>
                   {def.display_name && (
-                    <div className="text-xs text-gray-400">{def.display_name}</div>
+                    <div className="text-xs text-gray-400 truncate">{def.display_name}</div>
                   )}
-                  <div className="text-xs font-mono text-gray-400">v{def.version}</div>
+                  <div className="text-xs font-mono text-gray-400 truncate">v{def.version}</div>
                 </td>
                 {attackers.map(atk => {
                   const key = `${atk.submission_id}/${def.submission_id}`;
