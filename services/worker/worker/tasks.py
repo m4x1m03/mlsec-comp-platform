@@ -698,16 +698,22 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
     try:
         set_job_status(job_id=job_id, status="running")
-        mark_attack_validating(attack_submission_id)
+
+        # Check if validation or evaluation is already complete
+        status = get_submission_status(attack_submission_id)
+        if status == "evaluated":
+            logger.info(f"Attack {attack_submission_id} is already evaluated, skipping job.")
+            set_job_status(job_id=job_id, status="done")
+            return
+
         logger.info(
             f"Starting attack job {job_id} for submission {attack_submission_id}")
 
-        # Check if validation is already complete
-        status = get_submission_status(attack_submission_id)
-        if status in ["validated", "evaluated"]:
-            logger.info(f"Attack {attack_submission_id} is already in '{status}' state, skipping validation logic.")
+        if status == "validated":
+            logger.info(f"Attack {attack_submission_id} is already validated, skipping validation logic.")
         else:
             # Attack validation logic
+            mark_attack_validating(attack_submission_id)
             logger.info("Starting attack ZIP validation")
 
             # Get attack source information
