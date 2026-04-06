@@ -73,6 +73,10 @@ class SourceConfig(BaseModel):
 
 class AttackConfig(BaseModel):
     """Configuration for attack validation and evaluation."""
+    # True = skip template seeding and all behavioral checks entirely.
+    # Overrides check_similarity when set to True.
+    skip_seeding: bool = False
+
     # Whether to run similarity evaluation at all.
     # False = skip evaluation, accept all attacks that pass validation.
     check_similarity: bool = True

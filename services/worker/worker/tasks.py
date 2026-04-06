@@ -623,6 +623,12 @@ def seed_attack_template(self, *, template_id: str, job_id: str | None = None) -
     if job_id:
         set_job_status(job_id=job_id, status="running")
 
+    if config.worker.attack.skip_seeding:
+        logger.info("skip_seeding=true; skipping template seeding for template %s.", template_id)
+        if job_id:
+            set_job_status(job_id=job_id, status="done")
+        return
+
     try:
         template_files = get_template_files(template_id)
         if not template_files:
@@ -750,6 +756,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                 if (
                     active_template is not None
                     and attack_cfg.check_similarity
+                    and not attack_cfg.skip_seeding
                     and not is_template_fully_seeded(active_template["id"])
                 ):
                     logger.info(
@@ -847,7 +854,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                         f"Inserted {inserted_count} attack files into database")
 
                 # Heuristic validation (behavioral similarity against template)
-                if attack_cfg.check_similarity:
+                if attack_cfg.check_similarity and not attack_cfg.skip_seeding:
                     if active_template is None:
                         template_reports = {}
                     else:

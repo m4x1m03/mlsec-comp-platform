@@ -44,6 +44,7 @@ worker:
     access_key: "mlsec_minio_admin"
     secret_key: "mlsec_minio_password_change_in_production"
   attack:
+    skip_seeding: false              # true = skip template seeding and all behavioral checks
     check_similarity: false           # false = skip evaluation, accept all validated attacks
     reject_dissimilar_attacks: false  # only applies when check_similarity=true
                                      #   true  = reject if score < minimum_attack_similarity
