@@ -721,9 +721,6 @@ def set_active_submission(
         logger.warning("Failed to publish leaderboard update after active submission change")
 
     # Setting to active mimics an initial submission
-    from routers.queue import _insert_job, _publish_task
-    from schemas.jobs import JobType
-
     if sub_type == "defense":
         j_type = JobType.DEFENSE
         payload = {"defense_submission_id": submission_id}
