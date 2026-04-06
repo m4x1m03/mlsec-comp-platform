@@ -18,10 +18,10 @@ const session = await getSession(Astro.request);
 		<meta name="generator" content={Astro.generator} />
 		<title>MLSEC Submission</title>
 	</head>
-	<body class="flex flex-col h-screen overflow-hidden bg-gray-50">
+	<body class="flex flex-col min-h-screen bg-gray-50">
 		<Navbar />
 		{session ? (
-			<div class="flex flex-1 flex-row min-h-0">
+			<div class="flex flex-1 flex-row">
 				<Submit />
 				<PastSubmit />
 			</div>
