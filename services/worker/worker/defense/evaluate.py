@@ -194,6 +194,34 @@ async def evaluate_sample_against_container(
                 "Extended wait request failed for %s: %s", container_url, exc
             )
 
+    except httpx.NetworkError as exc:
+        # Connection dropped mid-request (ReadError, ConnectError, etc.).
+        # Treat this the same as a container crash: mark evaded, restart.
+        evaded_reason = "connection_error"
+        model_output = 0
+        logger.warning(
+            "Container %s dropped connection (%s: %s); restarting.",
+            container_name,
+            type(exc).__name__,
+            exc or "no message",
+        )
+        restart_count_ref[0] += 1
+        if restart_count_ref[0] > eval_cfg.defense_max_restarts:
+            raise ContainerRestartError(
+                f"Container {container_name!r} exceeded maximum restarts "
+                f"({eval_cfg.defense_max_restarts})."
+            )
+        try:
+            ctx.pop("container_obj", None)  # Force re-fetch after restart
+            ctx["container_obj"] = await asyncio.to_thread(docker_client.containers.get, container_name)
+            await asyncio.to_thread(ctx["container_obj"].restart)
+        except Exception as restart_exc:
+            logger.warning(
+                "Failed to restart container %s after network error: %s",
+                container_name,
+                restart_exc,
+            )
+
     duration_ms = int((time.monotonic() - start) * 1000)
     return EvalOutcome(
         model_output=model_output,

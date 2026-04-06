@@ -386,6 +386,7 @@ async def _validate_defense_container(
             "Unexpected error during validation of defense %s: %s",
             defense_submission_id,
             e,
+            exc_info=True,
         )
         try:
             mark_defense_failed(defense_submission_id, f"Unexpected validation error: {e}")
