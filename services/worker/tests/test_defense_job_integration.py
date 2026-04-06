@@ -412,11 +412,11 @@ def test_defense_job_github_source(db_session, fake_redis, test_helpers, monkeyp
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
-    # Create defense with GitHub source
+    # Create defense with GitHub source (not validated yet to ensure setup runs)
     defense_id = test_helpers.create_defense(
         source_type="github",
         git_repo="https://github.com/user/defense",
-        is_functional=True
+        is_functional=None
     )
 
     # Create job
@@ -480,11 +480,11 @@ def test_defense_job_zip_source(db_session, fake_redis, test_helpers, monkeypatc
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
-    # Create defense with ZIP source
+    # Create defense with ZIP source (not validated yet to ensure setup runs)
     defense_id = test_helpers.create_defense(
         source_type="zip",
         object_key="defenses/test-defense.zip",
-        is_functional=True
+        is_functional=None
     )
 
     # Create job
@@ -554,6 +554,9 @@ def test_defense_job_cleanup_on_error(db_session, fake_redis, test_helpers, monk
         docker_image="user/defense:latest",
         is_functional=True
     )
+
+    # Create attack so evaluation starts
+    test_helpers.create_attack()
 
     # Create job
     job_id = test_helpers.create_job(
@@ -642,6 +645,9 @@ def test_defense_job_unregisters_worker_on_error(db_session, fake_redis, test_he
         docker_image="user/defense:latest",
         is_functional=True
     )
+
+    # Create attack so evaluation starts
+    test_helpers.create_attack()
 
     # Create job
     job_id = test_helpers.create_job(

@@ -5,8 +5,14 @@ from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
+import os
+os.environ["CELERY_BROKER_URL"] = "memory://"
+os.environ["CELERY_DEFAULT_QUEUE"] = "mlsec"
+
 from main import app
 from core.database import Base, get_db
+from core.celery_app import get_celery
+from unittest.mock import MagicMock
 
 
 TEST_DB_URL = "postgresql://postgres:password123@localhost:5433/mlsec_test"
@@ -92,6 +98,14 @@ def client(db_session):
             yield c
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def mock_celery(monkeypatch):
+    """Mock Celery to prevent physical broker connections during tests."""
+    mock_app = MagicMock()
+    monkeypatch.setattr("core.celery_app.get_celery", lambda: mock_app)
+    return mock_app
 
 
 @pytest.fixture()

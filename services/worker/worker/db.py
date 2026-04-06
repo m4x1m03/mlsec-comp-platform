@@ -49,6 +49,17 @@ def set_job_status(*, job_id: str, status: str, error: str | None = None) -> Non
             )
 
 
+def get_submission_status(submission_id: str) -> str | None:
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT status FROM submissions WHERE id = :id"),
+            {"id": submission_id},
+        ).scalar()
+        return result
+
+
 def get_defense_docker_image(*, submission_id: str) -> str | None:
     from sqlalchemy import text
     engine = get_engine()

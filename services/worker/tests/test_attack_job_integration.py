@@ -551,8 +551,13 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
-    # Create attack
+    # Create attack in submitted state to trigger validation logic
     attack_id = test_helpers.create_attack()
+    db_session.execute(
+        text("UPDATE submissions SET status = 'submitted' WHERE id = CAST(:id AS uuid)"),
+        {"id": attack_id}
+    )
+    db_session.commit()
 
     # Create job
     job_id = test_helpers.create_job(
@@ -613,8 +618,15 @@ def _common_setup(db_session, fake_redis, test_helpers, monkeypatch):
         self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_redis_init)
-
+    
+    # Create attack in submitted state to trigger validation logic
     attack_id = test_helpers.create_attack()
+    db_session.execute(
+        text("UPDATE submissions SET status = 'submitted' WHERE id = CAST(:id AS uuid)"),
+        {"id": attack_id}
+    )
+    db_session.commit()
+
     job_id = test_helpers.create_job(
         job_type="attack",
         status="queued",
