@@ -1521,7 +1521,7 @@ def activate_submission(
 
         sub_row = db.execute(
             text("""
-                SELECT id, user_id, submission_type
+                SELECT id, user_id, submission_type, status
                 FROM submissions
                 WHERE id = CAST(:sid AS uuid) AND deleted_at IS NULL
             """),
@@ -1529,6 +1529,13 @@ def activate_submission(
         ).mappings().first()
         if sub_row is None:
             raise HTTPException(status_code=404, detail="Submission not found")
+
+        status: str = sub_row["status"]
+        if status not in ("validated", "evaluated"):
+             raise HTTPException(
+                status_code=409,
+                detail="Submission must be validated or evaluated before it can be set as active",
+            )
 
         user_id: str = str(sub_row["user_id"])
         submission_type: str = sub_row["submission_type"]
@@ -1559,6 +1566,27 @@ def activate_submission(
             token=action_token,
         )
         db.commit()
+
+        # Setting to active mimics an initial submission
+        from routers.queue import _insert_job, _publish_task
+        from schemas.jobs import JobType
+
+        if submission_type == "defense":
+            j_type = JobType.DEFENSE
+            payload = {"defense_submission_id": submission_id}
+        else:
+            j_type = JobType.ATTACK
+            payload = {"attack_submission_id": submission_id}
+
+        job_id = _insert_job(
+            db=db,
+            job_type=j_type.value,
+            payload=payload,
+            requested_by_user_id=current_user.user_id,
+        )
+        _publish_task(job_type=j_type, job_id=job_id, payload=payload)
+
+        logger.info(f"Enqueued {submission_type} job {job_id} after admin set active")
 
         client_ip, user_agent = _request_meta(request)
         log_audit_event(

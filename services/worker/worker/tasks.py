@@ -455,22 +455,36 @@ def run_batch_defense_job(
             f"Registered worker {worker_id} with Redis for {len(defense_submission_ids)} defenses"
         )
 
-        all_unevaluated_attacks: set[str] = set()
-        for dsid in defense_submission_ids:
-            all_unevaluated_attacks.update(get_unevaluated_attacks(dsid))
-
-        logger.info(f"Found {len(all_unevaluated_attacks)} unique unevaluated attacks for batch")
-        for attack_id in all_unevaluated_attacks:
-            registry.add_attack_to_queue(worker_id, attack_id)
-
         defense_specs: list[tuple[str, bool, str, dict]] = []
+        all_pending_attacks: set[str] = set()
+        
         for dsid in defense_submission_ids:
             needs_validation = check_if_needs_validation(dsid)
+            pending_attacks = get_unevaluated_attacks(dsid)
+            
+            if not needs_validation and not pending_attacks:
+                logger.info(f"Skipping container setup for defense {dsid}: already validated and no pending evaluations.")
+                continue
+                
             if needs_validation:
                 mark_defense_validating(dsid)
+            
             source_type, source_data = get_defense_submission_source(dsid)
             defense_specs.append((dsid, needs_validation, source_type, source_data))
+            
+            for attack_id in pending_attacks:
+                if attack_id not in all_pending_attacks:
+                    registry.add_attack_to_queue(worker_id, attack_id)
+                    all_pending_attacks.add(attack_id)
 
+        if not defense_specs:
+            logger.info(f"No defenses in batch job {job_id} require container setup. Finishing job.")
+            set_job_status(job_id=job_id, status="done")
+            return
+
+        logger.info(
+            f"Found {len(all_pending_attacks)} unique unevaluated attacks for {len(defense_specs)} active defense containers"
+        )
         logger.info(f"Setting up {len(defense_specs)} defense containers concurrently")
         setup_results = await asyncio.gather(*[
             _setup_defense_container(
