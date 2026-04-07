@@ -24,6 +24,8 @@ class MinIOConfig(BaseModel):
 
 class ApplicationConfig(BaseModel):
     join_code: str | None = None
+    defense_submission_cooldown: int = 0
+    attack_submission_cooldown: int = 0
 
 
 class AppConfig(BaseModel):
@@ -49,7 +51,11 @@ def get_config() -> AppConfig:
             join_code = app_data.get("login_code")
         return AppConfig(
             minio=MinIOConfig(**minio_data),
-            application=ApplicationConfig(join_code=join_code),
+            application=ApplicationConfig(
+                join_code=join_code,
+                defense_submission_cooldown=int(app_data.get("defense_submission_cooldown", 0)),
+                attack_submission_cooldown=int(app_data.get("attack_submission_cooldown", 0)),
+            ),
         )
     except Exception as e:
         logger.error(

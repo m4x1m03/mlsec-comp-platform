@@ -20,7 +20,7 @@ worker:
     heurval_malware_tpr_minimum: 0.30
     heurval_goodware_fpr_minimum: 0.0
     heurval_goodware_tpr_minimum: 0.30
-    reject_heurval_failures: true
+    reject_heurval_failures: false
   source:
     # Resource limits
     max_zip_size_mb: 512
@@ -56,3 +56,5 @@ worker:
 
 application:
   login_code: 'ABC'
+  defense_submission_cooldown: 30   # seconds between defense submissions per user; 0 = no cooldown
+  attack_submission_cooldown: 30    # seconds between attack submissions per user; 0 = no cooldown
