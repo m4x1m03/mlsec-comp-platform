@@ -24,28 +24,28 @@ interface LeaderboardData {
 
 /**
  * Maps a score (0.0 to 1.0) to an RGB color.
- * 0%  = red   rgb(220, 50, 50)
- * 50% = white rgb(255, 255, 255)
- * 100% = green rgb(50, 175, 80)
+ * 0%  = orange   rgb(254, 179, 56)
+ * 50% = white rgb(230, 230, 230)
+ * 100% = blue rgb(2, 81, 150)
  */
 function scoreToColor(score: number): string {
   const s = Math.max(0, Math.min(1, score));
   if (s <= 0.5) {
     const t = s / 0.5;
-    const r = Math.round(220 + (255 - 220) * t);
-    const g = Math.round(50  + (255 - 50)  * t);
-    const b = Math.round(50  + (255 - 50)  * t);
+    const r = Math.round(254 + (230 - 254) * t);
+    const g = Math.round(179  + (230 - 179)  * t);
+    const b = Math.round(56  + (230 - 56)  * t);
     return `rgb(${r},${g},${b})`;
   }
   const t = (s - 0.5) / 0.5;
-  const r = Math.round(255 + (50  - 255) * t);
-  const g = Math.round(255 + (175 - 255) * t);
-  const b = Math.round(255 + (80  - 255) * t);
+  const r = Math.round(230 + (2  - 230) * t);
+  const g = Math.round(230 + (81 - 230) * t);
+  const b = Math.round(230 + (150  - 230) * t);
   return `rgb(${r},${g},${b})`;
 }
 
 function textColorForScore(score: number): string {
-  return score < 0.35 || score > 0.65 ? '#ffffff' : '#374151';
+  return score > 0.70 ? '#ffffff' : '#374151';
 }
 
 export default function EvaluationMatrix() {
