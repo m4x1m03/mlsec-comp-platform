@@ -55,6 +55,9 @@ from schemas.admin import (
     AdminEvaluationPairRecord,
     AdminSubmissionEvaluationsResponse,
     AdminActivateSubmissionResponse,
+    JobDetailResponse,
+    JobDetailSubmission,
+    JobDetailEvalRun,
 )
 
 router = APIRouter(
@@ -461,6 +464,144 @@ def get_recent_jobs(
 
     items = [AdminJobLogRecord(**row) for row in rows]
     return AdminJobLogsResponse(count=len(items), items=items)
+
+
+@router.get("/logs/jobs/{job_id}/detail", response_model=JobDetailResponse)
+def get_job_detail(
+    job_id: str,
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> JobDetailResponse:
+    """Return extended detail for a single job record."""
+    row = (
+        db.execute(
+            text(
+                """
+                SELECT id, job_type, status, requested_by_user_id, payload, created_at, updated_at
+                FROM jobs
+                WHERE id = :id
+                """
+            ),
+            {"id": job_id},
+        )
+        .mappings()
+        .fetchone()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = AdminJobLogRecord(**row)
+    payload = row["payload"] or {}
+    submission: JobDetailSubmission | None = None
+    eval_runs: list[JobDetailEvalRun] = []
+
+    if job.job_type == "D":
+        sub_id = payload.get("defense_submission_id")
+        if sub_id:
+            sub_row = (
+                db.execute(
+                    text(
+                        """
+                        SELECT s.id, s.version, s.display_name, s.status,
+                               d.source_type
+                        FROM submissions s
+                        LEFT JOIN defense_submission_details d ON d.submission_id = s.id
+                        WHERE s.id = :id
+                        """
+                    ),
+                    {"id": sub_id},
+                )
+                .mappings()
+                .fetchone()
+            )
+            if sub_row:
+                submission = JobDetailSubmission(
+                    submission_id=str(sub_row["id"]),
+                    version=sub_row["version"],
+                    display_name=sub_row["display_name"],
+                    status=sub_row["status"],
+                    source_type=sub_row["source_type"],
+                )
+            run_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT id, attack_submission_id, status, duration_ms
+                        FROM evaluation_runs
+                        WHERE defense_submission_id = :id
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                        """
+                    ),
+                    {"id": sub_id},
+                )
+                .mappings()
+                .fetchall()
+            )
+            eval_runs = [
+                JobDetailEvalRun(
+                    id=str(r["id"]),
+                    counterpart_id=str(r["attack_submission_id"]),
+                    status=r["status"],
+                    duration_ms=r["duration_ms"],
+                )
+                for r in run_rows
+            ]
+
+    elif job.job_type == "A":
+        sub_id = payload.get("attack_submission_id")
+        if sub_id:
+            sub_row = (
+                db.execute(
+                    text(
+                        """
+                        SELECT s.id, s.version, s.display_name, s.status,
+                               a.file_count
+                        FROM submissions s
+                        LEFT JOIN attack_submission_details a ON a.submission_id = s.id
+                        WHERE s.id = :id
+                        """
+                    ),
+                    {"id": sub_id},
+                )
+                .mappings()
+                .fetchone()
+            )
+            if sub_row:
+                submission = JobDetailSubmission(
+                    submission_id=str(sub_row["id"]),
+                    version=sub_row["version"],
+                    display_name=sub_row["display_name"],
+                    status=sub_row["status"],
+                    file_count=sub_row["file_count"],
+                )
+            run_rows = (
+                db.execute(
+                    text(
+                        """
+                        SELECT id, defense_submission_id, status, duration_ms
+                        FROM evaluation_runs
+                        WHERE attack_submission_id = :id
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                        """
+                    ),
+                    {"id": sub_id},
+                )
+                .mappings()
+                .fetchall()
+            )
+            eval_runs = [
+                JobDetailEvalRun(
+                    id=str(r["id"]),
+                    counterpart_id=str(r["defense_submission_id"]),
+                    status=r["status"],
+                    duration_ms=r["duration_ms"],
+                )
+                for r in run_rows
+            ]
+
+    return JobDetailResponse(job=job, submission=submission, evaluation_runs=eval_runs)
 
 
 @router.get("/logs/evaluations", response_model=AdminEvaluationLogsResponse)
