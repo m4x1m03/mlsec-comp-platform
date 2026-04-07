@@ -92,6 +92,14 @@
     }
   });
 
+  function _extractDetail(detail: unknown): string {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      return (detail as { msg?: string }[]).map(e => e.msg ?? String(e)).join('; ');
+    }
+    return 'An unexpected error occurred.';
+  }
+
   function _attachDismiss(el: HTMLElement) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -181,7 +189,7 @@
 
       const res  = await fetch('/api/submissions/attack/zip', { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(_extractDetail(data.detail) || `Error ${res.status}`);
 
       feedback.textContent = `Submitted (ID: ${data.submission_id})`;
       feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';

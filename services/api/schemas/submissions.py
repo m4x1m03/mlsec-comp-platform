@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 class CreateDefenseDockerRequest(BaseModel):
     """Request schema for Docker Hub defense submission."""
 
-    docker_image: str = Field(..., min_length=1, max_length=500)
+    docker_image: str = Field(..., pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._\-/]*(:[a-zA-Z0-9._\-]+)?$", max_length=500)
     version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$")
     display_name: str | None = Field(None, max_length=200)
 
