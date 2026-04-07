@@ -21,7 +21,7 @@ const session = await getSession(Astro.request);
 	<body class="flex flex-col min-h-screen bg-gray-50">
 		<Navbar />
 		{session ? (
-			<div class="flex flex-1 flex-row">
+			<div class="flex flex-1 flex-col md:flex-row">
 				<Submit />
 				<PastSubmit />
 			</div>
