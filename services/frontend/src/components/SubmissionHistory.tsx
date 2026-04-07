@@ -12,6 +12,11 @@ interface Submission {
   is_active: boolean;
   heurval_tpr: number | null;
   heurval_fpr: number | null;
+  detail_loaded?: boolean;
+  source_type?: string | null;
+  sha256?: string | null;
+  docker_image?: string | null;
+  git_repo?: string | null;
 }
 
 interface Props {
@@ -42,6 +47,16 @@ function formatDate(iso: string): string {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+  });
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -115,44 +130,64 @@ function ExpandedDetail({ sub }: { sub: Submission }) {
   const { status, functional_error, submission_type, heurval_tpr, heurval_fpr } = sub;
   const showHeurval = submission_type === 'defense' && (heurval_tpr !== null || heurval_fpr !== null);
 
-  if (status === 'submitted') {
-    return <p className="text-xs text-gray-500">Queued for processing.</p>;
-  }
-  if (status === 'validating') {
-    return <p className="text-xs text-blue-500">Validation in progress.</p>;
-  }
-  if (status === 'validated') {
-    return (
-      <>
-        <p className="text-xs text-blue-600">Validation passed. Waiting for evaluation.</p>
-        {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
-      </>
-    );
-  }
-  if (status === 'evaluating') {
-    return (
-      <>
-        <p className="text-xs text-amber-600">Currently being evaluated.</p>
-        {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
-      </>
-    );
-  }
-  if (status === 'evaluated') {
-    return (
-      <>
-        <p className="text-xs text-green-600">Evaluation complete.</p>
-        {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
-      </>
-    );
-  }
-  if (status === 'error') {
-    return (
-      <p className="text-xs text-red-600">
-        {functional_error ?? 'An error occurred during processing.'}
-      </p>
-    );
-  }
-  return null;
+  return (
+    <>
+      {status === 'submitted' && <p className="text-xs text-gray-500">Queued for processing.</p>}
+      {status === 'validating' && <p className="text-xs text-blue-500">Validation in progress.</p>}
+      {(status === 'validated') && (
+        <>
+          <p className="text-xs text-blue-600">Validation passed. Waiting for evaluation.</p>
+          {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
+        </>
+      )}
+      {status === 'evaluating' && (
+        <>
+          <p className="text-xs text-amber-600">Currently being evaluated.</p>
+          {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
+        </>
+      )}
+      {status === 'evaluated' && (
+        <>
+          <p className="text-xs text-green-600">Evaluation complete.</p>
+          {showHeurval && <HeurvalStats tpr={heurval_tpr} fpr={heurval_fpr} />}
+        </>
+      )}
+      {status === 'error' && (
+        <p className="text-xs text-red-600">
+          {functional_error ?? 'An error occurred during processing.'}
+        </p>
+      )}
+
+      {sub.detail_loaded ? (
+        <dl className="mt-2 pt-2 border-t border-gray-100 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+          <dt className="text-gray-400 whitespace-nowrap">Submitted</dt>
+          <dd className="text-gray-600">{formatDateTime(sub.created_at)}</dd>
+          {sub.sha256 && (
+            <>
+              <dt className="text-gray-400 whitespace-nowrap">File Hash</dt>
+              <dd className="font-mono text-gray-600 truncate" title={sub.sha256}>
+                {sub.sha256.slice(0, 16)}...
+              </dd>
+            </>
+          )}
+          {sub.docker_image && (
+            <>
+              <dt className="text-gray-400 whitespace-nowrap">DockerHub</dt>
+              <dd className="text-gray-600 truncate" title={sub.docker_image}>{sub.docker_image}</dd>
+            </>
+          )}
+          {sub.git_repo && (
+            <>
+              <dt className="text-gray-400 whitespace-nowrap">GitHub</dt>
+              <dd className="text-gray-600 truncate" title={sub.git_repo}>{sub.git_repo}</dd>
+            </>
+          )}
+        </dl>
+      ) : (
+        <p className="mt-1 text-xs text-gray-400">Loading details...</p>
+      )}
+    </>
+  );
 }
 
 export default function SubmissionHistory({ type, title }: Props) {
@@ -205,12 +240,24 @@ export default function SubmissionHistory({ type, title }: Props) {
     );
   };
 
-  const toggleExpanded = (id: string) => {
+  const toggleExpanded = async (id: string) => {
     setExpanded(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+    const sub = submissions.find(s => s.submission_id === id);
+    if (!sub || sub.detail_loaded) return;
+    try {
+      const res = await fetch(`/api/submissions/${id}/detail`);
+      if (!res.ok) return;
+      const d = await res.json();
+      setSubmissions(prev => prev.map(s =>
+        s.submission_id === id
+          ? { ...s, detail_loaded: true, source_type: d.source_type, sha256: d.sha256, docker_image: d.docker_image, git_repo: d.git_repo }
+          : s
+      ));
+    } catch {}
   };
 
   return (

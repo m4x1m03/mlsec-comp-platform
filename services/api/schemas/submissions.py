@@ -113,3 +113,14 @@ class SubmissionHistoryResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class SubmissionDetailResponse(BaseModel):
+    """Source metadata for a single submission, fetched on demand."""
+
+    submission_id: str
+    created_at: str
+    source_type: str | None
+    sha256: str | None
+    docker_image: str | None
+    git_repo: str | None

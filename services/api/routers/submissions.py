@@ -32,6 +32,7 @@ from schemas.submissions import (
     CreateDefenseDockerRequest,
     CreateDefenseGitHubRequest,
     SetActiveResponse,
+    SubmissionDetailResponse,
     SubmissionListItem,
     SubmissionHistoryResponse,
     SubmissionResponse,
@@ -749,6 +750,49 @@ def set_active_submission(
     return SetActiveResponse(
         submission_id=submission_id,
         submission_type=sub_type,
+    )
+
+
+@router.get("/{submission_id}/detail", response_model=SubmissionDetailResponse)
+def get_submission_detail(
+    submission_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionDetailResponse:
+    """Return source metadata for a submission belonging to the authenticated user."""
+    row = db.execute(
+        text(
+            """
+            SELECT
+                s.id,
+                s.submission_type,
+                s.created_at,
+                d.source_type,
+                d.sha256,
+                d.docker_image,
+                d.git_repo,
+                a.zip_sha256
+            FROM submissions s
+            LEFT JOIN defense_submission_details d ON d.submission_id = s.id
+            LEFT JOIN attack_submission_details a ON a.submission_id = s.id
+            WHERE s.id = :id
+              AND s.user_id = :user_id
+              AND s.deleted_at IS NULL
+            """
+        ),
+        {"id": submission_id, "user_id": str(current_user.user_id)},
+    ).mappings().fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    return SubmissionDetailResponse(
+        submission_id=str(row["id"]),
+        created_at=row["created_at"].isoformat(),
+        source_type=row["source_type"],
+        sha256=row["sha256"] or row["zip_sha256"],
+        docker_image=row["docker_image"],
+        git_repo=row["git_repo"],
     )
 
 
