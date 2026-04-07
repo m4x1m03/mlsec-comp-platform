@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import json
 import logging
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -1627,3 +1629,235 @@ def activate_submission(
             message=str(exc),
         )
         raise
+
+
+# ---------------------------------------------------------------------------
+# CSV exports
+# ---------------------------------------------------------------------------
+
+def _csv_response(rows: list[list], filename: str) -> StreamingResponse:
+    """Build a StreamingResponse from a 2-D list of CSV rows."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerows(rows)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _submission_label(username: str, display_name: str | None, version: str) -> str:
+    return f"{username} / {display_name or version}"
+
+
+@router.get("/export/scores/all")
+def export_all_evaluation_scores(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Download confusion-matrix CSV (TP, FP, FN, TN) for all active submission pairs."""
+    axis_rows = db.execute(
+        text("""
+            SELECT u.username, s.display_name, s.version, s.id::text, a.submission_type
+            FROM active_submissions a
+            JOIN submissions s ON s.id = a.submission_id
+            JOIN users u       ON u.id = a.user_id
+            WHERE u.disabled_at IS NULL AND s.deleted_at IS NULL
+            ORDER BY a.submission_type, u.username
+        """)
+    ).fetchall()
+
+    attackers = [r for r in axis_rows if r[4] == "attack"]
+    defenders = [r for r in axis_rows if r[4] == "defense"]
+
+    if not attackers or not defenders:
+        return _csv_response(
+            [["No active submission pairs available."]],
+            "evaluation_scores_all.csv",
+        )
+
+    attack_ids  = [r[3] for r in attackers]
+    defense_ids = [r[3] for r in defenders]
+
+    file_rows = db.execute(
+        text("""
+            SELECT eps.defense_submission_id::text,
+                   eps.attack_submission_id::text,
+                   af.is_malware,
+                   efr.model_output
+            FROM evaluation_pair_scores eps
+            JOIN evaluation_runs er          ON er.id  = eps.latest_evaluation_run_id
+            JOIN evaluation_file_results efr ON efr.evaluation_run_id = er.id
+            JOIN attack_files af             ON af.id  = efr.attack_file_id
+            WHERE eps.defense_submission_id::text = ANY(:def_ids)
+              AND eps.attack_submission_id::text   = ANY(:atk_ids)
+              AND eps.latest_evaluation_run_id IS NOT NULL
+              AND efr.model_output IS NOT NULL
+              AND af.is_malware    IS NOT NULL
+        """),
+        {"def_ids": defense_ids, "atk_ids": attack_ids},
+    ).fetchall()
+
+    confusion: dict[tuple[str, str], dict[str, int]] = {}
+    for fr in file_rows:
+        key = (fr[0], fr[1])
+        if key not in confusion:
+            confusion[key] = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
+        if   fr[3] == 1 and     fr[2]: confusion[key]["tp"] += 1
+        elif fr[3] == 1 and not fr[2]: confusion[key]["fp"] += 1
+        elif fr[3] == 0 and     fr[2]: confusion[key]["fn"] += 1
+        elif fr[3] == 0 and not fr[2]: confusion[key]["tn"] += 1
+
+    header = ["Defense \\ Attack"] + [_submission_label(r[0], r[1], r[2]) for r in attackers]
+    data_rows: list[list] = [header]
+    for d in defenders:
+        did = d[3]
+        cells = []
+        for a in attackers:
+            c = confusion.get((did, a[3]))
+            cells.append(f"({c['tp']},{c['fp']},{c['fn']},{c['tn']})" if c else "")
+        data_rows.append([_submission_label(d[0], d[1], d[2])] + cells)
+
+    return _csv_response(data_rows, "evaluation_scores_all.csv")
+
+
+@router.get("/export/scores/individual")
+def export_individual_evaluation_scores(
+    defense_submission_id: UUID = Query(...),
+    attack_submission_id: UUID = Query(...),
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Download per-file model output for a single defense/attack pair."""
+    rows = db.execute(
+        text("""
+            SELECT af.filename, efr.model_output, af.is_malware
+            FROM evaluation_pair_scores eps
+            JOIN evaluation_runs er          ON er.id  = eps.latest_evaluation_run_id
+            JOIN evaluation_file_results efr ON efr.evaluation_run_id = er.id
+            JOIN attack_files af             ON af.id  = efr.attack_file_id
+            WHERE eps.defense_submission_id = :def_id
+              AND eps.attack_submission_id  = :atk_id
+              AND eps.latest_evaluation_run_id IS NOT NULL
+            ORDER BY af.filename
+        """),
+        {"def_id": str(defense_submission_id), "atk_id": str(attack_submission_id)},
+    ).fetchall()
+
+    if not rows:
+        return _csv_response(
+            [["No evaluation data found for this pair."]],
+            "evaluation_scores_individual.csv",
+        )
+
+    filenames = [r[0] or "unknown" for r in rows]
+    outputs   = [str(r[1]) if r[1] is not None else "" for r in rows]
+    ground    = [str(r[2]) if r[2] is not None else "" for r in rows]
+
+    return _csv_response(
+        [
+            [""] + filenames,
+            ["Model Output"] + outputs,
+            ["Is Malware (ground truth)"] + ground,
+        ],
+        "evaluation_scores_individual.csv",
+    )
+
+
+@router.get("/export/validation-scores")
+def export_validation_scores(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Download heuristic-validation result grid: defenses vs validation samples."""
+    rows = db.execute(
+        text("""
+            SELECT u.username, s.display_name, s.version, s.id::text,
+                   hs.filename, hfr.model_output
+            FROM heurval_results hr
+            JOIN submissions s            ON s.id  = hr.defense_submission_id
+            JOIN users u                  ON u.id  = s.user_id
+            JOIN heurval_file_results hfr ON hfr.heurval_result_id = hr.id
+            JOIN heurval_samples hs       ON hs.id = hfr.sample_id
+            WHERE s.deleted_at IS NULL
+            ORDER BY s.created_at, hs.filename
+        """)
+    ).fetchall()
+
+    if not rows:
+        return _csv_response([["No validation scores available."]], "validation_scores.csv")
+
+    sub_order: list[str] = []
+    sub_labels: dict[str, str] = {}
+    cells: dict[str, dict[str, int | None]] = {}
+    all_files: set[str] = set()
+
+    for r in rows:
+        sid = r[3]
+        if sid not in sub_labels:
+            sub_order.append(sid)
+            sub_labels[sid] = _submission_label(r[0], r[1], r[2])
+            cells[sid] = {}
+        cells[sid][r[4]] = r[5]
+        all_files.add(r[4])
+
+    sorted_files = sorted(all_files)
+    data_rows: list[list] = [["Defense"] + sorted_files]
+    for sid in sub_order:
+        row_cells = [str(cells[sid].get(f, "")) for f in sorted_files]
+        data_rows.append([sub_labels[sid]] + row_cells)
+
+    return _csv_response(data_rows, "validation_scores.csv")
+
+
+@router.get("/export/behavioral-analysis")
+def export_behavioral_analysis(
+    _: AuthenticatedUser = Depends(require_admin_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Download behavioral analysis status grid: attacks vs template files."""
+    rows = db.execute(
+        text("""
+            SELECT u.username, s.display_name, s.version, s.id::text,
+                   orig.filename AS template_filename,
+                   af.behavior_status
+            FROM submissions s
+            JOIN users u       ON u.id  = s.user_id
+            JOIN attack_files af   ON af.attack_submission_id = s.id
+            JOIN attack_files orig ON orig.id = af.original_file_id
+            WHERE s.submission_type = 'attack'
+              AND s.deleted_at IS NULL
+              AND af.original_file_id IS NOT NULL
+            ORDER BY s.created_at, orig.filename
+        """)
+    ).fetchall()
+
+    if not rows:
+        return _csv_response(
+            [["No behavioral analysis data available."]],
+            "behavioral_analysis.csv",
+        )
+
+    sub_order: list[str] = []
+    sub_labels: dict[str, str] = {}
+    cells: dict[str, dict[str, str]] = {}
+    all_files: set[str] = set()
+
+    for r in rows:
+        sid = r[3]
+        if sid not in sub_labels:
+            sub_order.append(sid)
+            sub_labels[sid] = _submission_label(r[0], r[1], r[2])
+            cells[sid] = {}
+        cells[sid][r[4]] = r[5] or ""
+        all_files.add(r[4])
+
+    sorted_files = sorted(all_files)
+    data_rows: list[list] = [["Attack"] + sorted_files]
+    for sid in sub_order:
+        row_cells = [cells[sid].get(f, "") for f in sorted_files]
+        data_rows.append([sub_labels[sid]] + row_cells)
+
+    return _csv_response(data_rows, "behavioral_analysis.csv")

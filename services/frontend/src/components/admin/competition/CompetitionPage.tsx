@@ -446,6 +446,201 @@ function ValidationSamplesSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Downloads
+// ---------------------------------------------------------------------------
+
+interface UserOption { id: string; username: string; email: string; }
+interface SubOption  { id: string; display_name: string | null; version: string; status: string; }
+
+async function triggerCsvDownload(path: string, filename: string): Promise<void> {
+  const res = await adminFetch(path);
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function DownloadButton({
+  label, path, filename,
+}: { label: string; path: string; filename: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState<string | null>(null);
+
+  async function handle() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await triggerCsvDownload(path, filename);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Download failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 shrink-0">
+      <button
+        onClick={handle}
+        disabled={busy}
+        className="rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {busy ? 'Downloading...' : label}
+      </button>
+      {err && <span className="text-xs text-red-600">{err}</span>}
+    </div>
+  );
+}
+
+function IndividualScoresDownload() {
+  const [users, setUsers]           = useState<UserOption[]>([]);
+  const [defUserId, setDefUserId]   = useState('');
+  const [atkUserId, setAtkUserId]   = useState('');
+  const [defSubs, setDefSubs]       = useState<SubOption[]>([]);
+  const [atkSubs, setAtkSubs]       = useState<SubOption[]>([]);
+  const [defSubId, setDefSubId]     = useState('');
+  const [atkSubId, setAtkSubId]     = useState('');
+  const [busy, setBusy]             = useState(false);
+  const [err, setErr]               = useState<string | null>(null);
+
+  useEffect(() => {
+    adminFetch('/admin/users?limit=200')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setUsers(d.items ?? []); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!defUserId) { setDefSubs([]); setDefSubId(''); return; }
+    adminFetch(`/admin/submissions/users/${defUserId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        setDefSubs((d?.submissions ?? []).filter((s: { submission_type: string }) => s.submission_type === 'defense'));
+        setDefSubId('');
+      })
+      .catch(() => {});
+  }, [defUserId]);
+
+  useEffect(() => {
+    if (!atkUserId) { setAtkSubs([]); setAtkSubId(''); return; }
+    adminFetch(`/admin/submissions/users/${atkUserId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        setAtkSubs((d?.submissions ?? []).filter((s: { submission_type: string }) => s.submission_type === 'attack'));
+        setAtkSubId('');
+      })
+      .catch(() => {});
+  }, [atkUserId]);
+
+  async function handle() {
+    if (!defSubId || !atkSubId) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await triggerCsvDownload(
+        `/admin/export/scores/individual?defense_submission_id=${defSubId}&attack_submission_id=${atkSubId}`,
+        'evaluation_scores_individual.csv',
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Download failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selectCls = "text-xs border border-gray-200 rounded px-2 py-1.5 m-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-40 max-w-48";
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-sm font-medium text-gray-800">Individual Evaluation Scores</p>
+        <p className="text-xs text-gray-500">Per-file model output for a specific attacker-defender submission pair.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <p className="text-xs text-gray-400">Defender</p>
+          <select value={defUserId} onChange={e => setDefUserId(e.target.value)} className={selectCls}>
+            <option value="">Select user...</option>
+            {users.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+          </select>
+          <select value={defSubId} onChange={e => setDefSubId(e.target.value)} disabled={!defSubs.length} className={selectCls}>
+            <option value="">Select submission...</option>
+            {defSubs.map(s => <option key={s.id} value={s.id}>{s.display_name || s.version} (v{s.version})</option>)}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-xs text-gray-400">Attacker</p>
+          <select value={atkUserId} onChange={e => setAtkUserId(e.target.value)} className={selectCls}>
+            <option value="">Select user...</option>
+            {users.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+          </select>
+          <select value={atkSubId} onChange={e => setAtkSubId(e.target.value)} disabled={!atkSubs.length} className={selectCls}>
+            <option value="">Select submission...</option>
+            {atkSubs.map(s => <option key={s.id} value={s.id}>{s.display_name || s.version} (v{s.version})</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handle}
+          disabled={busy || !defSubId || !atkSubId}
+          className="rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {busy ? 'Downloading...' : 'Download CSV'}
+        </button>
+        {err && <span className="text-xs text-red-600">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+const BULK_EXPORTS: { label: string; description: string; path: string; filename: string }[] = [
+  {
+    label: 'All Evaluation Scores',
+    description: 'Confusion-matrix results (TP/FP/FN/TN) for every active attacker-defender pair.',
+    path: '/admin/export/scores/all',
+    filename: 'evaluation_scores_all.csv',
+  },
+  {
+    label: 'Defense Validation Scores',
+    description: 'Per-sample model output for each defense submission across all defense validation samples.',
+    path: '/admin/export/validation-scores',
+    filename: 'validation_scores.csv',
+  },
+  {
+    label: 'Behavioral Analysis',
+    description: 'Behavior classification status for each attack file relative to its source template.',
+    path: '/admin/export/behavioral-analysis',
+    filename: 'behavioral_analysis.csv',
+  },
+];
+
+function DownloadsSection() {
+  return (
+    <Section title="Export Data">
+      <div className="space-y-2">
+        {BULK_EXPORTS.map(({ label, description, path, filename }) => (
+          <div key={path} className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-gray-800">{label}</p>
+              <p className="text-xs text-gray-500">{description}</p>
+            </div>
+            <DownloadButton label="Download CSV" path={path} filename={filename} />
+          </div>
+        ))}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <IndividualScoresDownload />
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -456,6 +651,7 @@ export default function CompetitionPage() {
       <SubmissionSection />
       <AttackTemplateSection />
       <ValidationSamplesSection />
+      <DownloadsSection />
     </div>
   );
 }
