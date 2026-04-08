@@ -689,6 +689,7 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
     # Override config: enable similarity check
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = True
+    mock_attack_cfg.skip_seeding = False
     mock_attack_cfg.reject_dissimilar_attacks = True
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100
@@ -743,6 +744,7 @@ def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_h
     # Override config: enable similarity check
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = True
+    mock_attack_cfg.skip_seeding = False
     mock_attack_cfg.reject_dissimilar_attacks = True
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100
