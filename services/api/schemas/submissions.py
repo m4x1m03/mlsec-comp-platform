@@ -25,17 +25,20 @@ class CreateDefenseDockerRequest(BaseModel):
 class CreateDefenseGitHubRequest(BaseModel):
     """Request schema for GitHub repository defense submission."""
 
-    git_repo: str = Field(..., pattern=r"^https://github\.com/[\w-]+/[\w-]+")
+    git_repo: str = Field(..., max_length=500)
     version: str = Field(..., pattern=r"^\d+\.\d+\.\d+$")
     display_name: str | None = Field(None, max_length=200)
 
     @field_validator("git_repo")
     @classmethod
     def validate_github_url(cls, v: str) -> str:
-        """Strip whitespace and .git suffix from GitHub URL."""
+        """Strip whitespace, remove .git suffix, and enforce GitHub URL format."""
+        import re
         v = v.strip()
         if v.endswith(".git"):
             v = v[:-4]
+        if not re.match(r"^https://github\.com/[\w-]+/[\w-]+$", v):
+            raise ValueError("Provided path is incorrectly formatted")
         return v
 
 
