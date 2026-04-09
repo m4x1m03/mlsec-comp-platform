@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import re as _re
 import shutil
 import tempfile
 from pathlib import Path
@@ -12,6 +13,18 @@ from celery.utils.log import get_task_logger
 from .validation import validate_dockerfile_safety, validate_build_context
 
 logger = get_task_logger(__name__)
+
+_GITHUB_TREE_RE = _re.compile(
+    r'^(https://github\.com/[\w-]+/[\w-]+)(?:/tree/(?!.*\.\.)([\w.\-/]+))?$'
+)
+
+
+def _parse_github_url(url: str) -> tuple[str, str | None]:
+    """Return (clone_url, branch) from a stored GitHub URL. branch is None if not present."""
+    m = _GITHUB_TREE_RE.match(url)
+    if not m:
+        raise ValueError(f"Unparseable GitHub URL: {url!r}")
+    return m.group(1), m.group(2)
 
 
 def build_from_github_repo(
@@ -38,17 +51,17 @@ def build_from_github_repo(
     try:
         # Create temporary directory for cloning
         temp_dir = tempfile.mkdtemp(prefix=f"defense_{submission_id}_")
-        logger.info(f"Cloning GitHub repo {git_repo_url} to {temp_dir}")
+
+        clone_url, branch = _parse_github_url(git_repo_url)
+        logger.info(f"Cloning GitHub repo {clone_url} (branch={branch!r}) to {temp_dir}")
 
         # Shallow clone for efficiency (depth=1)
         try:
-            git.Repo.clone_from(
-                git_repo_url,
-                temp_dir,
-                depth=1,
-                single_branch=True
-            )
-            logger.info(f"Successfully cloned {git_repo_url}")
+            clone_kwargs: dict = dict(depth=1, single_branch=True)
+            if branch is not None:
+                clone_kwargs["branch"] = branch
+            git.Repo.clone_from(clone_url, temp_dir, **clone_kwargs)
+            logger.info(f"Successfully cloned {clone_url}")
         except git.GitCommandError as e:
             raise ValueError(f"Failed to clone repository: {e}") from e
 

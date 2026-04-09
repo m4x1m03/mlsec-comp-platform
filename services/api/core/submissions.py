@@ -74,11 +74,11 @@ def validate_github_url_format(url: str) -> None:
     Raises:
         HTTPException(400): If format is invalid
     """
-    pattern = r"^https://github\.com/[\w-]+/[\w-]+(\.git)?$"
+    pattern = r"^https://github\.com/[\w-]+/[\w-]+(/tree/(?!.*\.\.)([\w.\-/]+))?(\.git)?$"
     if not re.match(pattern, url.strip()):
         raise HTTPException(
             status_code=400,
-            detail="Invalid GitHub URL format. Must be https://github.com/username/repository",
+            detail="Invalid GitHub URL format. Expected: https://github.com/username/repository or https://github.com/username/repository/tree/branch",
         )
 
 

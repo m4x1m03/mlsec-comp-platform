@@ -37,7 +37,7 @@ class CreateDefenseGitHubRequest(BaseModel):
         v = v.strip()
         if v.endswith(".git"):
             v = v[:-4]
-        if not re.match(r"^https://github\.com/[\w-]+/[\w-]+$", v):
+        if not re.match(r"^https://github\.com/[\w-]+/[\w-]+(/tree/(?!.*\.\.)([\w.\-/]+))?$", v):
             raise ValueError("Provided path is incorrectly formatted")
         return v
 

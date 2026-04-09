@@ -5,8 +5,103 @@ from __future__ import annotations
 import pytest
 import docker
 import random
+from unittest.mock import MagicMock, patch
 
-from worker.defense.github_handler import build_from_github_repo
+from worker.defense.github_handler import build_from_github_repo, _parse_github_url
+
+
+# ============================================================================
+# Unit tests for _parse_github_url (no network, no docker)
+# ============================================================================
+
+def test_parse_github_url_no_branch():
+    """Plain URL returns (url, None)."""
+    url = "https://github.com/user/repo"
+    clone_url, branch = _parse_github_url(url)
+    assert clone_url == "https://github.com/user/repo"
+    assert branch is None
+
+
+def test_parse_github_url_simple_branch():
+    """URL with /tree/<branch> returns correct tuple."""
+    clone_url, branch = _parse_github_url("https://github.com/user/repo/tree/my-branch")
+    assert clone_url == "https://github.com/user/repo"
+    assert branch == "my-branch"
+
+
+def test_parse_github_url_slash_branch():
+    """URL with a multi-segment branch (feature/foo) parses correctly."""
+    clone_url, branch = _parse_github_url("https://github.com/user/repo/tree/feature/my-feature")
+    assert clone_url == "https://github.com/user/repo"
+    assert branch == "feature/my-feature"
+
+
+def test_parse_github_url_invalid_raises():
+    """Garbage URL raises ValueError."""
+    with pytest.raises(ValueError, match="Unparseable"):
+        _parse_github_url("not-a-github-url")
+
+
+def test_build_clones_with_branch(config_dict):
+    """build_from_github_repo passes branch= to git.Repo.clone_from for branch URLs."""
+    mock_repo = MagicMock()
+
+    with patch("worker.defense.github_handler.git") as mock_git, \
+         patch("worker.defense.github_handler.validate_dockerfile_safety"), \
+         patch("worker.defense.github_handler.validate_build_context"), \
+         patch("worker.defense.github_handler.Path") as mock_path, \
+         patch("worker.defense.github_handler.docker") as mock_docker:
+
+        mock_git.Repo.clone_from.return_value = mock_repo
+        mock_git.GitCommandError = Exception
+
+        dockerfile = MagicMock()
+        dockerfile.exists.return_value = True
+        mock_path.return_value.__truediv__ = lambda self, other: dockerfile
+
+        mock_image = MagicMock()
+        mock_docker.from_env.return_value.images.build.return_value = (mock_image, [])
+
+        build_from_github_repo(
+            "https://github.com/user/repo/tree/my-branch",
+            12345,
+            config_dict,
+        )
+
+    call_kwargs = mock_git.Repo.clone_from.call_args
+    assert call_kwargs[0][0] == "https://github.com/user/repo"
+    assert call_kwargs[1].get("branch") == "my-branch"
+
+
+def test_build_clones_without_branch(config_dict):
+    """build_from_github_repo omits branch= kwarg for plain URLs."""
+    mock_repo = MagicMock()
+
+    with patch("worker.defense.github_handler.git") as mock_git, \
+         patch("worker.defense.github_handler.validate_dockerfile_safety"), \
+         patch("worker.defense.github_handler.validate_build_context"), \
+         patch("worker.defense.github_handler.Path") as mock_path, \
+         patch("worker.defense.github_handler.docker") as mock_docker:
+
+        mock_git.Repo.clone_from.return_value = mock_repo
+        mock_git.GitCommandError = Exception
+
+        dockerfile = MagicMock()
+        dockerfile.exists.return_value = True
+        mock_path.return_value.__truediv__ = lambda self, other: dockerfile
+
+        mock_image = MagicMock()
+        mock_docker.from_env.return_value.images.build.return_value = (mock_image, [])
+
+        build_from_github_repo(
+            "https://github.com/user/repo",
+            12345,
+            config_dict,
+        )
+
+    call_kwargs = mock_git.Repo.clone_from.call_args
+    assert call_kwargs[0][0] == "https://github.com/user/repo"
+    assert "branch" not in call_kwargs[1]
 
 
 def test_build_from_real_github_repo(config_dict):
