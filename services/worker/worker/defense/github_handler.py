@@ -15,12 +15,16 @@ from .validation import validate_dockerfile_safety, validate_build_context
 logger = get_task_logger(__name__)
 
 _GITHUB_TREE_RE = _re.compile(
-    r'^(https://github\.com/[\w-]+/[\w-]+)(?:/tree/(?!.*\.\.)([\w.\-/]+))?$'
+    r'^(https://github\.com/[\w-]+/[\w-]+)(?:\.git)?(?:/tree/(?!.*\.\.)([\w.\-/]+))?$'
 )
 
 
 def _parse_github_url(url: str) -> tuple[str, str | None]:
-    """Return (clone_url, branch) from a stored GitHub URL. branch is None if not present."""
+    """Return (clone_url, branch) from a stored GitHub URL. branch is None if not present.
+
+    Handles optional .git suffix and optional /tree/<branch> segment.
+    The returned clone_url never contains a .git suffix.
+    """
     m = _GITHUB_TREE_RE.match(url)
     if not m:
         raise ValueError(f"Unparseable GitHub URL: {url!r}")

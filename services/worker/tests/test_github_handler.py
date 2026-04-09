@@ -36,6 +36,13 @@ def test_parse_github_url_slash_branch():
     assert branch == "feature/my-feature"
 
 
+def test_parse_github_url_git_suffix():
+    """.git suffix is accepted and stripped from the returned clone_url."""
+    clone_url, branch = _parse_github_url("https://github.com/user/repo.git")
+    assert clone_url == "https://github.com/user/repo"
+    assert branch is None
+
+
 def test_parse_github_url_invalid_raises():
     """Garbage URL raises ValueError."""
     with pytest.raises(ValueError, match="Unparseable"):
