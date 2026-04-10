@@ -15,7 +15,7 @@ worker:
     defense_max_restarts: 3      # max container restarts before error state
     stats_sampling_rate: 25      # Number of samples evaluated before checking container stats again (This has a massive impact on total evaluation time)
   heuristic_validation:
-    enable_heuristic_validation: true
+    enable_heuristic_validation: false
     heurval_malware_fpr_minimum: 0.0
     heurval_malware_tpr_minimum: 0.30
     heurval_goodware_fpr_minimum: 0.0

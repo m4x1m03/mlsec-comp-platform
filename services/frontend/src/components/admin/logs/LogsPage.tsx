@@ -225,6 +225,8 @@ interface JobDetailSub {
   status: string;
   source_type?: string | null;
   file_count?: number | null;
+  heurval_done?: number | null;
+  heurval_total?: number | null;
 }
 
 interface JobDetailRun {
@@ -232,6 +234,8 @@ interface JobDetailRun {
   counterpart_id: string;
   status: string | null;
   duration_ms: number | null;
+  files_done?: number | null;
+  files_total?: number | null;
 }
 
 interface JobDetail {
@@ -270,6 +274,12 @@ function JobDetailPanel({ detail, jobType }: { detail: JobDetail; jobType: strin
                 <dd className="text-gray-700 capitalize">{submission.source_type}</dd>
               </>
             )}
+            {jobType === 'D' && submission.heurval_total != null && (
+              <>
+                <dt className="text-gray-400">Heurval</dt>
+                <dd className="text-gray-700">{submission.heurval_done ?? 0}/{submission.heurval_total} samples</dd>
+              </>
+            )}
             {jobType === 'A' && submission.file_count != null && (
               <>
                 <dt className="text-gray-400">Files</dt>
@@ -289,6 +299,7 @@ function JobDetailPanel({ detail, jobType }: { detail: JobDetail; jobType: strin
               <tr className="text-gray-400">
                 <th className="text-left font-medium pb-1 pr-4">{counterpartLabel}</th>
                 <th className="text-left font-medium pb-1 pr-4">Status</th>
+                <th className="text-left font-medium pb-1 pr-4">Progress</th>
                 <th className="text-left font-medium pb-1">Duration</th>
               </tr>
             </thead>
@@ -297,6 +308,9 @@ function JobDetailPanel({ detail, jobType }: { detail: JobDetail; jobType: strin
                 <tr key={r.id}>
                   <td className="font-mono text-gray-600 py-1 pr-4">{shortId(r.counterpart_id)}</td>
                   <td className="py-1 pr-4"><StatusBadge status={r.status} /></td>
+                  <td className="text-gray-500 py-1 pr-4">
+                    {r.files_total != null ? `${r.files_done ?? 0}/${r.files_total}` : '-'}
+                  </td>
                   <td className="text-gray-500 py-1">{r.duration_ms != null ? `${r.duration_ms} ms` : '-'}</td>
                 </tr>
               ))}

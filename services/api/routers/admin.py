@@ -514,6 +514,31 @@ def get_job_detail(
                 .mappings()
                 .fetchone()
             )
+            heurval_done: int | None = None
+            heurval_total: int | None = None
+            hv_row = (
+                db.execute(
+                    text(
+                        """
+                        SELECT hr.sample_set_id,
+                               COUNT(hfr.id) AS done,
+                               (SELECT COUNT(*) FROM heurval_samples hs
+                                WHERE hs.sample_set_id = hr.sample_set_id) AS total
+                        FROM heurval_results hr
+                        LEFT JOIN heurval_file_results hfr ON hfr.heurval_result_id = hr.id
+                        WHERE hr.defense_submission_id = :sub_id
+                        GROUP BY hr.sample_set_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"sub_id": sub_id},
+                )
+                .mappings()
+                .fetchone()
+            )
+            if hv_row:
+                heurval_done = int(hv_row["done"])
+                heurval_total = int(hv_row["total"])
             if sub_row:
                 submission = JobDetailSubmission(
                     submission_id=str(sub_row["id"]),
@@ -521,15 +546,25 @@ def get_job_detail(
                     display_name=sub_row["display_name"],
                     status=sub_row["status"],
                     source_type=sub_row["source_type"],
+                    heurval_done=heurval_done,
+                    heurval_total=heurval_total,
                 )
             run_rows = (
                 db.execute(
                     text(
                         """
-                        SELECT id, attack_submission_id, status, duration_ms
-                        FROM evaluation_runs
-                        WHERE defense_submission_id = :id
-                        ORDER BY created_at DESC
+                        SELECT er.id,
+                               er.attack_submission_id,
+                               er.status,
+                               er.duration_ms,
+                               COUNT(efr.id) AS files_done,
+                               (SELECT COUNT(*) FROM attack_files af
+                                WHERE af.attack_submission_id = er.attack_submission_id) AS files_total
+                        FROM evaluation_runs er
+                        LEFT JOIN evaluation_file_results efr ON efr.evaluation_run_id = er.id
+                        WHERE er.defense_submission_id = :id
+                        GROUP BY er.id, er.attack_submission_id, er.status, er.duration_ms
+                        ORDER BY er.created_at DESC
                         LIMIT 10
                         """
                     ),
@@ -544,6 +579,8 @@ def get_job_detail(
                     counterpart_id=str(r["attack_submission_id"]),
                     status=r["status"],
                     duration_ms=r["duration_ms"],
+                    files_done=int(r["files_done"]),
+                    files_total=int(r["files_total"]),
                 )
                 for r in run_rows
             ]
@@ -579,10 +616,18 @@ def get_job_detail(
                 db.execute(
                     text(
                         """
-                        SELECT id, defense_submission_id, status, duration_ms
-                        FROM evaluation_runs
-                        WHERE attack_submission_id = :id
-                        ORDER BY created_at DESC
+                        SELECT er.id,
+                               er.defense_submission_id,
+                               er.status,
+                               er.duration_ms,
+                               COUNT(efr.id) AS files_done,
+                               (SELECT COUNT(*) FROM attack_files af
+                                WHERE af.attack_submission_id = er.attack_submission_id) AS files_total
+                        FROM evaluation_runs er
+                        LEFT JOIN evaluation_file_results efr ON efr.evaluation_run_id = er.id
+                        WHERE er.attack_submission_id = :id
+                        GROUP BY er.id, er.defense_submission_id, er.status, er.duration_ms
+                        ORDER BY er.created_at DESC
                         LIMIT 10
                         """
                     ),
@@ -597,6 +642,8 @@ def get_job_detail(
                     counterpart_id=str(r["defense_submission_id"]),
                     status=r["status"],
                     duration_ms=r["duration_ms"],
+                    files_done=int(r["files_done"]),
+                    files_total=int(r["files_total"]),
                 )
                 for r in run_rows
             ]

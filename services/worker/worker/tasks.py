@@ -377,6 +377,12 @@ async def _validate_defense_container(
                     mark_defense_failed(defense_submission_id, error_msg)
                     return False
 
+        else:
+            logger.info(
+                "Heuristic validation disabled; skipping for defense %s.",
+                defense_submission_id,
+            )
+
         mark_defense_validated(defense_submission_id)
         logger.info(f"Validation PASSED for defense {defense_submission_id}")
         return True

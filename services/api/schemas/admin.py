@@ -45,6 +45,8 @@ class JobDetailSubmission(BaseModel):
     status: str
     source_type: str | None = None
     file_count: int | None = None
+    heurval_done: int | None = None
+    heurval_total: int | None = None
 
 
 class JobDetailEvalRun(BaseModel):
@@ -52,6 +54,8 @@ class JobDetailEvalRun(BaseModel):
     counterpart_id: str
     status: str | None
     duration_ms: int | None
+    files_done: int | None = None
+    files_total: int | None = None
 
 
 class JobDetailResponse(BaseModel):
