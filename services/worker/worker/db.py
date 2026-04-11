@@ -95,20 +95,27 @@ def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: s
         return str(result)
 
 
-def set_evaluation_run_status(evaluation_run_id: str, status: str) -> None:
+def set_evaluation_run_status(
+    evaluation_run_id: str,
+    status: str,
+    *,
+    error: str | None = None,
+) -> None:
     from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-                UPDATE evaluation_runs 
+                UPDATE evaluation_runs
                 SET status = :status,
+                    error = :error,
+                    duration_ms = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) * 1000,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
                 """
             ),
-            {"status": status, "id": evaluation_run_id},
+            {"status": status, "error": error, "id": evaluation_run_id},
         )
 
 

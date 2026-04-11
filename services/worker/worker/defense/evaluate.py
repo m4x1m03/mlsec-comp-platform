@@ -378,7 +378,7 @@ async def evaluate_defenses_async(
                             "Defense %s exceeded maximum restarts; removing from batch.",
                             ctx["defense_submission_id"],
                         )
-                        set_evaluation_run_status(runs[i], "failed")
+                        set_evaluation_run_status(runs[i], "failed", error=error_msg)
                         mark_defense_failed(ctx["defense_submission_id"], error_msg)
                         failed_indices.append(i)
                     elif isinstance(result, Exception):
