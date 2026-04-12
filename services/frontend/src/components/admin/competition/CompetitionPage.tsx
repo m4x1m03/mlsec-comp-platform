@@ -560,7 +560,7 @@ function IndividualScoresDownload() {
         <p className="text-sm font-medium text-gray-800">Individual Evaluation Scores</p>
         <p className="text-xs text-gray-500">Per-file model output for a specific attacker-defender submission pair.</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <p className="text-xs text-gray-400">Defender</p>
           <select value={defUserId} onChange={e => setDefUserId(e.target.value)} className={selectCls}>
