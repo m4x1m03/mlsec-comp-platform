@@ -129,22 +129,35 @@ export default function EvaluationMatrix() {
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
         <table className="min-w-full border-collapse text-sm">
           <thead>
+            {/* Axis label row */}
             <tr>
-              <th className="sticky left-0 z-10 bg-gray-50 border-b border-r border-gray-200 px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">
-                Defense \ Attack
-              </th>
+              <th className="sticky left-0 z-10 bg-gray-50 border-b border-r border-gray-200 w-5 min-w-[20px]" />
+              <th className="sticky left-5 z-10 bg-gray-50 border-b border-gray-200 w-[88px] min-w-[88px] md:w-[132px] md:min-w-[132px]" />
+              {attackers.length > 0 && (
+                <th
+                  colSpan={attackers.length}
+                  className="border-b border-r border-gray-200 bg-gray-50 py-1.5 text-center text-xs font-semibold text-gray-400"
+                >
+                  Attack
+                </th>
+              )}
+            </tr>
+            {/* Column headers row */}
+            <tr>
+              <th className="sticky left-0 z-10 bg-gray-50 border-r border-gray-200 w-5 min-w-[20px]" />
+              <th className="sticky left-5 z-10 bg-gray-50 border-b border-r border-gray-200 px-2 py-2 md:px-4 md:py-3 w-[88px] min-w-[88px] md:w-[132px] md:min-w-[132px]" />
               {attackers.map(atk => (
                 <th
                   key={atk.submission_id}
-                  className="border-b border-r border-gray-200 px-3 py-3 text-center bg-gray-50 w-[112px] min-w-[112px] max-w-[112px]"
+                  className="border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center bg-gray-50 w-[72px] min-w-[72px] max-w-[72px] md:w-[112px] md:min-w-[112px] md:max-w-[112px]"
                   title={[atk.username, atk.display_name, `v${atk.version}`].filter(Boolean).join(' · ')}
                 >
                   <div className="w-full overflow-hidden">
                     <div className="text-xs font-semibold text-gray-700 truncate">{atk.username}</div>
                     {atk.display_name && (
-                      <div className="text-xs font-normal text-gray-400 mt-0.5 truncate">{atk.display_name}</div>
+                      <div className="hidden md:block text-xs font-normal text-gray-400 mt-0.5 truncate">{atk.display_name}</div>
                     )}
-                    <div className="text-xs font-mono font-normal text-gray-400 truncate">v{atk.version}</div>
+                    <div className="hidden md:block text-xs font-mono font-normal text-gray-400 truncate">v{atk.version}</div>
                   </div>
                 </th>
               ))}
@@ -153,16 +166,29 @@ export default function EvaluationMatrix() {
           <tbody>
             {defenders.map((def, di) => (
               <tr key={def.submission_id} className={di % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
+                {di === 0 && (
+                  <td
+                    rowSpan={defenders.length}
+                    className="sticky left-0 z-10 bg-gray-50 border-r border-gray-200 w-5 min-w-[20px] text-center align-middle"
+                  >
+                    <span
+                      className="text-xs font-semibold text-gray-400 select-none"
+                      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                    >
+                      Defense
+                    </span>
+                  </td>
+                )}
                 <td
-                  className={`sticky left-0 z-10 border-b border-r border-gray-200 px-3 py-3 w-[132px] min-w-[132px] max-w-[132px] ${di % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+                  className={`sticky left-5 z-10 border-b border-r border-gray-200 px-2 py-2 md:px-3 md:py-3 w-[88px] min-w-[88px] max-w-[88px] md:w-[132px] md:min-w-[132px] md:max-w-[132px] ${di % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
                   title={[def.username, def.display_name, `v${def.version}`].filter(Boolean).join(' · ')}
                 >
                   <div className="w-full overflow-hidden">
                     <div className="text-xs font-semibold text-gray-700 truncate">{def.username}</div>
                     {def.display_name && (
-                      <div className="text-xs text-gray-400 truncate">{def.display_name}</div>
+                      <div className="hidden md:block text-xs text-gray-400 truncate">{def.display_name}</div>
                     )}
-                    <div className="text-xs font-mono text-gray-400 truncate">v{def.version}</div>
+                    <div className="hidden md:block text-xs font-mono text-gray-400 truncate">v{def.version}</div>
                   </div>
                 </td>
                 {attackers.map(atk => {
@@ -174,7 +200,7 @@ export default function EvaluationMatrix() {
                   return (
                     <td
                       key={atk.submission_id}
-                      className="border-b border-r border-gray-200 px-3 py-3 text-center transition-colors duration-300 w-[112px] min-w-[112px]"
+                      className="border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center transition-colors duration-300 w-[72px] min-w-[72px] md:w-[112px] md:min-w-[112px]"
                       style={bgColor ? { backgroundColor: bgColor } : undefined}
                       title={
                         entry
