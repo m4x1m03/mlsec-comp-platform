@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import docker
-import httpx
+import requests
 
 from worker.config import EvaluationConfig, get_config
 from worker.db import (
@@ -39,8 +39,29 @@ class EvalOutcome:
     duration_ms: int
 
 
+_CONTAINER_READY_TIMEOUT = 30  # seconds to wait for container to accept requests after restart
+
+
+async def _wait_for_container_ready(container_url: str, container_name: str) -> None:
+    """Poll container_url until it responds or the timeout expires."""
+    start_wait = time.monotonic()
+    while (time.monotonic() - start_wait) < _CONTAINER_READY_TIMEOUT:
+        try:
+            resp = await asyncio.to_thread(requests.get, container_url, timeout=2)
+            if resp.status_code != 502:
+                logger.info("Container %s is ready after restart.", container_name)
+                return
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    logger.warning(
+        "Container %s did not become ready within %ds after restart.",
+        container_name,
+        _CONTAINER_READY_TIMEOUT,
+    )
+
+
 async def evaluate_sample_against_container(
-    client: httpx.AsyncClient,
     container_url: str,
     docker_client: docker.DockerClient,
     container_name: str,
@@ -64,8 +85,15 @@ async def evaluate_sample_against_container(
 
     Note: restart handling behavior may change in future iterations.
 
+    Uses requests.post via asyncio.to_thread rather than an async HTTP client.
+    This avoids a known issue where async clients interleave sending a large
+    request body with reading the response: if the WSGI handler returns before
+    consuming the request body, the server closes the connection while the
+    async client is still writing, producing a spurious ReadError. Synchronous
+    requests sends the full body before reading the response, so this race
+    cannot occur.
+
     Args:
-        client: Shared httpx async client.
         container_url: URL to POST sample bytes to.
         docker_client: Docker SDK client for stats and restart operations.
         container_name: Name of the container to monitor and restart.
@@ -73,6 +101,9 @@ async def evaluate_sample_against_container(
         eval_cfg: Evaluation configuration with resource limits.
         restart_count_ref: Single-element list used as a mutable counter
             shared across calls for the same container.
+        ctx: Shared per-defense context dict (holds cached container object).
+        file_index: Index of this file within the current attack, used to
+            control stats sampling rate.
 
     Returns:
         EvalOutcome with model_output, evaded_reason, and duration_ms.
@@ -88,9 +119,10 @@ async def evaluate_sample_against_container(
     short_timeout = eval_cfg.defense_max_time / 1000.0
 
     try:
-        response = await client.post(
+        response = await asyncio.to_thread(
+            requests.post,
             container_url,
-            content=sample_content,
+            data=sample_content,
             headers=headers,
             timeout=short_timeout,
         )
@@ -124,6 +156,7 @@ async def evaluate_sample_against_container(
                             f"({eval_cfg.defense_max_restarts})."
                         )
                     await asyncio.to_thread(container.restart)
+                    await _wait_for_container_ready(container_url, container_name)
             except ContainerRestartError:
                 raise
             except Exception as exc:
@@ -149,7 +182,7 @@ async def evaluate_sample_against_container(
                     response.status_code,
                 )
 
-    except httpx.TimeoutException:
+    except requests.exceptions.Timeout:
         evaded_reason = "time_limit"
         model_output = 0
         logger.warning(
@@ -162,13 +195,14 @@ async def evaluate_sample_against_container(
             eval_cfg.defense_max_timeout - eval_cfg.defense_max_time
         ) / 1000.0
         try:
-            await client.post(
+            await asyncio.to_thread(
+                requests.post,
                 container_url,
-                content=sample_content,
+                data=sample_content,
                 headers=headers,
                 timeout=max(extended_timeout, 0.0),
             )
-        except httpx.TimeoutException:
+        except requests.exceptions.Timeout:
             logger.warning(
                 "Container %s unresponsive after full timeout (%d ms); restarting.",
                 container_name,
@@ -185,6 +219,9 @@ async def evaluate_sample_against_container(
                     ctx["container_obj"] = await asyncio.to_thread(docker_client.containers.get, container_name)
                 container = ctx["container_obj"]
                 await asyncio.to_thread(container.restart)
+                await _wait_for_container_ready(container_url, container_name)
+            except ContainerRestartError:
+                raise
             except Exception as exc:
                 logger.warning(
                     "Failed to restart container %s: %s", container_name, exc
@@ -194,9 +231,9 @@ async def evaluate_sample_against_container(
                 "Extended wait request failed for %s: %s", container_url, exc
             )
 
-    except httpx.NetworkError as exc:
-        # Connection dropped mid-request (ReadError, ConnectError, etc.).
-        # Treat this the same as a container crash: mark evaded, restart.
+    except requests.exceptions.ConnectionError as exc:
+        # Connection dropped mid-request.
+        # Treat this as a container crash: mark evaded, restart.
         evaded_reason = "connection_error"
         model_output = 0
         logger.warning(
@@ -215,9 +252,12 @@ async def evaluate_sample_against_container(
             ctx.pop("container_obj", None)  # Force re-fetch after restart
             ctx["container_obj"] = await asyncio.to_thread(docker_client.containers.get, container_name)
             await asyncio.to_thread(ctx["container_obj"].restart)
+            await _wait_for_container_ready(container_url, container_name)
+        except ContainerRestartError:
+            raise
         except Exception as restart_exc:
             logger.warning(
-                "Failed to restart container %s after network error: %s",
+                "Failed to restart container %s after connection error: %s",
                 container_name,
                 restart_exc,
             )
@@ -231,7 +271,6 @@ async def evaluate_sample_against_container(
 
 
 async def _evaluate_single_sample(
-    client: httpx.AsyncClient,
     ctx: dict[str, Any],
     sample_content: bytes,
     run_id: str,
@@ -245,7 +284,6 @@ async def _evaluate_single_sample(
     loop can remove the failed defense from the active set.
     """
     outcome = await evaluate_sample_against_container(
-        client=client,
         container_url=ctx["url"],
         docker_client=ctx["docker_client"],
         container_name=ctx["container_name"],
@@ -299,116 +337,114 @@ async def evaluate_defenses_async(
         ctx.setdefault("restart_count_ref", [0])
     active_contexts = list(defense_contexts)
 
-    async with httpx.AsyncClient() as client:
-        while True:
-            attack_id = registry.pop_next_attack(worker_id)
+    while True:
+        attack_id = registry.pop_next_attack(worker_id)
 
-            if attack_id is None:
-                empty_poll_count += 1
-                if empty_poll_count >= max_empty_polls:
-                    logger.info("Queue exhausted after %d empty polls", empty_poll_count)
-                    registry.close_queue(worker_id)
-                    break
-                await asyncio.sleep(1)
-                continue
+        if attack_id is None:
+            empty_poll_count += 1
+            if empty_poll_count >= max_empty_polls:
+                logger.info("Queue exhausted after %d empty polls", empty_poll_count)
+                registry.close_queue(worker_id)
+                break
+            await asyncio.sleep(1)
+            continue
 
-            empty_poll_count = 0
-            logger.info("Processing attack %s for batch", attack_id)
+        empty_poll_count = 0
+        logger.info("Processing attack %s for batch", attack_id)
 
-            # Ensure evaluation runs exist for all active defenses in batch.
-            runs: list[str] = []
-            for ctx in active_contexts:
-                def_id = ctx["defense_submission_id"]
-                key = (def_id, attack_id)
-                if key not in evaluation_runs:
-                    run_id = ensure_evaluation_run(
-                        defense_submission_id=def_id,
-                        attack_submission_id=attack_id,
-                    )
-                    evaluation_runs[key] = run_id
-                    mark_defense_evaluating(def_id)
-                runs.append(evaluation_runs[key])
-
-            # Process attack files
-            attack_files = get_attack_files(attack_id)
-            for f_idx, file_info in enumerate(attack_files):
-                file_id = file_info["id"]
-                object_key = file_info["object_key"]
-
-                try:
-                    local_path = await get_sample_path(object_key)
-                    with open(local_path, "rb") as f:
-                        sample_content = f.read()
-                except Exception as e:
-                    for run_id in runs:
-                        upsert_evaluation(
-                            evaluation_run_id=run_id,
-                            attack_file_id=file_id,
-                            result=None,
-                            error=f"Cache/MinIO error: {e}",
-                            duration_ms=0,
-                        )
-                    continue
-
-                # Broadcast to all active defenses concurrently.
-                tasks = [
-                    _evaluate_single_sample(
-                        client=client,
-                        ctx=ctx,
-                        sample_content=sample_content,
-                        run_id=runs[i],
-                        file_id=file_id,
-                        eval_cfg=eval_cfg,
-                        file_index=f_idx,
-                    )
-                    for i, ctx in enumerate(active_contexts)
-                ]
-
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # Remove any defense that exhausted its restart budget.
-                failed_indices = []
-                for i, result in enumerate(results):
-                    if isinstance(result, ContainerRestartError):
-                        ctx = active_contexts[i]
-                        error_msg = (
-                            "Container exceeded maximum restarts during evaluation."
-                        )
-                        logger.error(
-                            "Defense %s exceeded maximum restarts; removing from batch.",
-                            ctx["defense_submission_id"],
-                        )
-                        set_evaluation_run_status(runs[i], "failed", error=error_msg)
-                        mark_defense_failed(ctx["defense_submission_id"], error_msg)
-                        failed_indices.append(i)
-                    elif isinstance(result, Exception):
-                        logger.error(
-                            "Unexpected error evaluating defense %s: %s",
-                            active_contexts[i]["defense_submission_id"],
-                            result,
-                        )
-
-                for i in reversed(failed_indices):
-                    active_contexts.pop(i)
-                    runs.pop(i)
-
-                if not active_contexts:
-                    logger.warning("All defenses failed; stopping evaluation.")
-                    registry.close_queue(worker_id)
-                    return
-
-            # Mark evaluation runs as done and aggregate pair scores.
-            for ctx, run_id in zip(active_contexts, runs):
-                set_evaluation_run_status(run_id, "done")
-                mark_defense_evaluated(ctx["defense_submission_id"])
-                upsert_pair_score(
-                    evaluation_run_id=run_id,
-                    defense_submission_id=ctx["defense_submission_id"],
+        # Ensure evaluation runs exist for all active defenses in batch.
+        runs: list[str] = []
+        for ctx in active_contexts:
+            def_id = ctx["defense_submission_id"]
+            key = (def_id, attack_id)
+            if key not in evaluation_runs:
+                run_id = ensure_evaluation_run(
+                    defense_submission_id=def_id,
                     attack_submission_id=attack_id,
                 )
+                evaluation_runs[key] = run_id
+                mark_defense_evaluating(def_id)
+            runs.append(evaluation_runs[key])
 
-            registry.publish_leaderboard_update()
-            registry.heartbeat(worker_id)
+        # Process attack files
+        attack_files = get_attack_files(attack_id)
+        for f_idx, file_info in enumerate(attack_files):
+            file_id = file_info["id"]
+            object_key = file_info["object_key"]
+
+            try:
+                local_path = await get_sample_path(object_key)
+                with open(local_path, "rb") as f:
+                    sample_content = f.read()
+            except Exception as e:
+                for run_id in runs:
+                    upsert_evaluation(
+                        evaluation_run_id=run_id,
+                        attack_file_id=file_id,
+                        result=None,
+                        error=f"Cache/MinIO error: {e}",
+                        duration_ms=0,
+                    )
+                continue
+
+            # Broadcast to all active defenses concurrently.
+            tasks = [
+                _evaluate_single_sample(
+                    ctx=ctx,
+                    sample_content=sample_content,
+                    run_id=runs[i],
+                    file_id=file_id,
+                    eval_cfg=eval_cfg,
+                    file_index=f_idx,
+                )
+                for i, ctx in enumerate(active_contexts)
+            ]
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Remove any defense that exhausted its restart budget.
+            failed_indices = []
+            for i, result in enumerate(results):
+                if isinstance(result, ContainerRestartError):
+                    ctx = active_contexts[i]
+                    error_msg = (
+                        "Container exceeded maximum restarts during evaluation."
+                    )
+                    logger.error(
+                        "Defense %s exceeded maximum restarts; removing from batch.",
+                        ctx["defense_submission_id"],
+                    )
+                    set_evaluation_run_status(runs[i], "failed", error=error_msg)
+                    mark_defense_failed(ctx["defense_submission_id"], error_msg)
+                    failed_indices.append(i)
+                elif isinstance(result, Exception):
+                    logger.error(
+                        "Unexpected error evaluating defense %s: %s",
+                        active_contexts[i]["defense_submission_id"],
+                        result,
+                    )
+
+            for i in reversed(failed_indices):
+                active_contexts.pop(i)
+                runs.pop(i)
+
+            if not active_contexts:
+                logger.warning("All defenses failed; stopping evaluation.")
+                registry.close_queue(worker_id)
+                return
+
+        # Mark evaluation runs as done and aggregate pair scores.
+        for ctx, run_id in zip(active_contexts, runs):
+            set_evaluation_run_status(run_id, "done")
+            mark_defense_evaluated(ctx["defense_submission_id"])
+            upsert_pair_score(
+                evaluation_run_id=run_id,
+                defense_submission_id=ctx["defense_submission_id"],
+                attack_submission_id=attack_id,
+            )
+
+        registry.publish_leaderboard_update()
+        registry.heartbeat(worker_id)
 
     logger.info("Async batch evaluation complete")
 
