@@ -149,7 +149,6 @@ def _hash_token(token: str) -> str:
 
 def require_admin_origin(request: Request, *, require_present: bool = True) -> None:
     """Ensure Origin/Referer points to localhost (and is present if required)."""
-    settings = get_settings()
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
 
@@ -168,22 +167,18 @@ def require_admin_origin(request: Request, *, require_present: bool = True) -> N
 
     if origin:
         origin_host = _origin_host(origin)
-        if not _is_loopback_host(origin_host) and not _is_in_allowed_hosts(
-            origin_host, settings.admin_allowed_hosts
-        ):
+        if not _is_loopback_host(origin_host):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin actions require localhost or allowed origin",
+                detail="Admin actions require localhost origin",
             )
 
     if referer:
         referer_host = _origin_host(referer)
-        if not _is_loopback_host(referer_host) and not _is_in_allowed_hosts(
-            referer_host, settings.admin_allowed_hosts
-        ):
+        if not _is_loopback_host(referer_host):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin actions require localhost or allowed origin",
+                detail="Admin actions require localhost origin",
             )
 
 
