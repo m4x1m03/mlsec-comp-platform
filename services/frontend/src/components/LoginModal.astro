@@ -59,8 +59,48 @@
           type="submit"
           class="px-5 bg-primary hover:bg-secondary text-white py-2.5 rounded-lg transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
         >
-          Sign In
+          Login
         </button>
+      </form>
+
+      <form id="login-code-form" class="hidden flex flex-col gap-3">
+        <div id="login-code-message" class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"></div>
+        <div class="flex flex-col gap-1.5 flex-1">
+          <label for="login-code" class="text-sm font-semibold text-gray-700 tracking-wide uppercase">Verification Code</label>
+          <input
+            type="text"
+            id="login-code"
+            name="code"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            required
+            placeholder="123456"
+            class="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent transition"
+          />
+        </div>
+        <p id="login-code-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></p>
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            type="submit"
+            class="px-5 bg-primary hover:bg-secondary text-white py-2.5 rounded-lg transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
+          >
+            Verify
+          </button>
+          <button
+            type="button"
+            id="login-code-resend"
+            class="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300 transition text-sm font-semibold"
+          >
+            Resend
+          </button>
+          <button
+            type="button"
+            id="login-code-edit"
+            class="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300 transition text-sm font-semibold"
+          >
+            Edit Email
+          </button>
+        </div>
       </form>
     </div>
 
@@ -172,13 +212,41 @@
 
 
 <script>
-  //login logic
-  document.getElementById("login-form")!.addEventListener("submit", async function(e) {
-    e.preventDefault();
+  // login + email verification flow
+  const loginForm = document.getElementById("login-form")!;
+  const loginCodeForm = document.getElementById("login-code-form")!;
+  const loginEmailInput = document.getElementById("login-email") as HTMLInputElement;
+  const loginCodeInput = document.getElementById("login-code") as HTMLInputElement;
+  const loginError = document.getElementById("login-error")!;
+  const loginCodeError = document.getElementById("login-code-error")!;
+  const loginCodeMessage = document.getElementById("login-code-message")!;
+  const resendBtn = document.getElementById("login-code-resend") as HTMLButtonElement;
+  const editBtn = document.getElementById("login-code-edit") as HTMLButtonElement;
 
-    const email = (document.getElementById("login-email") as HTMLInputElement).value;
-    const errorEl = document.getElementById("login-error")!;
-    errorEl.classList.add("hidden");
+  let pendingEmail = "";
+
+  function showEmailStep() {
+    loginForm.classList.remove("hidden");
+    loginCodeForm.classList.add("hidden");
+    loginCodeInput.value = "";
+    loginCodeMessage.textContent = "";
+    loginCodeError.classList.add("hidden");
+  }
+
+  function showCodeStep(email: string, expiresAt?: string | null) {
+    pendingEmail = email;
+    loginForm.classList.add("hidden");
+    loginCodeForm.classList.remove("hidden");
+    loginCodeError.classList.add("hidden");
+    const expiry = expiresAt ? new Date(expiresAt) : null;
+    const expiryText = expiry ? ` Expires at ${expiry.toLocaleTimeString()}.` : "";
+    loginCodeMessage.textContent = `We sent a verification code to ${email}.${expiryText}`;
+    loginCodeInput.focus();
+  }
+
+  async function requestLoginCode(email: string) {
+    loginError.classList.add("hidden");
+    loginCodeError.classList.add("hidden");
 
     const res = await fetch("/auth/login", {
       method: "POST",
@@ -186,21 +254,92 @@
       body: JSON.stringify({ email })
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      errorEl.textContent = data.detail ?? "Login failed.";
-      errorEl.classList.remove("hidden");
+      loginError.textContent = data.detail ?? "Login failed.";
+      loginError.classList.remove("hidden");
+      showEmailStep();
       return;
     }
 
-    if (!data.authenticated) {
-      errorEl.textContent = "Email not recognized. Please register first.";
-      errorEl.classList.remove("hidden");
+    if (data.requires_registration) {
+      loginError.textContent = "Email not recognized. Please register first.";
+      loginError.classList.remove("hidden");
+      showEmailStep();
       return;
     }
 
-    window.location.href = "/submission";
+    if (data.authenticated) {
+      window.location.href = "/submission";
+      return;
+    }
+
+    if (data.verification_required) {
+      showCodeStep(email, data.verification_expires_at);
+      return;
+    }
+
+    loginError.textContent = "Unexpected login response.";
+    loginError.classList.remove("hidden");
+    showEmailStep();
+  }
+
+  loginForm.addEventListener("submit", async function(e) {
+    e.preventDefault();
+    const email = loginEmailInput.value.trim();
+    if (!email) return;
+    await requestLoginCode(email);
+  });
+
+  loginCodeForm.addEventListener("submit", async function(e) {
+    e.preventDefault();
+    loginCodeError.classList.add("hidden");
+
+    const code = loginCodeInput.value.trim();
+    if (!pendingEmail || !code) return;
+
+    const res = await fetch("/auth/login/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: pendingEmail, code })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      loginCodeError.textContent = data.detail ?? "Verification failed.";
+      loginCodeError.classList.remove("hidden");
+      return;
+    }
+
+    if (data.authenticated) {
+      window.location.href = "/submission";
+      return;
+    }
+
+    loginCodeError.textContent = "Verification failed.";
+    loginCodeError.classList.remove("hidden");
+  });
+
+  resendBtn.addEventListener("click", async () => {
+    if (!pendingEmail) return;
+    await requestLoginCode(pendingEmail);
+  });
+
+  editBtn.addEventListener("click", () => {
+    pendingEmail = "";
+    showEmailStep();
+    loginEmailInput.focus();
+  });
+
+  document.addEventListener("open-login-modal", () => {
+    showEmailStep();
+    loginError.classList.add("hidden");
+  });
+
+  document.getElementById("tab-login")?.addEventListener("click", () => {
+    showEmailStep();
   });
 </script>
 

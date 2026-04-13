@@ -44,6 +44,20 @@ class Settings(BaseSettings):
     auth_session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     auth_session_cookie_path: str = "/"
     auth_session_cookie_domain: str | None = None
+    auth_email_mfa_enabled: bool = True
+    auth_email_mfa_code_ttl_minutes: int = 10
+    auth_email_mfa_max_attempts: int = 5
+    auth_email_mfa_delivery: Literal["smtp", "log"] = "log"
+    auth_email_mfa_from: str = "no-reply@mlsec.local"
+    auth_email_mfa_subject: str = "Your MLSEC login code"
+    auth_email_mfa_base_url: str = "mlsec2.com"
+
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
 
     admin_localhost_only: bool = True
     admin_trusted_proxy_hosts: list[str] = ["127.0.0.1", "::1"]
