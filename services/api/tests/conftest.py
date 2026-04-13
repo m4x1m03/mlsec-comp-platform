@@ -15,7 +15,7 @@ from core.celery_app import get_celery
 from unittest.mock import MagicMock
 
 
-TEST_DB_URL = "postgresql://postgres:password123@localhost:5433/mlsec_test"
+TEST_DB_URL = os.getenv("DATABASE_URL", "postgresql://mlsec2:mlsec2_pw@localhost:5433/mlsec_test")
 
 engine = create_engine(TEST_DB_URL)
 TestingSessionLocal = sessionmaker(bind=engine)

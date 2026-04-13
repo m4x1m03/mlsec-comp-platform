@@ -24,28 +24,28 @@ interface LeaderboardData {
 
 /**
  * Maps a score (0.0 to 1.0) to an RGB color.
- * 0%  = red   rgb(220, 50, 50)
- * 50% = white rgb(255, 255, 255)
- * 100% = green rgb(50, 175, 80)
+ * 0%  = orange   rgb(254, 179, 56)
+ * 50% = white rgb(230, 230, 230)
+ * 100% = blue rgb(2, 81, 150)
  */
 function scoreToColor(score: number): string {
   const s = Math.max(0, Math.min(1, score));
   if (s <= 0.5) {
     const t = s / 0.5;
-    const r = Math.round(220 + (255 - 220) * t);
-    const g = Math.round(50  + (255 - 50)  * t);
-    const b = Math.round(50  + (255 - 50)  * t);
+    const r = Math.round(254 + (230 - 254) * t);
+    const g = Math.round(179  + (230 - 179)  * t);
+    const b = Math.round(56  + (230 - 56)  * t);
     return `rgb(${r},${g},${b})`;
   }
   const t = (s - 0.5) / 0.5;
-  const r = Math.round(255 + (50  - 255) * t);
-  const g = Math.round(255 + (175 - 255) * t);
-  const b = Math.round(255 + (80  - 255) * t);
+  const r = Math.round(230 + (2  - 230) * t);
+  const g = Math.round(230 + (81 - 230) * t);
+  const b = Math.round(230 + (150  - 230) * t);
   return `rgb(${r},${g},${b})`;
 }
 
 function textColorForScore(score: number): string {
-  return score < 0.35 || score > 0.65 ? '#ffffff' : '#374151';
+  return score > 0.70 ? '#ffffff' : '#374151';
 }
 
 export default function EvaluationMatrix() {
@@ -82,10 +82,10 @@ export default function EvaluationMatrix() {
 
   const { attackers, defenders, scores } = data;
 
-  if (attackers.length === 0 && defenders.length === 0) {
+  if (attackers.length === 0 || defenders.length === 0) {
     return (
       <p className="text-sm text-gray-500">
-        No active submissions yet. Once participants activate a submission, the matrix will appear here.
+        The matrix will appear once there is at least one active attack submission and one active defense submission.
       </p>
     );
   }
@@ -126,47 +126,77 @@ export default function EvaluationMatrix() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table className="min-w-full border-collapse text-sm">
-          <thead>
+      <div className="overflow-x-auto">
+        <div className="w-fit rounded-xl border border-gray-200 bg-white shadow-sm">
+        <table className="w-auto border-collapse text-sm">
+          <tbody>
+            {/* Row 1: Attack axis label. Spans name col + all score cols (no separate corner cell). */}
             <tr>
-              <th className="sticky left-0 z-10 bg-gray-50 border-b border-r border-gray-200 px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap">
-                Defense \ Attack
+              <th className="sticky left-0 z-10 bg-white border-b border-r border-gray-200 w-7 min-w-[28px]" />
+              {attackers.length > 0 && (
+                <th
+                  colSpan={attackers.length + 1}
+                  className="border-b border-r border-gray-200 bg-white py-1.5 text-center text-xs font-semibold text-gray-600"
+                >
+                  Attack
+                </th>
+              )}
+            </tr>
+            {/* Row 2: Column headers. Defense label starts here and spans down through all defender rows. */}
+            <tr>
+              <th
+                rowSpan={defenders.length + 1}
+                className="sticky left-0 z-10 bg-white border-r border-gray-200 w-7 min-w-[28px]"
+                style={{ verticalAlign: 'middle', textAlign: 'center' }}
+              >
+                <span
+                  className="text-xs font-semibold text-gray-600 select-none"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'inline-block' }}
+                >
+                  Defense
+                </span>
               </th>
-              {attackers.map(atk => (
+              <th className="sticky left-7 z-10 bg-white border-b border-r border-gray-200 px-2 py-2 md:px-4 md:py-3 w-[112px] min-w-[112px] md:w-[160px] md:min-w-[160px]" />
+              {attackers.map((atk, ai) => (
                 <th
                   key={atk.submission_id}
-                  className="border-b border-r border-gray-200 px-4 py-3 text-center bg-gray-50 whitespace-nowrap"
+                  className={`border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center w-[96px] min-w-[96px] max-w-[96px] md:w-[144px] md:min-w-[144px] md:max-w-[144px] ${ai % 2 === 0 ? 'bg-white' : 'bg-gray-100'}`}
+                  title={[atk.username, atk.display_name, `v${atk.version}`].filter(Boolean).join(' · ')}
                 >
-                  <div className="text-xs font-semibold text-gray-700">{atk.username}</div>
-                  {atk.display_name && (
-                    <div className="text-xs font-normal text-gray-400 mt-0.5">{atk.display_name}</div>
-                  )}
-                  <div className="text-xs font-mono font-normal text-gray-400">v{atk.version}</div>
+                  <div className="w-full overflow-hidden">
+                    <div className="text-xs font-semibold text-gray-700 truncate">{atk.username}</div>
+                    {atk.display_name && (
+                      <div className="hidden md:block text-xs font-normal text-gray-400 mt-0.5 truncate">{atk.display_name}</div>
+                    )}
+                    <div className="hidden md:block text-xs font-mono font-normal text-gray-400 truncate">v{atk.version}</div>
+                  </div>
                 </th>
               ))}
             </tr>
-          </thead>
-          <tbody>
+            {/* Defender rows. Defense label column is covered by the rowSpan above. */}
             {defenders.map((def, di) => (
-              <tr key={def.submission_id} className={di % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
-                <td className="sticky left-0 z-10 border-b border-r border-gray-200 px-4 py-3 whitespace-nowrap bg-inherit">
-                  <div className="text-xs font-semibold text-gray-700">{def.username}</div>
-                  {def.display_name && (
-                    <div className="text-xs text-gray-400">{def.display_name}</div>
-                  )}
-                  <div className="text-xs font-mono text-gray-400">v{def.version}</div>
+              <tr key={def.submission_id}>
+                <td
+                  className={`sticky left-7 z-10 border-b border-r border-gray-200 px-2 py-2 md:px-3 md:py-3 w-[112px] min-w-[112px] max-w-[112px] md:w-[160px] md:min-w-[160px] md:max-w-[160px] ${di % 2 === 0 ? 'bg-white' : 'bg-gray-100'}`}
+                  title={[def.username, def.display_name, `v${def.version}`].filter(Boolean).join(' · ')}
+                >
+                  <div className="w-full overflow-hidden">
+                    <div className="text-xs font-semibold text-gray-700 truncate">{def.username}</div>
+                    {def.display_name && (
+                      <div className="hidden md:block text-xs text-gray-400 truncate">{def.display_name}</div>
+                    )}
+                    <div className="hidden md:block text-xs font-mono text-gray-400 truncate">v{def.version}</div>
+                  </div>
                 </td>
                 {attackers.map(atk => {
                   const key = `${atk.submission_id}/${def.submission_id}`;
                   const entry = scores[key];
                   const bgColor = entry && showGradient ? scoreToColor(entry.score) : undefined;
                   const fgColor = entry && showGradient ? textColorForScore(entry.score) : '#374151';
-
                   return (
                     <td
                       key={atk.submission_id}
-                      className="border-b border-r border-gray-200 px-3 py-3 text-center transition-colors duration-300"
+                      className="border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center transition-colors duration-300 w-[96px] min-w-[96px] md:w-[144px] md:min-w-[144px] bg-white"
                       style={bgColor ? { backgroundColor: bgColor } : undefined}
                       title={
                         entry
@@ -193,6 +223,7 @@ export default function EvaluationMatrix() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

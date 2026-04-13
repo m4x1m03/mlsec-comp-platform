@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { adminFetch } from '../../../lib/adminApi';
 
 type Tab = 'audit' | 'jobs' | 'evaluations' | 'sessions';
@@ -218,13 +218,117 @@ interface JobRecord {
   updated_at: string;
 }
 
+interface JobDetailSub {
+  submission_id: string;
+  version: string;
+  display_name: string | null;
+  status: string;
+  source_type?: string | null;
+  file_count?: number | null;
+  heurval_done?: number | null;
+  heurval_total?: number | null;
+}
+
+interface JobDetailRun {
+  id: string;
+  counterpart_id: string;
+  status: string | null;
+  duration_ms: number | null;
+  files_done?: number | null;
+  files_total?: number | null;
+}
+
+interface JobDetail {
+  submission: JobDetailSub | null;
+  evaluation_runs: JobDetailRun[];
+  fetching?: boolean;
+}
+
 const JOB_STATUSES = ['queued', 'running', 'done', 'failed'];
 
+function JobDetailPanel({ detail, jobType }: { detail: JobDetail; jobType: string }) {
+  if (detail.fetching) {
+    return <p className="text-xs text-gray-400">Loading details...</p>;
+  }
+  const { submission, evaluation_runs } = detail;
+  const counterpartLabel = jobType === 'D' ? 'Attack' : 'Defense';
+  return (
+    <div className="flex flex-col sm:flex-row gap-6">
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Submission</p>
+        {submission ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+            {submission.display_name && (
+              <>
+                <dt className="text-gray-400">Name</dt>
+                <dd className="text-gray-700 font-medium">{submission.display_name}</dd>
+              </>
+            )}
+            <dt className="text-gray-400">Version</dt>
+            <dd className="text-gray-700 font-mono">{submission.version}</dd>
+            <dt className="text-gray-400">Status</dt>
+            <dd><StatusBadge status={submission.status} /></dd>
+            {jobType === 'D' && submission.source_type && (
+              <>
+                <dt className="text-gray-400">Source</dt>
+                <dd className="text-gray-700 capitalize">{submission.source_type}</dd>
+              </>
+            )}
+            {jobType === 'D' && submission.heurval_total != null && (
+              <>
+                <dt className="text-gray-400">Heurval</dt>
+                <dd className="text-gray-700">{submission.heurval_done ?? 0}/{submission.heurval_total} samples</dd>
+              </>
+            )}
+            {jobType === 'A' && submission.file_count != null && (
+              <>
+                <dt className="text-gray-400">Files</dt>
+                <dd className="text-gray-700">{submission.file_count}</dd>
+              </>
+            )}
+          </dl>
+        ) : (
+          <p className="text-xs text-gray-400">No submission data.</p>
+        )}
+      </div>
+      {evaluation_runs.length > 0 && (
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Evaluation Runs</p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-gray-400">
+                <th className="text-left font-medium pb-1 pr-4">{counterpartLabel}</th>
+                <th className="text-left font-medium pb-1 pr-4">Status</th>
+                <th className="text-left font-medium pb-1 pr-4">Progress</th>
+                <th className="text-left font-medium pb-1">Duration</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {evaluation_runs.map(r => (
+                <tr key={r.id}>
+                  <td className="font-mono text-gray-600 py-1 pr-4">{shortId(r.counterpart_id)}</td>
+                  <td className="py-1 pr-4"><StatusBadge status={r.status} /></td>
+                  <td className="text-gray-500 py-1 pr-4">
+                    {r.files_total != null ? `${r.files_done ?? 0}/${r.files_total}` : '-'}
+                  </td>
+                  <td className="text-gray-500 py-1">{r.duration_ms != null ? `${r.duration_ms} ms` : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function JobsTab() {
-  const [records, setRecords] = useState<JobRecord[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [statusFilter, setStatus]   = useState('');
-  const [limit, setLimit]           = useState(50);
+  const [records, setRecords]   = useState<JobRecord[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [statusFilter, setStatus] = useState('');
+  const [limit, setLimit]       = useState(50);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [details, setDetails]   = useState<Record<string, JobDetail>>({});
   const first = useRef(true);
 
   async function load(s: string, lim: number) {
@@ -244,6 +348,29 @@ function JobsTab() {
     return () => clearTimeout(t);
   }, [statusFilter, limit]);
 
+  async function toggleExpand(id: string) {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+    if (details[id]) return;
+    setDetails(prev => ({ ...prev, [id]: { submission: null, evaluation_runs: [], fetching: true } }));
+    try {
+      const res = await adminFetch(`/admin/logs/jobs/${id}/detail`);
+      const d = res.ok ? await res.json() : null;
+      setDetails(prev => ({
+        ...prev,
+        [id]: {
+          submission: d?.submission ?? null,
+          evaluation_runs: d?.evaluation_runs ?? [],
+        },
+      }));
+    } catch {
+      setDetails(prev => ({ ...prev, [id]: { submission: null, evaluation_runs: [] } }));
+    }
+  }
+
   return (
     <>
       <FilterBar onRefresh={() => load(statusFilter, limit)}>
@@ -258,23 +385,51 @@ function JobsTab() {
         <LimitSelect value={limit} onChange={setLimit} />
       </FilterBar>
       <TableShell
-        headers={['Timestamp', 'Type', 'Status', 'Requested By', 'Updated At']}
+        headers={['', 'Timestamp', 'Type', 'Status', 'Requested By', 'Updated At']}
         loading={loading}
         empty={records.length === 0}
       >
-        {records.map(r => (
-          <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-            <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDateTime(r.created_at)}</td>
-            <td className="px-4 py-2.5">
-              <span className="font-medium text-gray-800">
-                {r.job_type === 'D' ? 'Defense' : r.job_type === 'A' ? 'Attack' : r.job_type === 'S' ? 'Seeding' : r.job_type}
-              </span>
-            </td>
-            <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
-            <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{shortId(r.requested_by_user_id)}</td>
-            <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDateTime(r.updated_at)}</td>
-          </tr>
-        ))}
+        {records.map(r => {
+          const isOpen = expanded.has(r.id);
+          const detail = details[r.id];
+          return (
+            <Fragment key={r.id}>
+              <tr className="hover:bg-gray-50 transition-colors">
+                <td className="pl-3 pr-1 py-2.5 w-8">
+                  <button
+                    onClick={() => toggleExpand(r.id)}
+                    aria-label={isOpen ? 'Collapse' : 'Expand'}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <svg className={`w-3.5 h-3.5 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </td>
+                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDateTime(r.created_at)}</td>
+                <td className="px-4 py-2.5">
+                  <span className="font-medium text-gray-800">
+                    {r.job_type === 'D' ? 'Defense' : r.job_type === 'A' ? 'Attack' : r.job_type === 'S' ? 'Seeding' : r.job_type}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
+                <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{shortId(r.requested_by_user_id)}</td>
+                <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{formatDateTime(r.updated_at)}</td>
+              </tr>
+              {isOpen && (
+                <tr>
+                  <td colSpan={6} className="bg-gray-50 px-6 py-4 border-b border-gray-100">
+                    {detail ? (
+                      <JobDetailPanel detail={detail} jobType={r.job_type} />
+                    ) : (
+                      <p className="text-xs text-gray-400">Loading details...</p>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          );
+        })}
       </TableShell>
     </>
   );

@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine, text
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password123@localhost:5432/mlsec")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mlsec2:mlsec2_pw@localhost:5432/mlsec")
 
 def dump_results():
     engine = create_engine(DATABASE_URL)

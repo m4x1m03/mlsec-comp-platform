@@ -203,6 +203,13 @@
     openModal(tab);
   });
 
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) {
+      (document.getElementById('login-form') as HTMLFormElement)?.reset();
+      (document.getElementById('register-form') as HTMLFormElement)?.reset();
+    }
+  });
+
   closeBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
   document.addEventListener('keydown', (e) => {
@@ -270,6 +277,9 @@
       return;
     }
 
+    (document.getElementById("login-form") as HTMLFormElement).reset();
+    (document.getElementById("register-form") as HTMLFormElement).reset();
+    window.location.href = "/submission";
     if (data.authenticated) {
       window.location.href = "/submission";
       return;

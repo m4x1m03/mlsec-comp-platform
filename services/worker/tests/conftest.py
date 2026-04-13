@@ -14,10 +14,10 @@ import os
 os.environ.setdefault("CELERY_BROKER_URL", "redis://localhost:6379/0")
 os.environ.setdefault("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
 os.environ.setdefault(
-    "DATABASE_URL", "postgresql://postgres:password123@localhost:5433/mlsec_test")
+    "DATABASE_URL", "postgresql://mlsec2:mlsec2_pw@localhost:5433/mlsec_test")
 os.environ.setdefault("MINIO_ENDPOINT", "minio:9000")
-os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
-os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin")
+os.environ.setdefault("MINIO_ACCESS_KEY", "mlsec2")
+os.environ.setdefault("MINIO_SECRET_KEY", "mlsec2_pw")
 os.environ.setdefault("CELERY_DEFAULT_QUEUE", "mlsec")
 
 
@@ -26,8 +26,8 @@ os.environ.setdefault("CELERY_DEFAULT_QUEUE", "mlsec")
 def set_env_vars():
     """Environment variables are already set at module level."""
     pass
-    os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
-    os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin")
+    os.environ.setdefault("MINIO_ACCESS_KEY", "mlsec2")
+    os.environ.setdefault("MINIO_SECRET_KEY", "mlsec2_pw")
     os.environ.setdefault("MINIO_BUCKET", "mlsec-submissions")
     os.environ.setdefault("GATEWAY_URL", "http://mlsec-gateway:8080/")
     os.environ.setdefault("GATEWAY_SECRET", "test_secret")
@@ -35,7 +35,7 @@ def set_env_vars():
 
 
 # Test database configuration
-TEST_DB_URL = "postgresql://postgres:password123@localhost:5433/mlsec_test"
+TEST_DB_URL = os.environ.get("DATABASE_URL", "postgresql://mlsec2:mlsec2_pw@localhost:5433/mlsec_test")
 
 engine = create_engine(TEST_DB_URL)
 TestingSessionLocal = sessionmaker(bind=engine)
@@ -157,8 +157,8 @@ def config_dict():
         },
         "minio": {
             "endpoint": "minio:9000",
-            "access_key": "minioadmin",
-            "secret_key": "minioadmin",
+            "access_key": "mlsec2",
+            "secret_key": "mlsec2_pw",
             "bucket": "mlsec-submissions",
             "attack_files_bucket": "attack-files",
             "secure": False,

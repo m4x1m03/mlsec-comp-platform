@@ -1,8 +1,10 @@
 ---
 ---
 
-<div class="flex flex-col flex-1 bg-white border border-gray-200 shadow-sm ml-6 mr-3 mb-6 mt-3 p-6 rounded-xl">
+<div class="flex flex-col bg-white border border-gray-200 shadow-sm ml-6 mr-3 mb-6 mt-3 p-6 rounded-xl">
   <h2 class="text-xl font-semibold text-gray-900 mb-5">Attack Submission</h2>
+
+  <p id="attack-cooldown" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"></p>
 
   <form id="attack-form" class="flex flex-col gap-4">
 
@@ -90,6 +92,74 @@
     }
   });
 
+  function _extractDetail(detail: unknown): string {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      return (detail as { msg?: string }[]).map(e => e.msg ?? String(e)).join('; ');
+    }
+    return 'An unexpected error occurred.';
+  }
+
+  function _attachDismiss(el: HTMLElement) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '×';
+    btn.className = 'ml-3 text-current opacity-60 hover:opacity-100 leading-none flex-shrink-0';
+    btn.setAttribute('aria-label', 'Dismiss');
+    btn.addEventListener('click', () => {
+      el.className = 'hidden text-sm rounded-lg px-3 py-2';
+      el.textContent = '';
+    });
+    el.appendChild(btn);
+  }
+
+  (function initAttackCooldown() {
+    const cooldownEl = document.getElementById('attack-cooldown') as HTMLParagraphElement;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    function startCountdown(seconds: number) {
+      let remaining = seconds;
+      if (timer) clearInterval(timer);
+
+      function tick() {
+        if (remaining <= 0) {
+          cooldownEl.classList.add('hidden');
+          cooldownEl.textContent = '';
+          if (timer) clearInterval(timer);
+          return;
+        }
+        const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
+        const ss = String(remaining % 60).padStart(2, '0');
+        cooldownEl.textContent = `You can submit again in ${mm}:${ss}`;
+        cooldownEl.classList.remove('hidden');
+        remaining--;
+      }
+
+      tick();
+      timer = setInterval(tick, 1000);
+    }
+
+    async function checkCooldown() {
+      try {
+        const res = await fetch('/api/submissions/cooldown');
+        if (!res.ok) return;
+        const data = await res.json();
+        const secs: number | null = data.attack_remaining_seconds;
+        if (secs && secs > 0) {
+          startCountdown(secs);
+        }
+      } catch {}
+    }
+
+    checkCooldown();
+
+    document.addEventListener('submission-created', (e: Event) => {
+      if ((e as CustomEvent).detail?.type === 'attack') {
+        checkCooldown();
+      }
+    });
+  })();
+
   document.getElementById('attack-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -102,7 +172,8 @@
 
     if (!file) {
       feedback.textContent = 'Please select a ZIP file.';
-      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+      feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+      _attachDismiss(feedback);
       return;
     }
 
@@ -118,10 +189,11 @@
 
       const res  = await fetch('/api/submissions/attack/zip', { method: 'POST', body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+      if (!res.ok) throw new Error(_extractDetail(data.detail) || `Error ${res.status}`);
 
       feedback.textContent = `Submitted (ID: ${data.submission_id})`;
-      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
+      feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
+      _attachDismiss(feedback);
       (e.target as HTMLFormElement).reset();
       attackIdleView.classList.remove('hidden');
       attackChosenView.classList.add('hidden');
@@ -130,7 +202,8 @@
 
     } catch (err: unknown) {
       feedback.textContent = (err instanceof Error ? err.message : null) ?? 'Submission failed.';
-      feedback.className   = 'text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+      feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
+      _attachDismiss(feedback);
     } finally {
       btn.disabled    = false;
       btn.textContent = 'Submit Attack';
