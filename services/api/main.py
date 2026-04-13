@@ -68,7 +68,8 @@ def create_app() -> FastAPI:
     app.include_router(queue_router)
     app.include_router(submissions_router, prefix="/api")
     app.include_router(leaderboard_router)
-    app.include_router(admin_router)
+    app.include_router(admin_router) # this needs to be fixed but I think this will fix our problems for now
+    app.include_router(admin_router, prefix="/api")
     return app
 
 
