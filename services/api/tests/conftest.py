@@ -159,6 +159,19 @@ def fake_redis():
             self.data[key] = str(value)
             return True
 
+        def set(self, key, value):
+            self.data[key] = str(value)
+            return True
+
+        def setex(self, key, seconds, value):
+            import time
+            self.data[key] = str(value)
+            self.expiry[key] = time.time() + seconds
+            return True
+
+        def get(self, key):
+            return self.data.get(key)
+
         def expire(self, key, seconds):
             import time
             exists = (key in self.data or key in self.hashes or

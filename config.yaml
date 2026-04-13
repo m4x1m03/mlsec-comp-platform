@@ -56,3 +56,4 @@ worker:
 
 application:
   login_code: 'ABC'
+  email_mfa_enabled: true
