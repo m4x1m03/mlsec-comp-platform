@@ -26,6 +26,7 @@ class ApplicationConfig(BaseModel):
     join_code: str | None = None
     defense_submission_cooldown: int = 0
     attack_submission_cooldown: int = 0
+    email_mfa_enabled: bool | None = None
 
 
 class AppConfig(BaseModel):
@@ -49,12 +50,14 @@ def get_config() -> AppConfig:
         join_code = app_data.get("join_code")
         if join_code is None:
             join_code = app_data.get("login_code")
+        email_mfa_enabled = app_data.get("email_mfa_enabled")
         return AppConfig(
             minio=MinIOConfig(**minio_data),
             application=ApplicationConfig(
                 join_code=join_code,
                 defense_submission_cooldown=int(app_data.get("defense_submission_cooldown", 0)),
                 attack_submission_cooldown=int(app_data.get("attack_submission_cooldown", 0)),
+                email_mfa_enabled=email_mfa_enabled,
             ),
         )
     except Exception as e:

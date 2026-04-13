@@ -52,6 +52,26 @@ class LoginRequest(BaseModel):
         return _normalize_email(value)
 
 
+class LoginVerifyRequest(BaseModel):
+    """Login verification payload for MFA codes."""
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(..., min_length=3, max_length=255)
+    code: str = Field(..., min_length=4, max_length=12)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        """Normalize and validate the email field."""
+        return _normalize_email(value)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        """Normalize code input."""
+        return value.strip()
+
+
 class RegisterRequest(BaseModel):
     """Registration request payload."""
     model_config = ConfigDict(extra="forbid")
@@ -133,6 +153,9 @@ class LoginResponse(BaseModel):
     authenticated: bool
     requires_registration: bool
     required_registration_fields: list[str] = Field(default_factory=list)
+    verification_required: bool = False
+    verification_delivery: str | None = None
+    verification_expires_at: datetime | None = None
     expires_at: datetime | None = None
     user: AuthenticatedUserResponse | None = None
 
