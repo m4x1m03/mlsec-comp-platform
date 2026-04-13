@@ -1,5 +1,5 @@
 worker:
-  num_workers: 4   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
+  num_workers: 2   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
   defense_job:
     mem_limit: "1g"
     nano_cpus: 1000000000
