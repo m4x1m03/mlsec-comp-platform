@@ -40,6 +40,8 @@ def _hosts_match(left: str, right: str) -> bool:
     """Normalize and compare hostnames or IP literals."""
     left_normalized = left.strip().lower()
     right_normalized = right.strip().lower()
+    if left_normalized == "*" or right_normalized == "*":
+        return True
     if left_normalized == right_normalized:
         return True
 

@@ -30,7 +30,7 @@ prod-up:
 	docker compose -f $(DOCKER_COMPOSE_PROD) up -d --scale worker=$(NUM_WORKERS)
 
 prod-down:
-	docker compose -f $(DOCKER_COMPOSE_PROD) down
+	docker compose -f $(DOCKER_COMPOSE_PROD) down --remove-orphans
 
 prod-build:
 	docker compose -f $(DOCKER_COMPOSE_PROD) build

@@ -57,4 +57,4 @@ application:
   login_code: 'ABC'
   defense_submission_cooldown: 30   # seconds between defense submissions per user; 0 = no cooldown
   attack_submission_cooldown: 30    # seconds between attack submissions per user; 0 = no cooldown
-  email_mfa_enabled: true
+  email_mfa_enabled: false
