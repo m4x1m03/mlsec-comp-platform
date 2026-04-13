@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 class MinIOConfig(BaseModel):
     endpoint: str = "minio:9000"
-    access_key: str = "minioadmin"
-    secret_key: str = "minioadmin"
+    access_key: str = "mlsec2"
+    secret_key: str = "mlsec2_pw"
     bucket_name: str = "mlsec-submissions"
     secure: bool = False
 

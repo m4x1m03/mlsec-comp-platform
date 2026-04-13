@@ -26,8 +26,8 @@ class Settings(BaseSettings):
 
     # MinIO object storage
     minio_endpoint: str = "minio:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
+    minio_access_key: str = "mlsec2"
+    minio_secret_key: str = "mlsec2_pw"
     minio_secure: bool = False
     minio_bucket_name: str = "mlsec-submissions"
 

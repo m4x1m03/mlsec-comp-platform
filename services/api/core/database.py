@@ -15,7 +15,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from core.settings import get_settings
 
 # TODO: Change this to .env for resolving password, port, etc.
-DEFAULT_DATABASE_URL = "postgresql://postgres:password123@postgres:5432/mlsec"
+DEFAULT_DATABASE_URL = "postgresql://mlsec2:mlsec2_pw@postgres:5432/mlsec"
 logger = logging.getLogger(__name__)
 
 

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 
 # Configuration - Use test database
 API_URL = "http://localhost:8000"
-DATABASE_URL = "postgresql://postgres:password123@localhost:5432/mlsec"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mlsec2:mlsec2_pw@localhost:5432/mlsec")
 SESSION_COOKIE_NAME = os.getenv("AUTH_SESSION_COOKIE_NAME", "mlsec_session")
 
 @pytest.fixture(scope="function")

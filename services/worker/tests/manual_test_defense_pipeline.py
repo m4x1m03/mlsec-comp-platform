@@ -9,8 +9,8 @@ from celery import Celery
 from minio import Minio
 
 # Configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password123@localhost:5432/mlsec")
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://mlsec:mlsec@localhost:5672//")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mlsec2:mlsec2_pw@localhost:5432/mlsec")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://mlsec2:mlsec2_pw@localhost:5672//")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 DOCKER_IMAGE = "https://hub.docker.com/r/thompaar003/notconv"
 # https://hub.docker.com/r/thompaar003/notconv
@@ -18,8 +18,8 @@ DOCKER_IMAGE = "https://hub.docker.com/r/thompaar003/notconv"
 # https://hub.docker.com/r/thompaar003/evil-defense
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "mlsec_minio_admin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "mlsec_minio_password_change_in_production")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "mlsec2")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "mlsec2_pw")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "mlsec-submissions")
 
 def setup_test_data():

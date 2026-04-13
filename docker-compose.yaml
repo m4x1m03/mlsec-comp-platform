@@ -4,8 +4,8 @@ services:
     image: postgres:18
     container_name: postgres-db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password123
+      POSTGRES_USER: ${POSTGRES_USER:-mlsec2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlsec2_pw}
       POSTGRES_DB: mlsec
     ports:
       - "5432:5432"
@@ -20,8 +20,8 @@ services:
     image: postgres:18
     container_name: test-postgres-db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password123
+      POSTGRES_USER: ${POSTGRES_USER:-mlsec2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlsec2_pw}
       POSTGRES_DB: mlsec_test
     ports:
       - "5433:5432"
@@ -35,8 +35,8 @@ services:
     image: minio/minio:latest
     container_name: mlsec-minio
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-mlsec_minio_admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-mlsec2}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000" # API
@@ -55,8 +55,8 @@ services:
     image: rabbitmq:3-management
     container_name: rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: mlsec
-      RABBITMQ_DEFAULT_PASS: mlsec
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-mlsec2}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-mlsec2_pw}
     ports:
       - "5672:5672" # AMQP
       - "15672:15672" # Management UI
@@ -88,12 +88,12 @@ services:
       dockerfile: Dockerfile
     container_name: mlsec-api
     environment:
-      DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
-      CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mlsec2}:${POSTGRES_PASSWORD:-mlsec2_pw}@postgres:5432/mlsec
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-mlsec2}:${RABBITMQ_PASSWORD:-mlsec2_pw}@rabbitmq:5672//
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec2}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
       MINIO_SECURE: "false"
       ADMIN_ALLOWED_HOSTS: '["172.22.0.1"]' # Docker bridge gateway for localhost SSH tunnel access
       ADMIN_TRUSTED_PROXY_HOSTS: '["127.0.0.1", "::1", "172.16.0.0/12"]' # Trust nginx on any Docker bridge subnet
@@ -127,13 +127,13 @@ services:
       context: ./services/worker
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql://postgres:password123@postgres:5432/mlsec
-      CELERY_BROKER_URL: amqp://mlsec:mlsec@rabbitmq:5672//
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mlsec2}:${POSTGRES_PASSWORD:-mlsec2_pw}@postgres:5432/mlsec
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-mlsec2}:${RABBITMQ_PASSWORD:-mlsec2_pw}@rabbitmq:5672//
       CELERY_DEFAULT_QUEUE: mlsec
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec_minio_admin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec_minio_password_change_in_production}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec2}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
       MINIO_SECURE: "false"
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       CELERY_CONCURRENCY: "${WORKER_CONCURRENCY:-4}"

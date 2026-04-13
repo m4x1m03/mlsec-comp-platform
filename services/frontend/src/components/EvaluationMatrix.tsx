@@ -82,10 +82,10 @@ export default function EvaluationMatrix() {
 
   const { attackers, defenders, scores } = data;
 
-  if (attackers.length === 0 && defenders.length === 0) {
+  if (attackers.length === 0 || defenders.length === 0) {
     return (
       <p className="text-sm text-gray-500">
-        No active submissions yet. Once participants activate a submission, the matrix will appear here.
+        The matrix will appear once there is at least one active attack submission and one active defense submission.
       </p>
     );
   }
@@ -126,30 +126,41 @@ export default function EvaluationMatrix() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table className="min-w-full border-collapse text-sm">
-          <thead>
-            {/* Axis label row */}
+      <div className="overflow-x-auto">
+        <div className="w-fit rounded-xl border border-gray-200 bg-white shadow-sm">
+        <table className="w-auto border-collapse text-sm">
+          <tbody>
+            {/* Row 1: Attack axis label. Spans name col + all score cols (no separate corner cell). */}
             <tr>
-              <th className="sticky left-0 z-10 bg-gray-50 border-b border-r border-gray-200 w-5 min-w-[20px]" />
-              <th className="sticky left-5 z-10 bg-gray-50 border-b border-gray-200 w-[88px] min-w-[88px] md:w-[132px] md:min-w-[132px]" />
+              <th className="sticky left-0 z-10 bg-white border-b border-r border-gray-200 w-7 min-w-[28px]" />
               {attackers.length > 0 && (
                 <th
-                  colSpan={attackers.length}
-                  className="border-b border-r border-gray-200 bg-gray-50 py-1.5 text-center text-xs font-semibold text-gray-400"
+                  colSpan={attackers.length + 1}
+                  className="border-b border-r border-gray-200 bg-white py-1.5 text-center text-xs font-semibold text-gray-600"
                 >
                   Attack
                 </th>
               )}
             </tr>
-            {/* Column headers row */}
+            {/* Row 2: Column headers. Defense label starts here and spans down through all defender rows. */}
             <tr>
-              <th className="sticky left-0 z-10 bg-gray-50 border-r border-gray-200 w-5 min-w-[20px]" />
-              <th className="sticky left-5 z-10 bg-gray-50 border-b border-r border-gray-200 px-2 py-2 md:px-4 md:py-3 w-[88px] min-w-[88px] md:w-[132px] md:min-w-[132px]" />
-              {attackers.map(atk => (
+              <th
+                rowSpan={defenders.length + 1}
+                className="sticky left-0 z-10 bg-white border-r border-gray-200 w-7 min-w-[28px]"
+                style={{ verticalAlign: 'middle', textAlign: 'center' }}
+              >
+                <span
+                  className="text-xs font-semibold text-gray-600 select-none"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', display: 'inline-block' }}
+                >
+                  Defense
+                </span>
+              </th>
+              <th className="sticky left-7 z-10 bg-white border-b border-r border-gray-200 px-2 py-2 md:px-4 md:py-3 w-[112px] min-w-[112px] md:w-[160px] md:min-w-[160px]" />
+              {attackers.map((atk, ai) => (
                 <th
                   key={atk.submission_id}
-                  className="border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center bg-gray-50 w-[72px] min-w-[72px] max-w-[72px] md:w-[112px] md:min-w-[112px] md:max-w-[112px]"
+                  className={`border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center w-[96px] min-w-[96px] max-w-[96px] md:w-[144px] md:min-w-[144px] md:max-w-[144px] ${ai % 2 === 0 ? 'bg-white' : 'bg-gray-100'}`}
                   title={[atk.username, atk.display_name, `v${atk.version}`].filter(Boolean).join(' · ')}
                 >
                   <div className="w-full overflow-hidden">
@@ -162,25 +173,11 @@ export default function EvaluationMatrix() {
                 </th>
               ))}
             </tr>
-          </thead>
-          <tbody>
+            {/* Defender rows. Defense label column is covered by the rowSpan above. */}
             {defenders.map((def, di) => (
-              <tr key={def.submission_id} className={di % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}>
-                {di === 0 && (
-                  <td
-                    rowSpan={defenders.length}
-                    className="sticky left-0 z-10 bg-gray-50 border-r border-gray-200 w-5 min-w-[20px] text-center align-middle"
-                  >
-                    <span
-                      className="text-xs font-semibold text-gray-400 select-none"
-                      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-                    >
-                      Defense
-                    </span>
-                  </td>
-                )}
+              <tr key={def.submission_id}>
                 <td
-                  className={`sticky left-5 z-10 border-b border-r border-gray-200 px-2 py-2 md:px-3 md:py-3 w-[88px] min-w-[88px] max-w-[88px] md:w-[132px] md:min-w-[132px] md:max-w-[132px] ${di % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
+                  className={`sticky left-7 z-10 border-b border-r border-gray-200 px-2 py-2 md:px-3 md:py-3 w-[112px] min-w-[112px] max-w-[112px] md:w-[160px] md:min-w-[160px] md:max-w-[160px] ${di % 2 === 0 ? 'bg-white' : 'bg-gray-100'}`}
                   title={[def.username, def.display_name, `v${def.version}`].filter(Boolean).join(' · ')}
                 >
                   <div className="w-full overflow-hidden">
@@ -196,11 +193,10 @@ export default function EvaluationMatrix() {
                   const entry = scores[key];
                   const bgColor = entry && showGradient ? scoreToColor(entry.score) : undefined;
                   const fgColor = entry && showGradient ? textColorForScore(entry.score) : '#374151';
-
                   return (
                     <td
                       key={atk.submission_id}
-                      className="border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center transition-colors duration-300 w-[72px] min-w-[72px] md:w-[112px] md:min-w-[112px]"
+                      className="border-b border-r border-gray-200 px-1 py-2 md:px-3 md:py-3 text-center transition-colors duration-300 w-[96px] min-w-[96px] md:w-[144px] md:min-w-[144px] bg-white"
                       style={bgColor ? { backgroundColor: bgColor } : undefined}
                       title={
                         entry
@@ -227,6 +223,7 @@ export default function EvaluationMatrix() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

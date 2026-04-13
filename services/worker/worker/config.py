@@ -102,9 +102,9 @@ class MinIOConfig(BaseModel):
     endpoint: str = Field(default_factory=lambda: os.getenv(
         "MINIO_ENDPOINT", "minio:9000"))
     access_key: str = Field(default_factory=lambda: os.getenv(
-        "MINIO_ACCESS_KEY", "minioadmin"))
+        "MINIO_ACCESS_KEY", "mlsec2"))
     secret_key: str = Field(default_factory=lambda: os.getenv(
-        "MINIO_SECRET_KEY", "minioadmin"))
+        "MINIO_SECRET_KEY", "mlsec2_pw"))
     bucket_name: str = "mlsec-submissions"
     secure: bool = Field(default_factory=lambda: os.getenv(
         "MINIO_SECURE", "false").lower() == "true")

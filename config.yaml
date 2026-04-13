@@ -41,8 +41,6 @@ worker:
     cleanup_pulled_images: true           # Remove pulled images after evaluation (Docker Hub sources only)
   minio:
     bucket_name: "mlsec-submissions"
-    access_key: "mlsec_minio_admin"
-    secret_key: "mlsec_minio_password_change_in_production"
   attack:
     skip_seeding: true              # true = skip template seeding and all behavioral checks
     check_similarity: false           # false = skip evaluation, accept all validated attacks
