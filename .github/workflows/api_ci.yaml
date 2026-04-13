@@ -20,7 +20,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://postgres:password123@localhost:5433/mlsec_test
+      DATABASE_URL: postgresql://mlsec2:mlsec2_pw@localhost:5433/mlsec_test
       REDIS_URL: redis://localhost:6379/0
 
     steps:
@@ -33,7 +33,7 @@ jobs:
       - name: Wait for test database readiness
         run: |
           for i in {1..30}; do
-            if docker exec test-postgres-db pg_isready -U postgres -d mlsec_test; then
+            if docker exec test-postgres-db pg_isready -U mlsec2 -d mlsec_test; then
               exit 0
             fi
             sleep 2

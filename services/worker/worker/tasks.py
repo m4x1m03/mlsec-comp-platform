@@ -377,6 +377,12 @@ async def _validate_defense_container(
                     mark_defense_failed(defense_submission_id, error_msg)
                     return False
 
+        else:
+            logger.info(
+                "Heuristic validation disabled; skipping for defense %s.",
+                defense_submission_id,
+            )
+
         mark_defense_validated(defense_submission_id)
         logger.info(f"Validation PASSED for defense {defense_submission_id}")
         return True
@@ -386,6 +392,7 @@ async def _validate_defense_container(
             "Unexpected error during validation of defense %s: %s",
             defense_submission_id,
             e,
+            exc_info=True,
         )
         try:
             mark_defense_failed(defense_submission_id, f"Unexpected validation error: {e}")
@@ -455,22 +462,36 @@ def run_batch_defense_job(
             f"Registered worker {worker_id} with Redis for {len(defense_submission_ids)} defenses"
         )
 
-        all_unevaluated_attacks: set[str] = set()
-        for dsid in defense_submission_ids:
-            all_unevaluated_attacks.update(get_unevaluated_attacks(dsid))
-
-        logger.info(f"Found {len(all_unevaluated_attacks)} unique unevaluated attacks for batch")
-        for attack_id in all_unevaluated_attacks:
-            registry.add_attack_to_queue(worker_id, attack_id)
-
         defense_specs: list[tuple[str, bool, str, dict]] = []
+        all_pending_attacks: set[str] = set()
+        
         for dsid in defense_submission_ids:
             needs_validation = check_if_needs_validation(dsid)
+            pending_attacks = get_unevaluated_attacks(dsid)
+            
+            if not needs_validation and not pending_attacks:
+                logger.info(f"Skipping container setup for defense {dsid}: already validated and no pending evaluations.")
+                continue
+                
             if needs_validation:
                 mark_defense_validating(dsid)
+            
             source_type, source_data = get_defense_submission_source(dsid)
             defense_specs.append((dsid, needs_validation, source_type, source_data))
+            
+            for attack_id in pending_attacks:
+                if attack_id not in all_pending_attacks:
+                    registry.add_attack_to_queue(worker_id, attack_id)
+                    all_pending_attacks.add(attack_id)
 
+        if not defense_specs:
+            logger.info(f"No defenses in batch job {job_id} require container setup. Finishing job.")
+            set_job_status(job_id=job_id, status="done")
+            return
+
+        logger.info(
+            f"Found {len(all_pending_attacks)} unique unevaluated attacks for {len(defense_specs)} active defense containers"
+        )
         logger.info(f"Setting up {len(defense_specs)} defense containers concurrently")
         setup_results = await asyncio.gather(*[
             _setup_defense_container(
@@ -609,6 +630,12 @@ def seed_attack_template(self, *, template_id: str, job_id: str | None = None) -
     if job_id:
         set_job_status(job_id=job_id, status="running")
 
+    if config.worker.attack.skip_seeding:
+        logger.info("skip_seeding=true; skipping template seeding for template %s.", template_id)
+        if job_id:
+            set_job_status(job_id=job_id, status="done")
+        return
+
     try:
         template_files = get_template_files(template_id)
         if not template_files:
@@ -668,6 +695,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
         get_template_reports,
         get_all_validated_defenses,
         is_evaluation_in_progress,
+        get_submission_status,
     )
     from worker.minio_client import get_minio_client, get_bucket_name
     from worker.attack.validation import (
@@ -683,212 +711,224 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
     try:
         set_job_status(job_id=job_id, status="running")
-        mark_attack_validating(attack_submission_id)
+
+        # Check if validation or evaluation is already complete
+        status = get_submission_status(attack_submission_id)
+        if status == "evaluated":
+            logger.info(f"Attack {attack_submission_id} is already evaluated, skipping job.")
+            set_job_status(job_id=job_id, status="done")
+            return
+
         logger.info(
             f"Starting attack job {job_id} for submission {attack_submission_id}")
 
-        # Attack validation logic
-        logger.info("Starting attack ZIP validation")
+        if status == "validated":
+            logger.info(f"Attack {attack_submission_id} is already validated, skipping validation logic.")
+        else:
+            # Attack validation logic
+            mark_attack_validating(attack_submission_id)
+            logger.info("Starting attack ZIP validation")
 
-        # Get attack source information
-        attack_source = get_attack_submission_source(attack_submission_id)
-        zip_object_key = attack_source["zip_object_key"]
-        logger.info(f"Attack ZIP object key: {zip_object_key}")
+            # Get attack source information
+            attack_source = get_attack_submission_source(attack_submission_id)
+            zip_object_key = attack_source["zip_object_key"]
+            logger.info(f"Attack ZIP object key: {zip_object_key}")
 
-        # Initialize MinIO client
-        minio_client = get_minio_client()
-        bucket_name = get_bucket_name()
+            # Initialize MinIO client
+            minio_client = get_minio_client()
+            bucket_name = get_bucket_name()
 
-        # Download ZIP to temporary file
-        # TODO: Store as individual files instead of zips, maybe?
-        temp_zip = tempfile.NamedTemporaryFile(
-            suffix='.zip',
-            prefix=f'attack_{attack_submission_id}_',
-            delete=False
-        )
-        temp_zip.close()
+            # Download ZIP to temporary file
+            # TODO: Store as individual files instead of zips, maybe?
+            temp_zip = tempfile.NamedTemporaryFile(
+                suffix='.zip',
+                prefix=f'attack_{attack_submission_id}_',
+                delete=False
+            )
+            temp_zip.close()
 
-        temp_extract_dir = None
+            temp_extract_dir = None
 
-        try:
-            logger.info(f"Downloading {zip_object_key} from MinIO")
-            minio_client.fget_object(
-                bucket_name, zip_object_key, temp_zip.name)
-            logger.info(f"Downloaded to {temp_zip.name}")
+            try:
+                logger.info(f"Downloading {zip_object_key} from MinIO")
+                minio_client.fget_object(
+                    bucket_name, zip_object_key, temp_zip.name)
+                logger.info(f"Downloaded to {temp_zip.name}")
 
-            # Functional validation (ZIP structure, password, safety)
-            attack_cfg = config.worker.attack
-            active_template = get_active_template()
+                # Functional validation (ZIP structure, password, safety)
+                attack_cfg = config.worker.attack
+                active_template = get_active_template()
 
-            # Defer job if behavioral seeding is still in progress
-            if (
-                active_template is not None
-                and attack_cfg.check_similarity
-                and not is_template_fully_seeded(active_template["id"])
-            ):
-                logger.info(
-                    "Template seeding in progress, deferring attack job %s", job_id
-                )
-                raise self.retry(countdown=60)
+                # Defer job if behavioral seeding is still in progress
+                if (
+                    active_template is not None
+                    and attack_cfg.check_similarity
+                    and not attack_cfg.skip_seeding
+                    and not is_template_fully_seeded(active_template["id"])
+                ):
+                    logger.info(
+                        "Template seeding in progress, deferring attack job %s", job_id
+                    )
+                    raise self.retry(countdown=60)
 
-            if active_template is None:
-                if attack_cfg.check_similarity:
-                    error_msg = "No attack template is configured."
+                if active_template is None:
+                    if attack_cfg.check_similarity:
+                        error_msg = "No attack template is configured."
+                        logger.warning(
+                            "Attack %s rejected: %s", attack_submission_id, error_msg
+                        )
+                        mark_attack_failed(attack_submission_id, error_msg)
+                        set_job_status(job_id=job_id, status="failed", error=error_msg)
+                        return
+                    expected_files: set[str] = set()
+                else:
+                    template_file_rows = get_template_files(active_template["id"])
+                    expected_files = {f["filename"] for f in template_file_rows}
+
+                try:
+                    validate_attack_functional(
+                        temp_zip.name,
+                        expected_files,
+                        attack_cfg.max_zip_size_mb,
+                    )
+                except AttackValidationError as e:
+                    error_msg = str(e)
                     logger.warning(
-                        "Attack %s rejected: %s", attack_submission_id, error_msg
+                        "Attack %s failed functional validation: %s",
+                        attack_submission_id,
+                        error_msg,
                     )
                     mark_attack_failed(attack_submission_id, error_msg)
                     set_job_status(job_id=job_id, status="failed", error=error_msg)
                     return
-                expected_files: set[str] = set()
-            else:
-                template_file_rows = get_template_files(active_template["id"])
-                expected_files = {f["filename"] for f in template_file_rows}
 
-            try:
-                validate_attack_functional(
-                    temp_zip.name,
-                    expected_files,
-                    attack_cfg.max_zip_size_mb,
+                # Extract ZIP with password "infected"
+                temp_extract_dir = tempfile.mkdtemp(
+                    prefix=f"attack_{attack_submission_id}_extract_"
                 )
-            except AttackValidationError as e:
-                error_msg = str(e)
-                logger.warning(
-                    "Attack %s failed functional validation: %s",
-                    attack_submission_id,
-                    error_msg,
-                )
-                mark_attack_failed(attack_submission_id, error_msg)
-                set_job_status(job_id=job_id, status="failed", error=error_msg)
-                return
+                logger.info(f"Extracting ZIP to {temp_extract_dir}")
 
-            # Extract ZIP with password "infected"
-            temp_extract_dir = tempfile.mkdtemp(
-                prefix=f"attack_{attack_submission_id}_extract_"
-            )
-            logger.info(f"Extracting ZIP to {temp_extract_dir}")
+                try:
+                    import pyzipper
+                    with pyzipper.AESZipFile(temp_zip.name, 'r') as zf:
+                        zf.setpassword(b'infected')
+                        zf.extractall(temp_extract_dir)
+                    logger.info("Successfully extracted attack ZIP")
+                except RuntimeError as e:
+                    if "password" in str(e).lower():
+                        raise ValueError(
+                            "Wrong password for attack ZIP (expected 'infected')")
+                    raise ValueError(f"Failed to extract ZIP: {e}")
 
-            try:
-                import pyzipper
-                with pyzipper.AESZipFile(temp_zip.name, 'r') as zf:
-                    zf.setpassword(b'infected')
-                    zf.extractall(temp_extract_dir)
-                logger.info("Successfully extracted attack ZIP")
-            except RuntimeError as e:
-                if "password" in str(e).lower():
-                    raise ValueError(
-                        "Wrong password for attack ZIP (expected 'infected')")
-                raise ValueError(f"Failed to extract ZIP: {e}")
+                # Scan extracted files and populate attack_files table
+                extract_path = Path(temp_extract_dir)
+                submission_files: list[tuple[str, str]] = []
+                extracted_files = []
 
-            # Scan extracted files and populate attack_files table
-            extract_path = Path(temp_extract_dir)
-            extracted_files = []
-            submission_files: list[tuple[str, str]] = []
+                for file_path in extract_path.rglob('*'):
+                    if file_path.is_file():
+                        # Calculate SHA256
+                        sha256_hash = hashlib.sha256()
+                        with open(file_path, 'rb') as f:
+                            for chunk in iter(lambda: f.read(8192), b''):
+                                sha256_hash.update(chunk)
 
-            for file_path in extract_path.rglob('*'):
-                if file_path.is_file():
-                    # Calculate SHA256
-                    sha256_hash = hashlib.sha256()
-                    with open(file_path, 'rb') as f:
-                        for chunk in iter(lambda: f.read(8192), b''):
-                            sha256_hash.update(chunk)
+                        # Get relative path
+                        rel_path = file_path.relative_to(extract_path)
 
-                    # Get relative path
-                    rel_path = file_path.relative_to(extract_path)
+                        # Inner filename (strips top-level wrapping folder)
+                        inner_name = _inner_filename(file_path, extract_path)
+                        submission_files.append((inner_name, str(file_path)))
 
-                    # Inner filename (strips top-level wrapping folder)
-                    inner_name = _inner_filename(file_path, extract_path)
-                    submission_files.append((inner_name, str(file_path)))
+                        file_object_key = f"attack/{attack_submission_id}/{rel_path}"
+                        minio_client.fput_object(bucket_name, file_object_key, str(file_path))
 
-                    file_object_key = f"attack/{attack_submission_id}/{rel_path}"
-                    minio_client.fput_object(bucket_name, file_object_key, str(file_path))
+                        extracted_files.append({
+                            "filename": str(rel_path),
+                            "sha256": sha256_hash.hexdigest(),
+                            "byte_size": file_path.stat().st_size,
+                            "object_key": file_object_key,
+                            "is_malware": True  # Default assumption for attack samples
+                        })
 
-                    extracted_files.append({
-                        "filename": str(rel_path),
-                        "sha256": sha256_hash.hexdigest(),
-                        "byte_size": file_path.stat().st_size,
-                        "object_key": file_object_key,
-                        "is_malware": True  # Default assumption for attack samples
-                    })
+                logger.info(f"Found {len(extracted_files)} files in attack ZIP")
 
-            logger.info(f"Found {len(extracted_files)} files in attack ZIP")
+                # Insert files into database
+                if extracted_files:
+                    inserted_count = insert_attack_files(
+                        attack_submission_id, extracted_files)
+                    logger.info(
+                        f"Inserted {inserted_count} attack files into database")
 
-            # Insert files into database
-            if extracted_files:
-                inserted_count = insert_attack_files(
-                    attack_submission_id, extracted_files)
-                logger.info(
-                    f"Inserted {inserted_count} attack files into database")
-
-            # Heuristic validation (behavioral similarity against template)
-            if attack_cfg.check_similarity:
-                if active_template is None:
-                    template_reports = {}
-                else:
-                    template_reports = get_template_reports_for_template(
-                        active_template["id"]
-                    )
-                if not template_reports:
-                    logger.warning(
-                        "No template reports available, skipping heuristic "
-                        "validation for attack %s.",
-                        attack_submission_id,
-                    )
-                else:
-                    sandbox = get_sandbox_backend(attack_cfg)
-                    try:
-                        avg_similarity = validate_heuristic(
-                            submission_files, sandbox, template_reports
+                # Heuristic validation (behavioral similarity against template)
+                if attack_cfg.check_similarity and not attack_cfg.skip_seeding:
+                    if active_template is None:
+                        template_reports = {}
+                    else:
+                        template_reports = get_template_reports_for_template(
+                            active_template["id"]
                         )
-                    except SandboxUnavailableError as e:
-                        error_msg = str(e)
-                        logger.error(
-                            "Sandbox unavailable during heuristic validation "
-                            "for attack %s: %s",
-                            attack_submission_id,
-                            error_msg,
-                        )
-                        mark_attack_failed(attack_submission_id, error_msg)
-                        raise
-
-                    if (
-                        attack_cfg.reject_dissimilar_attacks
-                        and avg_similarity < attack_cfg.minimum_attack_similarity
-                    ):
-                        error_msg = (
-                            f"Behavioral similarity {avg_similarity:.1f}% is below "
-                            f"the minimum threshold of "
-                            f"{attack_cfg.minimum_attack_similarity}%."
-                        )
+                    if not template_reports:
                         logger.warning(
-                            "Attack %s rejected: %s",
+                            "No template reports available, skipping heuristic "
+                            "validation for attack %s.",
                             attack_submission_id,
-                            error_msg,
                         )
-                        mark_attack_failed(attack_submission_id, error_msg)
-                        set_job_status(
-                            job_id=job_id, status="failed", error=error_msg
-                        )
-                        return
-                    elif not attack_cfg.reject_dissimilar_attacks:
-                        logger.info(
-                            "Attack %s heuristic similarity=%.1f%% "
-                            "(reject_dissimilar_attacks=False, accepting).",
-                            attack_submission_id,
-                            avg_similarity,
-                        )
+                    else:
+                        sandbox = get_sandbox_backend(attack_cfg)
+                        try:
+                            avg_similarity = validate_heuristic(
+                                submission_files, sandbox, template_reports
+                            )
+                        except SandboxUnavailableError as e:
+                            error_msg = str(e)
+                            logger.error(
+                                "Sandbox unavailable during heuristic validation "
+                                "for attack %s: %s",
+                                attack_submission_id,
+                                error_msg,
+                            )
+                            mark_attack_failed(attack_submission_id, error_msg)
+                            raise
 
-            # Mark attack as validated
-            mark_attack_validated(attack_submission_id)
-            logger.info(f"Attack {attack_submission_id} marked as validated")
+                        if (
+                            attack_cfg.reject_dissimilar_attacks
+                            and avg_similarity < attack_cfg.minimum_attack_similarity
+                        ):
+                            error_msg = (
+                                f"Behavioral similarity {avg_similarity:.1f}% is below "
+                                f"the minimum threshold of "
+                                f"{attack_cfg.minimum_attack_similarity}%."
+                            )
+                            logger.warning(
+                                "Attack %s rejected: %s",
+                                attack_submission_id,
+                                error_msg,
+                            )
+                            mark_attack_failed(attack_submission_id, error_msg)
+                            set_job_status(
+                                job_id=job_id, status="failed", error=error_msg
+                            )
+                            return
+                        elif not attack_cfg.reject_dissimilar_attacks:
+                            logger.info(
+                                "Attack %s heuristic similarity=%.1f%% "
+                                "(reject_dissimilar_attacks=False, accepting).",
+                                attack_submission_id,
+                                avg_similarity,
+                            )
 
-        finally:
-            # Cleanup temporary files
-            if os.path.exists(temp_zip.name):
-                os.unlink(temp_zip.name)
-            if temp_extract_dir and os.path.exists(temp_extract_dir):
-                import shutil
-                shutil.rmtree(temp_extract_dir)
+                # Mark attack as validated
+                mark_attack_validated(attack_submission_id)
+                logger.info(f"Attack {attack_submission_id} marked as validated")
+
+            finally:
+                # Cleanup temporary files
+                if os.path.exists(temp_zip.name):
+                    os.unlink(temp_zip.name)
+                if temp_extract_dir and os.path.exists(temp_extract_dir):
+                    import shutil
+                    shutil.rmtree(temp_extract_dir)
 
         # Initialize Redis client
         # Use a temporary worker ID for API-side operations

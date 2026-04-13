@@ -21,5 +21,5 @@ COPY . /app
 # RUN useradd --create-home --uid 10001 appuser
 # USER appuser
 
-CMD ["sh", "-c", "celery -A worker.celery_app:celery_app worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-4}"]
+CMD ["sh", "-c", "celery -A worker.celery_app:celery_app worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-1}"]
 

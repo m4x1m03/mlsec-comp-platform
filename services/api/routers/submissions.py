@@ -24,13 +24,15 @@ from core.submissions import (
     validate_github_url_format,
     validate_semver_format,
 )
-from core.submission_control import ensure_submissions_open
+from core.config import get_config
+from core.submission_control import check_cooldown, ensure_submissions_open, get_cooldown_remaining
 from routers.queue import _insert_job, _publish_task
 from schemas.jobs import JobType
 from schemas.submissions import (
     CreateDefenseDockerRequest,
     CreateDefenseGitHubRequest,
     SetActiveResponse,
+    SubmissionDetailResponse,
     SubmissionListItem,
     SubmissionHistoryResponse,
     SubmissionResponse,
@@ -106,6 +108,7 @@ def create_defense_docker(
     """
     # Enforce admin-controlled submission window before accepting new work.
     ensure_submissions_open(db)
+    check_cooldown(db, user_id=str(current_user.user_id), submission_type='defense', cooldown_seconds=get_config().application.defense_submission_cooldown)
     # 1. Validate format
     validate_docker_image_format(req.docker_image)
     validate_semver_format(req.version)
@@ -198,6 +201,7 @@ def create_defense_github(
     """
     # Enforce admin-controlled submission window before accepting new work.
     ensure_submissions_open(db)
+    check_cooldown(db, user_id=str(current_user.user_id), submission_type='defense', cooldown_seconds=get_config().application.defense_submission_cooldown)
     # 1. Validate format
     validate_github_url_format(req.git_repo)
     validate_semver_format(req.version)
@@ -292,6 +296,7 @@ async def create_defense_zip(
     """
     # Enforce admin-controlled submission window before accepting new work.
     ensure_submissions_open(db)
+    check_cooldown(db, user_id=str(current_user.user_id), submission_type='defense', cooldown_seconds=get_config().application.defense_submission_cooldown)
     settings = get_settings()
 
     # 1. Validate file
@@ -448,6 +453,7 @@ async def create_attack_zip(
     """
     # Enforce admin-controlled submission window before accepting new work.
     ensure_submissions_open(db)
+    check_cooldown(db, user_id=str(current_user.user_id), submission_type='attack', cooldown_seconds=get_config().application.attack_submission_cooldown)
     settings = get_settings()
 
     # 1. Validate file
@@ -720,7 +726,98 @@ def set_active_submission(
     except Exception:
         logger.warning("Failed to publish leaderboard update after active submission change")
 
+    # Setting to active mimics an initial submission
+    from routers.queue import _insert_job, _publish_task
+    from schemas.jobs import JobType
+
+    if sub_type == "defense":
+        j_type = JobType.DEFENSE
+        payload = {"defense_submission_id": submission_id}
+    else:
+        j_type = JobType.ATTACK
+        payload = {"attack_submission_id": submission_id}
+
+    job_id = _insert_job(
+        db=db,
+        job_type=j_type.value,
+        payload=payload,
+        requested_by_user_id=current_user.user_id,
+    )
+    _publish_task(job_type=j_type, job_id=job_id, payload=payload)
+
+    logger.info(f"Enqueued {sub_type} job {job_id} after setting active")
+
     return SetActiveResponse(
         submission_id=submission_id,
         submission_type=sub_type,
     )
+
+
+@router.get("/{submission_id}/detail", response_model=SubmissionDetailResponse)
+def get_submission_detail(
+    submission_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> SubmissionDetailResponse:
+    """Return source metadata for a submission belonging to the authenticated user."""
+    row = db.execute(
+        text(
+            """
+            SELECT
+                s.id,
+                s.submission_type,
+                s.created_at,
+                d.source_type,
+                d.sha256,
+                d.docker_image,
+                d.git_repo,
+                a.zip_sha256
+            FROM submissions s
+            LEFT JOIN defense_submission_details d ON d.submission_id = s.id
+            LEFT JOIN attack_submission_details a ON a.submission_id = s.id
+            WHERE s.id = :id
+              AND s.user_id = :user_id
+              AND s.deleted_at IS NULL
+            """
+        ),
+        {"id": submission_id, "user_id": str(current_user.user_id)},
+    ).mappings().fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    return SubmissionDetailResponse(
+        submission_id=str(row["id"]),
+        created_at=row["created_at"].isoformat(),
+        source_type=row["source_type"],
+        sha256=row["sha256"] or row["zip_sha256"],
+        docker_image=row["docker_image"],
+        git_repo=row["git_repo"],
+    )
+
+
+@router.get("/cooldown")
+def get_submission_cooldown(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return remaining cooldown seconds for each submission type.
+
+    A null value means no cooldown is currently active.
+    """
+    cfg = get_config()
+    user_id = str(current_user.user_id)
+    return {
+        "defense_remaining_seconds": get_cooldown_remaining(
+            db,
+            user_id=user_id,
+            submission_type="defense",
+            cooldown_seconds=cfg.application.defense_submission_cooldown,
+        ),
+        "attack_remaining_seconds": get_cooldown_remaining(
+            db,
+            user_id=user_id,
+            submission_type="attack",
+            cooldown_seconds=cfg.application.attack_submission_cooldown,
+        ),
+    }

@@ -8,7 +8,6 @@ import random
 from pathlib import Path
 
 import docker
-import httpx
 import requests
 from celery.utils.log import get_task_logger
 
@@ -319,36 +318,33 @@ async def validate_heuristic(
     malware_outputs: list[int] = []
     goodware_outputs: list[int] = []
 
-    async with httpx.AsyncClient() as client:
-        for i, sample in enumerate(samples):
-            sample_path = await get_sample_path(sample["object_key"])
-            sample_content = Path(sample_path).read_bytes()
+    for sample in samples:
+        sample_path = await get_sample_path(sample["object_key"])
+        sample_content = Path(sample_path).read_bytes()
 
-            outcome = await evaluate_sample_against_container(
-                client=client,
-                container_url=container_url,
-                docker_client=docker_client,
-                container_name=container_name,
-                sample_content=sample_content,
-                eval_cfg=eval_cfg,
-                restart_count_ref=restart_count_ref,
-                ctx=heurval_ctx,
-                file_index=i,
-            )
+        outcome = await evaluate_sample_against_container(
+            container_url=container_url,
+            docker_client=docker_client,
+            container_name=container_name,
+            sample_content=sample_content,
+            eval_cfg=eval_cfg,
+            restart_count_ref=restart_count_ref,
+            ctx=heurval_ctx,
+        )
 
-            insert_heurval_file_result(
-                heurval_result_id=result_id,
-                sample_id=sample["id"],
-                model_output=outcome.model_output,
-                evaded_reason=outcome.evaded_reason,
-                duration_ms=outcome.duration_ms,
-            )
+        insert_heurval_file_result(
+            heurval_result_id=result_id,
+            sample_id=sample["id"],
+            model_output=outcome.model_output,
+            evaded_reason=outcome.evaded_reason,
+            duration_ms=outcome.duration_ms,
+        )
 
-            effective_output = outcome.model_output if outcome.model_output is not None else 0
-            if sample["is_malware"]:
-                malware_outputs.append(effective_output)
-            else:
-                goodware_outputs.append(effective_output)
+        effective_output = outcome.model_output if outcome.model_output is not None else 0
+        if sample["is_malware"]:
+            malware_outputs.append(effective_output)
+        else:
+            goodware_outputs.append(effective_output)
 
     malware_tpr = (
         sum(1 for o in malware_outputs if o == 1) / len(malware_outputs)

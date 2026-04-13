@@ -16,14 +16,16 @@ logger = logging.getLogger(__name__)
 
 class MinIOConfig(BaseModel):
     endpoint: str = "minio:9000"
-    access_key: str = "minioadmin"
-    secret_key: str = "minioadmin"
+    access_key: str = "mlsec2"
+    secret_key: str = "mlsec2_pw"
     bucket_name: str = "mlsec-submissions"
     secure: bool = False
 
 
 class ApplicationConfig(BaseModel):
     join_code: str | None = None
+    defense_submission_cooldown: int = 0
+    attack_submission_cooldown: int = 0
     email_mfa_enabled: bool | None = None
 
 
@@ -53,6 +55,8 @@ def get_config() -> AppConfig:
             minio=MinIOConfig(**minio_data),
             application=ApplicationConfig(
                 join_code=join_code,
+                defense_submission_cooldown=int(app_data.get("defense_submission_cooldown", 0)),
+                attack_submission_cooldown=int(app_data.get("attack_submission_cooldown", 0)),
                 email_mfa_enabled=email_mfa_enabled,
             ),
         )

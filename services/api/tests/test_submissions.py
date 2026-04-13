@@ -296,6 +296,71 @@ class TestDefenseGitHubSubmission:
 
         assert response.status_code == 201
 
+    def test_create_defense_github_with_branch(self, client, db_session, monkeypatch):
+        """Test that a URL with /tree/<branch> is accepted and stored verbatim."""
+        from routers import submissions as submissions_module
+
+        fake = _FakeCelery()
+        monkeypatch.setattr(submissions_module, "_publish_task",
+                            lambda **kwargs: fake.send_task("", kwargs))
+
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        response = client.post(
+            "/api/submissions/defense/github",
+            json={
+                "git_repo": "https://github.com/user/repo/tree/my-branch",
+                "version": "1.0.0",
+            },
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 201
+        details_row = db_session.execute(
+            text("SELECT git_repo FROM defense_submission_details WHERE submission_id = :id"),
+            {"id": response.json()["submission_id"]},
+        ).fetchone()
+        assert details_row[0] == "https://github.com/user/repo/tree/my-branch"
+
+    def test_create_defense_github_with_slash_branch(self, client, db_session, monkeypatch):
+        """Test that a URL with a multi-segment branch (feature/foo) is accepted."""
+        from routers import submissions as submissions_module
+
+        fake = _FakeCelery()
+        monkeypatch.setattr(submissions_module, "_publish_task",
+                            lambda **kwargs: fake.send_task("", kwargs))
+
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        response = client.post(
+            "/api/submissions/defense/github",
+            json={
+                "git_repo": "https://github.com/user/repo/tree/feature/my-feature",
+                "version": "1.0.0",
+            },
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 201
+
+    def test_create_defense_github_invalid_branch_empty(self, client, db_session):
+        """Test that /tree/ with no branch name is rejected."""
+        user_id = _create_user(db_session)
+        token = _create_session_token(db_session, user_id=user_id)
+
+        response = client.post(
+            "/api/submissions/defense/github",
+            json={
+                "git_repo": "https://github.com/user/repo/tree/",
+                "version": "1.0.0",
+            },
+            headers=_make_auth_headers(token),
+        )
+
+        assert response.status_code == 422
+
 
 # ============================================================================
 # Defense ZIP Submission Tests
@@ -524,6 +589,8 @@ class TestValidationHelpers:
         validate_github_url_format("https://github.com/user/repo")
         validate_github_url_format("https://github.com/user-name/repo-name")
         validate_github_url_format("https://github.com/user/repo.git")
+        validate_github_url_format("https://github.com/user/repo/tree/my-branch")
+        validate_github_url_format("https://github.com/user/repo/tree/feature/foo")
 
     def test_validate_github_url_format_invalid(self):
         """Test GitHub URL validation with invalid URLs."""
@@ -539,6 +606,10 @@ class TestValidationHelpers:
 
         with pytest.raises(HTTPException) as exc:
             validate_github_url_format("github.com/user/repo")
+        assert exc.value.status_code == 400
+
+        with pytest.raises(HTTPException) as exc:
+            validate_github_url_format("https://github.com/user/repo/tree/")
         assert exc.value.status_code == 400
 
     def test_validate_docker_image_format_valid(self):

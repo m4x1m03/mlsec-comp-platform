@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
+import requests
 
 from worker.config import EvaluationConfig
 from worker.defense.evaluate import (
@@ -46,7 +46,7 @@ def _mock_docker(usage_mb: float = 100.0) -> MagicMock:
 
 
 def _mock_response(result: int, status_code: int = 200) -> MagicMock:
-    resp = MagicMock(spec=httpx.Response)
+    resp = MagicMock(spec=requests.Response)
     resp.status_code = status_code
     resp.json.return_value = {"result": result}
     return resp
@@ -72,14 +72,11 @@ def test_normal_response_returns_correct_model_output():
     restart_ref = [0]
 
     async def run():
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json={"result": 1})
-            )
-        ) as client:
-            return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
-            )
+        with patch("worker.defense.evaluate.requests.post", return_value=_mock_response(1)):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(1)):
+                return await evaluate_sample_against_container(
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
+                )
 
     outcome = _run(run())
     assert outcome.model_output == 1
@@ -93,14 +90,11 @@ def test_normal_response_result_zero():
     docker_client = _mock_docker(usage_mb=50)
 
     async def run():
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json={"result": 0})
-            )
-        ) as client:
-            return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
-            )
+        with patch("worker.defense.evaluate.requests.post", return_value=_mock_response(0)):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(0)):
+                return await evaluate_sample_against_container(
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
+                )
 
     outcome = _run(run())
     assert outcome.model_output == 0
@@ -116,27 +110,16 @@ def test_timeout_returns_time_limit_evaded():
     eval_cfg = _make_eval_cfg(defense_max_time=1, defense_max_timeout=2)
     docker_client = _mock_docker()
 
-    call_count = [0]
-
-    async def transport_handler(request):
-        call_count[0] += 1
-        # Both the initial request and the extended-wait request succeed quickly
-        # so no restart is triggered, but the first timeout already marked evaded.
-        return httpx.Response(200, json={"result": 1})
-
-    # Simulate the first POST timing out, extended wait succeeds (no restart).
+    # First POST times out; extended-wait POST succeeds (no restart).
     async def run():
-        async with httpx.AsyncClient() as client:
-            with patch.object(
-                client,
-                "post",
-                side_effect=[
-                    httpx.TimeoutException("timed out"),
-                    httpx.Response(200, json={"result": 1}),
-                ],
-            ):
+        post_side_effects = [
+            requests.exceptions.Timeout("timed out"),
+            _mock_response(1),
+        ]
+        with patch("worker.defense.evaluate.requests.post", side_effect=post_side_effects):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(1)):
                 return await evaluate_sample_against_container(
-                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
                 )
 
     outcome = _run(run())
@@ -155,17 +138,14 @@ def test_full_timeout_triggers_restart():
     restart_ref = [0]
 
     async def run():
-        async with httpx.AsyncClient() as client:
-            with patch.object(
-                client,
-                "post",
-                side_effect=[
-                    httpx.TimeoutException("initial timeout"),
-                    httpx.TimeoutException("extended timeout"),
-                ],
-            ):
+        post_side_effects = [
+            requests.exceptions.Timeout("initial timeout"),
+            requests.exceptions.Timeout("extended timeout"),
+        ]
+        with patch("worker.defense.evaluate.requests.post", side_effect=post_side_effects):
+            with patch("worker.defense.evaluate._wait_for_container_ready", new_callable=AsyncMock):
                 return await evaluate_sample_against_container(
-                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
                 )
 
     outcome = _run(run())
@@ -187,17 +167,14 @@ def test_full_timeout_raises_when_max_restarts_exceeded():
     restart_ref = [2]  # already at max
 
     async def run():
-        async with httpx.AsyncClient() as client:
-            with patch.object(
-                client,
-                "post",
-                side_effect=[
-                    httpx.TimeoutException("initial"),
-                    httpx.TimeoutException("extended"),
-                ],
-            ):
+        post_side_effects = [
+            requests.exceptions.Timeout("initial"),
+            requests.exceptions.Timeout("extended"),
+        ]
+        with patch("worker.defense.evaluate.requests.post", side_effect=post_side_effects):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(1)):
                 return await evaluate_sample_against_container(
-                    client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
                 )
 
     with pytest.raises(ContainerRestartError):
@@ -214,14 +191,11 @@ def test_ram_overuse_returns_ram_limit_evaded():
     docker_client = _mock_docker(usage_mb=600)
 
     async def run():
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json={"result": 1})
-            )
-        ) as client:
-            return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
-            )
+        with patch("worker.defense.evaluate.requests.post", return_value=_mock_response(1)):
+            with patch("worker.defense.evaluate._wait_for_container_ready", new_callable=AsyncMock):
+                return await evaluate_sample_against_container(
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
+                )
 
     outcome = _run(run())
     assert outcome.evaded_reason == "ram_limit"
@@ -236,14 +210,11 @@ def test_ram_overuse_raises_when_max_restarts_exceeded():
     restart_ref = [1]  # already at max
 
     async def run():
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json={"result": 1})
-            )
-        ) as client:
-            return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
-            )
+        with patch("worker.defense.evaluate.requests.post", return_value=_mock_response(1)):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(1)):
+                return await evaluate_sample_against_container(
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, restart_ref, ctx={}
+                )
 
     with pytest.raises(ContainerRestartError):
         _run(run())
@@ -255,14 +226,11 @@ def test_ram_within_limit_does_not_evade():
     docker_client = _mock_docker(usage_mb=100)
 
     async def run():
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json={"result": 1})
-            )
-        ) as client:
-            return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
-            )
+        with patch("worker.defense.evaluate.requests.post", return_value=_mock_response(1)):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(1)):
+                return await evaluate_sample_against_container(
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
+                )
 
     outcome = _run(run())
     assert outcome.evaded_reason is None
@@ -290,14 +258,11 @@ def test_docker_stats_failure_does_not_crash():
     docker_client.containers.get.side_effect = Exception("Docker unavailable")
 
     async def run():
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda req: httpx.Response(200, json={"result": 0})
-            )
-        ) as client:
-            return await evaluate_sample_against_container(
-                client, URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
-            )
+        with patch("worker.defense.evaluate.requests.post", return_value=_mock_response(0)):
+            with patch("worker.defense.evaluate.requests.get", return_value=_mock_response(0)):
+                return await evaluate_sample_against_container(
+                    URL, docker_client, CONTAINER, SAMPLE, eval_cfg, [0], ctx={}
+                )
 
     outcome = _run(run())
     assert outcome.evaded_reason is None

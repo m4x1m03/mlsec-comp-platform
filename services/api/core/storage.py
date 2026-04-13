@@ -21,8 +21,8 @@ def get_minio_client() -> Minio:
     """Singleton MinIO client factory."""
     cfg = get_config().minio
     http_client = urllib3.PoolManager(
-        timeout=urllib3.Timeout(connect=5, read=30),
-        retries=urllib3.Retry(total=0),
+        timeout=urllib3.Timeout(connect=5, read=600),
+        retries=urllib3.Retry(total=2),
     )
     return Minio(
         endpoint=cfg.endpoint,

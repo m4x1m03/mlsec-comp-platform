@@ -1,9 +1,251 @@
-<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 128 128">
-    <path d="M50.4 78.5a75.1 75.1 0 0 0-28.5 6.9l24.2-65.7c.7-2 1.9-3.2 3.4-3.2h29c1.5 0 2.7 1.2 3.4 3.2l24.2 65.7s-11.6-7-28.5-7L67 45.5c-.4-1.7-1.6-2.8-2.9-2.8-1.3 0-2.5 1.1-2.9 2.7L50.4 78.5Zm-1.1 28.2Zm-4.2-20.2c-2 6.6-.6 15.8 4.2 20.2a17.5 17.5 0 0 1 .2-.7 5.5 5.5 0 0 1 5.7-4.5c2.8.1 4.3 1.5 4.7 4.7.2 1.1.2 2.3.2 3.5v.4c0 2.7.7 5.2 2.2 7.4a13 13 0 0 0 5.7 4.9v-.3l-.2-.3c-1.8-5.6-.5-9.5 4.4-12.8l1.5-1a73 73 0 0 0 3.2-2.2 16 16 0 0 0 6.8-11.4c.3-2 .1-4-.6-6l-.8.6-1.6 1a37 37 0 0 1-22.4 2.7c-5-.7-9.7-2-13.2-6.2Z" />
-    <style>
-        path { fill: #000; }
-        @media (prefers-color-scheme: dark) {
-            path { fill: #FFF; }
-        }
-    </style>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="100"
+   height="100"
+   viewBox="0 0 100 100"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   sodipodi:docname="mlsec-logo-white.svg"
+   inkscape:export-filename="..\Downloads\logos-final\mlsec-logo.svg"
+   inkscape:export-xdpi="96"
+   inkscape:export-ydpi="96"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#6f6f6f"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="true"
+     showguides="true"
+     inkscape:zoom="8.4880471"
+     inkscape:cx="39.820703"
+     inkscape:cy="53.074635"
+     inkscape:window-width="2560"
+     inkscape:window-height="1369"
+     inkscape:window-x="2552"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1"
+     inkscape:export-bgcolor="#ffffff00">
+    <inkscape:grid
+       id="grid1"
+       units="px"
+       originx="-5.3290705e-15"
+       originy="-5.3290705e-15"
+       spacingx="1"
+       spacingy="1"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       dotted="false"
+       gridanglex="30"
+       gridanglez="30"
+       visible="true" />
+    <sodipodi:guide
+       position="-5.3290705e-15,100"
+       orientation="0.70710678,0.70710678"
+       id="guide2"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="45,100"
+       orientation="-1,0"
+       id="guide3"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="-5.3290705e-15,55"
+       orientation="0,1"
+       id="guide4"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="54,46"
+       orientation="0.70710678,-0.70710678"
+       id="guide6"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="32,24"
+       orientation="0.70710678,0.70710678"
+       id="guide7"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="1,55"
+       orientation="0.70710678,-0.70710678"
+       id="guide8"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(145,65,172)" />
+    <sodipodi:guide
+       position="45,99"
+       orientation="0.70710678,0.70710678"
+       id="guide9"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="14,42"
+       orientation="0.70710678,-0.70710678"
+       id="guide10"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(224,27,36)" />
+    <sodipodi:guide
+       position="12.050253,49.949747"
+       orientation="0.70710678,-0.70710678"
+       id="guide1"
+       inkscape:locked="false"
+       inkscape:label=""
+       inkscape:color="rgb(0,134,229)" />
+  </sodipodi:namedview>
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="mlsec-logo"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       style="font-variation-settings:'wght' 700;display:inline;fill:none;stroke:#ffffff;stroke-width:8;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+       d="M 4,96 96,4"
+       id="path1"
+       inkscape:label="line"
+       sodipodi:nodetypes="cc" />
+    <circle
+       style="font-variation-settings:'wght' 700;display:inline;fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:9.99999;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+       id="path2"
+       cx="17"
+       cy="55"
+       r="7"
+       inkscape:label="dot" />
+    <circle
+       style="font-variation-settings:'wght' 700;fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:9.99997;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+       id="path2-1"
+       cx="55"
+       cy="17"
+       r="7"
+       inkscape:label="dot" />
+    <circle
+       style="font-variation-settings:'wght' 700;fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:9.99994;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+       id="path2-6"
+       cx="18"
+       cy="18"
+       r="7"
+       inkscape:label="dot" />
+    <g
+       inkscape:groupmode="layer"
+       id="layer3"
+       inkscape:label="long-arrow"
+       style="display:none">
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#000000;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 97,97 33,33 v 11"
+         id="path5-5"
+         sodipodi:nodetypes="ccc" />
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#000000;stroke-width:6;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 33,33 H 44"
+         id="path6-2"
+         sodipodi:nodetypes="cc" />
+    </g>
+    <g
+       inkscape:groupmode="layer"
+       id="layer2"
+       inkscape:label="arrow"
+       style="display:inline">
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 97,97 54,54 v 11"
+         id="path5"
+         sodipodi:nodetypes="ccc" />
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:6;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 54,54 H 65"
+         id="path6"
+         sodipodi:nodetypes="cc" />
+    </g>
+    <g
+       inkscape:groupmode="layer"
+       id="layer2-0"
+       inkscape:label="small-arrow"
+       transform="translate(-22,22)">
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 75,75 54,54 v 11"
+         id="path5-6"
+         sodipodi:nodetypes="ccc" />
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:6;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 54,54 H 65"
+         id="path6-8"
+         sodipodi:nodetypes="cc" />
+    </g>
+    <g
+       inkscape:groupmode="layer"
+       id="layer2-0-7"
+       inkscape:label="small-arrow"
+       transform="translate(22,-22)">
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 75,75 54,54 v 11"
+         id="path5-6-2"
+         sodipodi:nodetypes="ccc" />
+      <path
+         style="font-variation-settings:'wght' 700;fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:6;stroke-linecap:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="M 54,54 H 65"
+         id="path6-8-1"
+         sodipodi:nodetypes="cc" />
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12px;line-height:1;font-family:arial;-inkscape-font-specification:arial;text-align:center;letter-spacing:0px;text-anchor:middle;display:none;fill:#000000;stroke-width:6;stroke-linecap:square;paint-order:stroke fill markers"
+       x="50.294922"
+       y="28.212891"
+       id="text1"
+       inkscape:label="attribution"><tspan
+         sodipodi:role="line"
+         id="tspan1"
+         x="50.294922"
+         y="28.212891"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">Created by</tspan><tspan
+         sodipodi:role="line"
+         x="50.294922"
+         y="40.212891"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal"
+         id="tspan5">Aaron Thompson</tspan><tspan
+         sodipodi:role="line"
+         x="50.294922"
+         y="52.212891"
+         id="tspan2"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">Graham Dungan</tspan><tspan
+         sodipodi:role="line"
+         x="50.294922"
+         y="64.212891"
+         id="tspan4"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">Karl Farrar</tspan><tspan
+         sodipodi:role="line"
+         x="50.294922"
+         y="76.212891"
+         id="tspan3"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">Maxim Mouget</tspan></text>
+  </g>
 </svg>

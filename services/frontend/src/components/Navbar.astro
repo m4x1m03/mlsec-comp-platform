@@ -9,45 +9,103 @@ import Account from './Account.astro';
 const session = await getSession(Astro.request);
 ---
 
-<nav class="bg-primary shadow-lg flex items-center justify-around py-4">
-  <a href="/" class="font-bold text-white text-xl">
-    MLSEC
-  </a>
+<nav class="bg-primary shadow-lg">
+  <div class="flex items-center justify-between px-4 sm:px-6 py-4">
+    <a href="/" class="shrink-0" aria-label="MLSEC home">
+      <img src="/mlsec-title.svg" alt="MLSEC" class="h-8 w-auto" />
+    </a>
 
-  <div class="space-x-6">
-    <a
-      href="/rules"
-      class:list={[
-        "font-semibold transition-colors",
-        currentPath === '/rules' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
-      ]}>
-      Rules
-    </a>
-    <a
-      href="/submission"
-      class:list={[
-        "font-semibold transition-colors",
-        currentPath === '/submission' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
-      ]}>
-      Submission
-    </a>
-    <a
-      href="/leaderboard"
-      class:list={[
-        "font-semibold transition-colors",
-        currentPath === '/leaderboard' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
-      ]}>
-      Leaderboard
-    </a>
+    <div class="hidden md:flex items-center space-x-6">
+      <a
+        href="/rules"
+        class:list={[
+          "font-semibold transition-colors",
+          currentPath === '/rules' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
+        ]}>
+        Rules
+      </a>
+      <a
+        href="/submission"
+        class:list={[
+          "font-semibold transition-colors",
+          currentPath === '/submission' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
+        ]}>
+        Submission
+      </a>
+      <a
+        href="/leaderboard"
+        class:list={[
+          "font-semibold transition-colors",
+          currentPath === '/leaderboard' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
+        ]}>
+        Leaderboard
+      </a>
+    </div>
+
+    <div class="flex items-center gap-3 shrink-0">
+      <Account session={session}>
+        <LoginModal slot="modal" />
+        <Logout slot="logout" />
+      </Account>
+
+      <button
+        id="nav-hamburger"
+        class="md:hidden p-1.5 rounded text-white/80 hover:text-white hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        aria-label="Toggle navigation"
+        aria-expanded="false"
+        aria-controls="nav-mobile-menu"
+      >
+        <svg id="nav-icon-open" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+        </svg>
+        <svg id="nav-icon-close" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 hidden">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
   </div>
 
-  <Account session={session}>
-    <LoginModal slot="modal" />
-    <Logout slot="logout" />
-  </Account>
+  <div id="nav-mobile-menu" class="hidden md:hidden border-t border-white/20 bg-gray-800">
+    <div class="flex flex-col px-4 py-2">
+      <a
+        href="/rules"
+        class:list={[
+          "font-semibold transition-colors py-2.5",
+          currentPath === '/rules' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
+        ]}>
+        Rules
+      </a>
+      <a
+        href="/submission"
+        class:list={[
+          "font-semibold transition-colors py-2.5",
+          currentPath === '/submission' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
+        ]}>
+        Submission
+      </a>
+      <a
+        href="/leaderboard"
+        class:list={[
+          "font-semibold transition-colors py-2.5",
+          currentPath === '/leaderboard' ? 'text-white underline underline-offset-4' : 'text-white/80 hover:text-white'
+        ]}>
+        Leaderboard
+      </a>
+    </div>
+  </div>
+</nav>
 
 <script>
-  document.getElementById('open-login-btn')!.addEventListener('click', () => {
-    document.dispatchEvent(new CustomEvent('open-login-modal'));
+  const hamburger = document.getElementById('nav-hamburger');
+  const mobileMenu = document.getElementById('nav-mobile-menu');
+  const iconOpen   = document.getElementById('nav-icon-open');
+  const iconClose  = document.getElementById('nav-icon-close');
+
+  hamburger?.addEventListener('click', () => {
+    const isCurrentlyOpen = !mobileMenu!.classList.contains('hidden');
+    mobileMenu!.classList.toggle('hidden', isCurrentlyOpen);
+    iconOpen!.classList.toggle('hidden', !isCurrentlyOpen);
+    iconClose!.classList.toggle('hidden', isCurrentlyOpen);
+    hamburger.setAttribute('aria-expanded', String(!isCurrentlyOpen));
   });
 </script>

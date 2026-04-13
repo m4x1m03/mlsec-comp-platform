@@ -45,32 +45,23 @@ def require_submission_of_type(
 
 def validate_docker_image_format(image: str) -> None:
     """
-    Validate Docker image URL/name format.
+    Validate Docker image reference format.
 
     Accepts formats like:
+    - nginx
     - nginx:latest
-    - user/repo:tag
-    - hub.docker.com/r/user/image
-    - registry.io/project/image:tag
+    - user/image:tag
+    - registry.io/user/image:tag
 
     Raises:
         HTTPException(400): If format is invalid
     """
     image = image.strip()
-    if not image:
+    pattern = r"^[a-zA-Z0-9][a-zA-Z0-9._\-/]*(:[a-zA-Z0-9._\-]+)?$"
+    if not re.match(pattern, image):
         raise HTTPException(
-            status_code=400, detail="Docker image cannot be empty")
-
-    # Basic validation - detailed validation happens in worker
-    # Just check for obviously bad patterns
-    if " " in image:
-        raise HTTPException(
-            status_code=400, detail="Docker image name cannot contain spaces"
-        )
-
-    if image.startswith("-") or image.endswith("-"):
-        raise HTTPException(
-            status_code=400, detail="Docker image name cannot start or end with dash"
+            status_code=400,
+            detail="Invalid Docker image format. Expected: image, image:tag, user/image:tag, or registry/path:tag",
         )
 
 
@@ -83,11 +74,11 @@ def validate_github_url_format(url: str) -> None:
     Raises:
         HTTPException(400): If format is invalid
     """
-    pattern = r"^https://github\.com/[\w-]+/[\w-]+(\.git)?$"
+    pattern = r"^https://github\.com/[\w-]+/[\w-]+(/tree/(?!.*\.\.)([\w.\-/]+))?(\.git)?$"
     if not re.match(pattern, url.strip()):
         raise HTTPException(
             status_code=400,
-            detail="Invalid GitHub URL format. Must be https://github.com/username/repository",
+            detail="Invalid GitHub URL format. Expected: https://github.com/username/repository or https://github.com/username/repository/tree/branch",
         )
 
 

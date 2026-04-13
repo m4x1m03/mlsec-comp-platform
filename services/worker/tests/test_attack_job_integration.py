@@ -551,8 +551,13 @@ def test_attack_job_no_validated_defenses(db_session, fake_redis, test_helpers, 
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
-    # Create attack
+    # Create attack in submitted state to trigger validation logic
     attack_id = test_helpers.create_attack()
+    db_session.execute(
+        text("UPDATE submissions SET status = 'submitted' WHERE id = CAST(:id AS uuid)"),
+        {"id": attack_id}
+    )
+    db_session.commit()
 
     # Create job
     job_id = test_helpers.create_job(
@@ -613,8 +618,15 @@ def _common_setup(db_session, fake_redis, test_helpers, monkeypatch):
         self.client = fake_redis
 
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_redis_init)
-
+    
+    # Create attack in submitted state to trigger validation logic
     attack_id = test_helpers.create_attack()
+    db_session.execute(
+        text("UPDATE submissions SET status = 'submitted' WHERE id = CAST(:id AS uuid)"),
+        {"id": attack_id}
+    )
+    db_session.commit()
+
     job_id = test_helpers.create_job(
         job_type="attack",
         status="queued",
@@ -677,6 +689,7 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
     # Override config: enable similarity check
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = True
+    mock_attack_cfg.skip_seeding = False
     mock_attack_cfg.reject_dissimilar_attacks = True
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100
@@ -731,6 +744,7 @@ def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_h
     # Override config: enable similarity check
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = True
+    mock_attack_cfg.skip_seeding = False
     mock_attack_cfg.reject_dissimilar_attacks = True
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100

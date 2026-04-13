@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -91,7 +92,12 @@ def set_manual_closed(
     closed: bool,
     updated_by: str | None,
 ) -> SubmissionControl:
-    """Toggle the manual close flag and return the updated control state."""
+    """Toggle the manual close flag and return the updated control state.
+
+    When opening submissions (closed=False), also clears a lapsed scheduled
+    close time so the submission window is actually open afterwards.
+    """
+    now = _utcnow()
     row = (
         db.execute(
             text(
@@ -100,6 +106,11 @@ def set_manual_closed(
                 VALUES (1, :manual_closed, :updated_at, :updated_by)
                 ON CONFLICT (id) DO UPDATE
                 SET manual_closed = EXCLUDED.manual_closed,
+                    close_at = CASE
+                        WHEN NOT :manual_closed AND submission_control.close_at <= :now
+                        THEN NULL
+                        ELSE submission_control.close_at
+                    END,
                     updated_at = EXCLUDED.updated_at,
                     updated_by = EXCLUDED.updated_by
                 RETURNING manual_closed, close_at, updated_at, updated_by
@@ -107,8 +118,9 @@ def set_manual_closed(
             ),
             {
                 "manual_closed": closed,
-                "updated_at": _utcnow(),
+                "updated_at": now,
                 "updated_by": updated_by,
+                "now": now,
             },
         )
         .mappings()
@@ -175,4 +187,55 @@ def ensure_submissions_open(db: Session) -> None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Submissions are closed (deadline passed)",
+        )
+
+
+def get_cooldown_remaining(
+    db: Session,
+    *,
+    user_id: str,
+    submission_type: str,
+    cooldown_seconds: int,
+) -> int | None:
+    """Return remaining cooldown seconds, or None if no cooldown is active."""
+    if cooldown_seconds <= 0:
+        return None
+    row = db.execute(
+        text(
+            """
+            SELECT MAX(created_at)
+            FROM submissions
+            WHERE user_id = :user_id
+              AND submission_type = :submission_type
+              AND deleted_at IS NULL
+            """
+        ),
+        {"user_id": user_id, "submission_type": submission_type},
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    last_submitted = _as_utc(row[0])
+    elapsed = (_utcnow() - last_submitted).total_seconds()
+    remaining = cooldown_seconds - elapsed
+    return math.ceil(remaining) if remaining > 0 else None
+
+
+def check_cooldown(
+    db: Session,
+    *,
+    user_id: str,
+    submission_type: str,
+    cooldown_seconds: int,
+) -> None:
+    """Raise HTTP 429 if the user submitted within the cooldown window."""
+    remaining = get_cooldown_remaining(
+        db,
+        user_id=user_id,
+        submission_type=submission_type,
+        cooldown_seconds=cooldown_seconds,
+    )
+    if remaining:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {remaining} seconds before submitting again.",
         )

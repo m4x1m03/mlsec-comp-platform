@@ -49,6 +49,17 @@ def set_job_status(*, job_id: str, status: str, error: str | None = None) -> Non
             )
 
 
+def get_submission_status(submission_id: str) -> str | None:
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT status FROM submissions WHERE id = :id"),
+            {"id": submission_id},
+        ).scalar()
+        return result
+
+
 def get_defense_docker_image(*, submission_id: str) -> str | None:
     from sqlalchemy import text
     engine = get_engine()
@@ -84,20 +95,27 @@ def ensure_evaluation_run(*, defense_submission_id: str, attack_submission_id: s
         return str(result)
 
 
-def set_evaluation_run_status(evaluation_run_id: str, status: str) -> None:
+def set_evaluation_run_status(
+    evaluation_run_id: str,
+    status: str,
+    *,
+    error: str | None = None,
+) -> None:
     from sqlalchemy import text
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-                UPDATE evaluation_runs 
+                UPDATE evaluation_runs
                 SET status = :status,
+                    error = :error,
+                    duration_ms = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at)) * 1000,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
                 """
             ),
-            {"status": status, "id": evaluation_run_id},
+            {"status": status, "error": error, "id": evaluation_run_id},
         )
 
 
@@ -317,7 +335,7 @@ def check_if_needs_validation(defense_submission_id: str) -> bool:
 
 def mark_defense_validated(defense_submission_id: str) -> None:
     """
-    Mark defense as functionally validated.
+    Mark defense as functionally validated and activate it for the user.
 
     Args:
         defense_submission_id: Defense submission UUID
@@ -354,13 +372,15 @@ def mark_defense_validated(defense_submission_id: str) -> None:
 
 def mark_defense_failed(defense_submission_id: str, error: str) -> None:
     """
-    Mark defense as failed validation.
+    Mark defense as failed and deactivate it, falling back to the user's most
+    recent other validated/evaluated submission if one exists.
 
     Args:
         defense_submission_id: Defense submission UUID
-        error: Error message describing validation failure
+        error: Error message describing the failure
     """
     from sqlalchemy import text
+    from worker.redis_client import get_redis_client
     engine = get_engine()
     with engine.begin() as conn:
         conn.execute(
@@ -373,6 +393,32 @@ def mark_defense_failed(defense_submission_id: str, error: str) -> None:
             """),
             {"id": defense_submission_id, "error": error}
         )
+        conn.execute(
+            text("DELETE FROM active_submissions WHERE submission_id = :id"),
+            {"id": defense_submission_id},
+        )
+        conn.execute(
+            text("""
+                INSERT INTO active_submissions (user_id, submission_type, submission_id, updated_at)
+                SELECT s_fail.user_id, 'defense', s_cand.id, NOW()
+                FROM submissions s_fail
+                JOIN submissions s_cand
+                  ON s_cand.user_id = s_fail.user_id
+                 AND s_cand.id != :id
+                 AND s_cand.submission_type = 'defense'
+                 AND s_cand.status IN ('validated', 'evaluated')
+                 AND s_cand.deleted_at IS NULL
+                WHERE s_fail.id = :id
+                ORDER BY s_cand.created_at DESC
+                LIMIT 1
+                ON CONFLICT (user_id, submission_type) DO NOTHING
+            """),
+            {"id": defense_submission_id},
+        )
+    try:
+        get_redis_client().publish("leaderboard:updated", "defense_failed")
+    except Exception:
+        pass
 
 
 def mark_defense_validating(defense_submission_id: str) -> None:

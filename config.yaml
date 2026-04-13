@@ -1,5 +1,5 @@
 worker:
-  num_workers: 4   # number of concurrent Celery worker processes (maps to --concurrency)
+  num_workers: 4   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
   defense_job:
     mem_limit: "1g"
     nano_cpus: 1000000000
@@ -8,19 +8,19 @@ worker:
     max_uncompressed_size_mb: 1024
   evaluation:
     requests_timeout_seconds: 5
-    batch_size: 4
+    batch_size: 2
     defense_max_ram: 1024        # MB - soft RAM threshold; sample marked evaded and container restarted if exceeded
     defense_max_time: 5000       # ms - per-sample time limit; exceeded = evaded
     defense_max_timeout: 20000   # ms - forced restart threshold (must be >= defense_max_time)
     defense_max_restarts: 3      # max container restarts before error state
     stats_sampling_rate: 25      # Number of samples evaluated before checking container stats again (This has a massive impact on total evaluation time)
   heuristic_validation:
-    enable_heuristic_validation: true
+    enable_heuristic_validation: false
     heurval_malware_fpr_minimum: 0.0
     heurval_malware_tpr_minimum: 0.30
     heurval_goodware_fpr_minimum: 0.0
     heurval_goodware_tpr_minimum: 0.30
-    reject_heurval_failures: true
+    reject_heurval_failures: false
   source:
     # Resource limits
     max_zip_size_mb: 512
@@ -41,9 +41,8 @@ worker:
     cleanup_pulled_images: true           # Remove pulled images after evaluation (Docker Hub sources only)
   minio:
     bucket_name: "mlsec-submissions"
-    access_key: "mlsec_minio_admin"
-    secret_key: "mlsec_minio_password_change_in_production"
   attack:
+    skip_seeding: true              # true = skip template seeding and all behavioral checks
     check_similarity: false           # false = skip evaluation, accept all validated attacks
     reject_dissimilar_attacks: false  # only applies when check_similarity=true
                                      #   true  = reject if score < minimum_attack_similarity
@@ -52,7 +51,10 @@ worker:
     max_zip_size_mb: 100
     sandbox_backend: "virustotal"    # "virustotal" | "local"
     cache_persistence_duration: 300  # seconds of inactivity before clearing the sample cache
+    cache_max_size_gb: 10            # Maximum size of local sample cache before pruning
 
 application:
   login_code: 'ABC'
+  defense_submission_cooldown: 30   # seconds between defense submissions per user; 0 = no cooldown
+  attack_submission_cooldown: 30    # seconds between attack submissions per user; 0 = no cooldown
   email_mfa_enabled: true

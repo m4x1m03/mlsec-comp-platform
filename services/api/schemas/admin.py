@@ -38,6 +38,32 @@ class AdminJobLogsResponse(BaseModel):
     items: list[AdminJobLogRecord]
 
 
+class JobDetailSubmission(BaseModel):
+    submission_id: str
+    version: str
+    display_name: str | None
+    status: str
+    source_type: str | None = None
+    file_count: int | None = None
+    heurval_done: int | None = None
+    heurval_total: int | None = None
+
+
+class JobDetailEvalRun(BaseModel):
+    id: str
+    counterpart_id: str
+    status: str | None
+    duration_ms: int | None
+    files_done: int | None = None
+    files_total: int | None = None
+
+
+class JobDetailResponse(BaseModel):
+    job: AdminJobLogRecord
+    submission: JobDetailSubmission | None
+    evaluation_runs: list[JobDetailEvalRun]
+
+
 class AdminEvaluationLogRecord(BaseModel):
     id: UUID
     defense_submission_id: UUID
