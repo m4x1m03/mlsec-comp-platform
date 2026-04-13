@@ -1,5 +1,5 @@
 worker:
-  num_workers: 4   # number of concurrent Celery worker processes (maps to --concurrency)
+  num_workers: 4   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
   defense_job:
     mem_limit: "1g"
     nano_cpus: 1000000000
@@ -8,7 +8,7 @@ worker:
     max_uncompressed_size_mb: 1024
   evaluation:
     requests_timeout_seconds: 5
-    batch_size: 4
+    batch_size: 2
     defense_max_ram: 1024        # MB - soft RAM threshold; sample marked evaded and container restarted if exceeded
     defense_max_time: 5000       # ms - per-sample time limit; exceeded = evaded
     defense_max_timeout: 20000   # ms - forced restart threshold (must be >= defense_max_time)
@@ -52,6 +52,7 @@ worker:
     max_zip_size_mb: 100
     sandbox_backend: "virustotal"    # "virustotal" | "local"
     cache_persistence_duration: 300  # seconds of inactivity before clearing the sample cache
+    cache_max_size_gb: 10            # Maximum size of local sample cache before pruning
 
 application:
   login_code: 'ABC'
