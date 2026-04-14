@@ -98,6 +98,19 @@ services:
       ADMIN_ALLOWED_HOSTS: '["172.22.0.1"]' # Docker bridge gateway for localhost SSH tunnel access
       ADMIN_TRUSTED_PROXY_HOSTS: '["127.0.0.1", "::1", "172.16.0.0/12"]' # Trust nginx on any Docker bridge subnet
       ADMIN_ALLOWED_NETWORKS: '["172.16.0.0/12"]' # Allow Docker bridge gateway as effective client (localhost dev access)
+      AUTH_EMAIL_MFA_ENABLED: ${AUTH_EMAIL_MFA_ENABLED:-true}
+      AUTH_EMAIL_MFA_DELIVERY: ${AUTH_EMAIL_MFA_DELIVERY:-log}
+      AUTH_EMAIL_MFA_CODE_TTL_MINUTES: ${AUTH_EMAIL_MFA_CODE_TTL_MINUTES:-10}
+      AUTH_EMAIL_MFA_MAX_ATTEMPTS: ${AUTH_EMAIL_MFA_MAX_ATTEMPTS:-5}
+      AUTH_EMAIL_MFA_FROM: ${AUTH_EMAIL_MFA_FROM:-no-reply@mlsec.local}
+      AUTH_EMAIL_MFA_SUBJECT: ${AUTH_EMAIL_MFA_SUBJECT:-Your MLSEC login code}
+      AUTH_EMAIL_MFA_BASE_URL: ${AUTH_EMAIL_MFA_BASE_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:

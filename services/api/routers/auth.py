@@ -435,14 +435,14 @@ def verify_login(
     )
 
 
-@router.post("/register", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 def register(
     req: RegisterRequest,
     response: Response,
     request: Request,
     db: Session = Depends(get_db),
-) -> SessionResponse:
-    """Register a new user and issue a session token."""
+) -> LoginResponse:
+    """Register a new user. When email MFA is enabled, issues a verification challenge instead of a session."""
     _validate_join_code_or_raise(req.join_code)
     existing_email = (
         db.execute(
@@ -537,8 +537,11 @@ def register(
             },
         )
 
-        session_token = create_session(db, user_id=user_row["id"], commit=False)
-        db.commit()
+        if _email_mfa_enabled():
+            db.commit()
+        else:
+            session_token = create_session(db, user_id=user_row["id"], commit=False)
+            db.commit()
     except IntegrityError:
         db.rollback()
         client_ip, user_agent = _request_meta(request)
@@ -556,8 +559,6 @@ def register(
         db.rollback()
         raise
 
-    _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
-
     client_ip, user_agent = _request_meta(request)
     log_audit_event(
         event_type="auth.register",
@@ -568,14 +569,48 @@ def register(
         success=True,
     )
     logger.info("Registered new user %s", user_row["id"])
-    return SessionResponse(
-        expires_at=session_token.expires_at,
-        user=_to_user_response(
-            user_id=user_row["id"],
-            email=user_row["email"],
-            username=user_row["username"],
-            is_admin=user_row["is_admin"],
-        ),
+
+    if not _email_mfa_enabled():
+        _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
+        return LoginResponse(
+            authenticated=True,
+            requires_registration=False,
+            expires_at=session_token.expires_at,
+            user=_to_user_response(
+                user_id=user_row["id"],
+                email=user_row["email"],
+                username=user_row["username"],
+                is_admin=user_row["is_admin"],
+            ),
+        )
+
+    settings = get_settings()
+    code = _generate_login_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.auth_email_mfa_code_ttl_minutes)
+    try:
+        _store_login_challenge(email=user_row["email"], user_id=str(user_row["id"]), code=code, expires_at=expires_at)
+        send_login_code_email(to_email=user_row["email"], code=code, expires_at=expires_at)
+    except Exception:
+        _clear_login_challenge(user_row["email"])
+        logger.exception("Failed to send verification code for %s", user_row["email"])
+        raise HTTPException(status_code=500, detail="Failed to send verification code") from None
+
+    log_audit_event(
+        event_type="auth.register.challenge",
+        user_id=user_row["id"],
+        email=user_row["email"],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        success=True,
+        message="verification code sent",
+    )
+    logger.info("Registration challenge issued for user %s", user_row["id"])
+    return LoginResponse(
+        authenticated=False,
+        requires_registration=False,
+        verification_required=True,
+        verification_delivery="email",
+        verification_expires_at=expires_at,
     )
 
 
