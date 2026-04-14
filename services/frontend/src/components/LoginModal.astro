@@ -12,14 +12,21 @@
     id="login-modal-card"
     class="relative w-full max-w-lg mx-4 bg-white rounded-2xl shadow-2xl p-8 scale-95 opacity-0 transition-all duration-200"
   >
-
     <button
       id="login-modal-close"
       class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
       aria-label="Close modal"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        class="h-5 w-5"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+      >
+        <path
+          fill-rule="evenodd"
+          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+          clip-rule="evenodd"></path>
       </svg>
     </button>
 
@@ -40,11 +47,14 @@
       </button>
     </div>
 
-
     <div id="panel-login">
       <form id="login-form" class="flex flex-col gap-3">
         <div class="flex flex-col gap-1.5 flex-1">
-          <label for="login-email" class="text-sm font-semibold text-gray-700 tracking-wide uppercase">Email</label>
+          <label
+            for="login-email"
+            class="text-sm font-semibold text-gray-700 tracking-wide uppercase"
+            >Email</label
+          >
           <input
             type="email"
             id="login-email"
@@ -54,7 +64,11 @@
             class="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent transition"
           />
         </div>
-        <p id="login-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></p>
+        <p
+          id="login-error"
+          class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+        </p>
         <button
           type="submit"
           class="px-5 bg-primary hover:bg-secondary text-white py-2.5 rounded-lg transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
@@ -64,9 +78,17 @@
       </form>
 
       <form id="login-code-form" class="hidden flex flex-col gap-3">
-        <div id="login-code-message" class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"></div>
+        <div
+          id="login-code-message"
+          class="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"
+        >
+        </div>
         <div class="flex flex-col gap-1.5 flex-1">
-          <label for="login-code" class="text-sm font-semibold text-gray-700 tracking-wide uppercase">Verification Code</label>
+          <label
+            for="login-code"
+            class="text-sm font-semibold text-gray-700 tracking-wide uppercase"
+            >Verification Code</label
+          >
           <input
             type="text"
             id="login-code"
@@ -78,7 +100,11 @@
             class="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent transition"
           />
         </div>
-        <p id="login-code-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></p>
+        <p
+          id="login-code-error"
+          class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+        </p>
         <div class="flex flex-wrap items-center gap-2">
           <button
             type="submit"
@@ -89,14 +115,14 @@
           <button
             type="button"
             id="login-code-resend"
-            class="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300 transition text-sm font-semibold"
+            class="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
           >
             Resend
           </button>
           <button
             type="button"
             id="login-code-edit"
-            class="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300 transition text-sm font-semibold"
+            class="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
           >
             Edit Email
           </button>
@@ -108,7 +134,11 @@
       <form id="register-form" class="flex flex-col gap-4">
         <div class="flex flex-col gap-3">
           <div class="flex flex-col gap-1.5 flex-1">
-            <label for="register-email" class="text-sm font-semibold text-gray-700 tracking-wide uppercase">Email</label>
+            <label
+              for="register-email"
+              class="text-sm font-semibold text-gray-700 tracking-wide uppercase"
+              >Email</label
+            >
             <input
               type="email"
               id="register-email"
@@ -119,7 +149,11 @@
             />
           </div>
           <div class="flex flex-col gap-1.5 flex-1">
-            <label for="register-username" class="text-sm font-semibold text-gray-700 tracking-wide uppercase">Username</label>
+            <label
+              for="register-username"
+              class="text-sm font-semibold text-gray-700 tracking-wide uppercase"
+              >Username</label
+            >
             <input
               type="text"
               id="register-username"
@@ -130,7 +164,11 @@
             />
           </div>
           <div id="join-code-field" class="hidden flex-col gap-1.5 flex-1">
-            <label for="register-join-code" class="text-sm font-semibold text-gray-700 tracking-wide uppercase">Join Code</label>
+            <label
+              for="register-join-code"
+              class="text-sm font-semibold text-gray-700 tracking-wide uppercase"
+              >Join Code</label
+            >
             <input
               type="text"
               id="register-join-code"
@@ -140,7 +178,11 @@
             />
           </div>
         </div>
-        <p id="register-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></p>
+        <p
+          id="register-error"
+          class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"
+        >
+        </p>
         <button
           type="submit"
           class="px-5 bg-primary hover:bg-secondary text-white py-2.5 rounded-lg transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
@@ -153,82 +195,97 @@
 </div>
 
 <script>
-  const modal = document.getElementById('login-modal')!;
-  const card = document.getElementById('login-modal-card')!;
-  const closeBtn = document.getElementById('login-modal-close')!;
-  const tabBtns = document.querySelectorAll<HTMLButtonElement>('.tab-btn');
+  const modal = document.getElementById("login-modal")!;
+  const card = document.getElementById("login-modal-card")!;
+  const closeBtn = document.getElementById("login-modal-close")!;
+  const tabBtns = document.querySelectorAll<HTMLButtonElement>(".tab-btn");
 
   // Tab switching
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
       const target = btn.dataset.tab!;
 
       // Update tab styles
-      tabBtns.forEach(b => {
+      tabBtns.forEach((b) => {
         const active = b.dataset.tab === target;
-        b.classList.toggle('bg-white', active);
-        b.classList.toggle('text-gray-900', active);
-        b.classList.toggle('shadow-sm', active);
-        b.classList.toggle('text-gray-500', !active);
+        b.classList.toggle("bg-white", active);
+        b.classList.toggle("text-gray-900", active);
+        b.classList.toggle("shadow-sm", active);
+        b.classList.toggle("text-gray-500", !active);
       });
 
       // Show/hide panels
-      document.getElementById('panel-login')!.classList.toggle('hidden', target !== 'login');
-      document.getElementById('panel-register')!.classList.toggle('hidden', target !== 'register');
+      document
+        .getElementById("panel-login")!
+        .classList.toggle("hidden", target !== "login");
+      document
+        .getElementById("panel-register")!
+        .classList.toggle("hidden", target !== "register");
     });
   });
 
-  function openModal(tab = 'login') {
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
+  function openModal(tab = "login") {
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
     // Activate the correct tab
-    document.querySelector<HTMLButtonElement>(`.tab-btn[data-tab="${tab}"]`)?.click();
+    document
+      .querySelector<HTMLButtonElement>(`.tab-btn[data-tab="${tab}"]`)
+      ?.click();
     requestAnimationFrame(() => {
-      card.classList.remove('scale-95', 'opacity-0');
-      card.classList.add('scale-100', 'opacity-100');
+      card.classList.remove("scale-95", "opacity-0");
+      card.classList.add("scale-100", "opacity-100");
     });
   }
 
   function closeModal() {
-    card.classList.remove('scale-100', 'opacity-100');
-    card.classList.add('scale-95', 'opacity-0');
+    card.classList.remove("scale-100", "opacity-100");
+    card.classList.add("scale-95", "opacity-0");
     setTimeout(() => {
-      modal.classList.add('hidden');
-      modal.classList.remove('flex');
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
     }, 200);
   }
 
-  document.addEventListener('open-login-modal', (e: Event) => {
-    const tab = (e as CustomEvent).detail?.tab ?? 'login';
+  document.addEventListener("open-login-modal", (e: Event) => {
+    const tab = (e as CustomEvent).detail?.tab ?? "login";
     openModal(tab);
   });
 
-  window.addEventListener('pageshow', (e) => {
+  window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
-      (document.getElementById('login-form') as HTMLFormElement)?.reset();
-      (document.getElementById('register-form') as HTMLFormElement)?.reset();
+      (document.getElementById("login-form") as HTMLFormElement)?.reset();
+      (document.getElementById("register-form") as HTMLFormElement)?.reset();
     }
   });
 
-  closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+  closeBtn.addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.classList.contains("hidden")) closeModal();
   });
 </script>
-
 
 <script>
   // login + email verification flow
   const loginForm = document.getElementById("login-form")!;
   const loginCodeForm = document.getElementById("login-code-form")!;
-  const loginEmailInput = document.getElementById("login-email") as HTMLInputElement;
-  const loginCodeInput = document.getElementById("login-code") as HTMLInputElement;
+  const loginEmailInput = document.getElementById(
+    "login-email",
+  ) as HTMLInputElement;
+  const loginCodeInput = document.getElementById(
+    "login-code",
+  ) as HTMLInputElement;
   const loginError = document.getElementById("login-error")!;
   const loginCodeError = document.getElementById("login-code-error")!;
   const loginCodeMessage = document.getElementById("login-code-message")!;
-  const resendBtn = document.getElementById("login-code-resend") as HTMLButtonElement;
-  const editBtn = document.getElementById("login-code-edit") as HTMLButtonElement;
+  const resendBtn = document.getElementById(
+    "login-code-resend",
+  ) as HTMLButtonElement;
+  const editBtn = document.getElementById(
+    "login-code-edit",
+  ) as HTMLButtonElement;
 
   let pendingEmail = "";
 
@@ -246,7 +303,9 @@
     loginCodeForm.classList.remove("hidden");
     loginCodeError.classList.add("hidden");
     const expiry = expiresAt ? new Date(expiresAt) : null;
-    const expiryText = expiry ? ` Expires at ${expiry.toLocaleTimeString()}.` : "";
+    const expiryText = expiry
+      ? ` Expires at ${expiry.toLocaleTimeString()}.`
+      : "";
     loginCodeMessage.textContent = `We sent a verification code to ${email}.${expiryText}`;
     loginCodeInput.focus();
   }
@@ -258,7 +317,7 @@
     const res = await fetch("/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email }),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -277,10 +336,9 @@
       return;
     }
 
-    (document.getElementById("login-form") as HTMLFormElement).reset();
-    (document.getElementById("register-form") as HTMLFormElement).reset();
-    window.location.href = "/submission";
     if (data.authenticated) {
+      (document.getElementById("login-form") as HTMLFormElement).reset();
+      (document.getElementById("register-form") as HTMLFormElement).reset();
       window.location.href = "/submission";
       return;
     }
@@ -295,14 +353,14 @@
     showEmailStep();
   }
 
-  loginForm.addEventListener("submit", async function(e) {
+  loginForm.addEventListener("submit", async function (e) {
     e.preventDefault();
     const email = loginEmailInput.value.trim();
     if (!email) return;
     await requestLoginCode(email);
   });
 
-  loginCodeForm.addEventListener("submit", async function(e) {
+  loginCodeForm.addEventListener("submit", async function (e) {
     e.preventDefault();
     loginCodeError.classList.add("hidden");
 
@@ -312,7 +370,7 @@
     const res = await fetch("/auth/login/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: pendingEmail, code })
+      body: JSON.stringify({ email: pendingEmail, code }),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -351,6 +409,15 @@
   document.getElementById("tab-login")?.addEventListener("click", () => {
     showEmailStep();
   });
+
+  document.addEventListener("show-verify-step", (e: Event) => {
+    const { email, expiresAt } = (e as CustomEvent).detail;
+    pendingEmail = email;
+    document
+      .querySelector<HTMLButtonElement>('.tab-btn[data-tab="login"]')
+      ?.click();
+    showCodeStep(email, expiresAt);
+  });
 </script>
 
 <script>
@@ -361,7 +428,9 @@
       if (!res.ok) return;
       const data = await res.json();
       const joinCodeField = document.getElementById("join-code-field")!;
-      const joinCodeInput = document.getElementById("register-join-code") as HTMLInputElement;
+      const joinCodeInput = document.getElementById(
+        "register-join-code",
+      ) as HTMLInputElement;
       if (data.required) {
         joinCodeField.classList.remove("hidden");
         joinCodeField.classList.add("flex");
@@ -376,40 +445,66 @@
     }
   }
 
-  document.getElementById("tab-register")!.addEventListener("click", checkJoinCodeRequired);
+  document
+    .getElementById("tab-register")!
+    .addEventListener("click", checkJoinCodeRequired);
   document.addEventListener("open-login-modal", (e: Event) => {
     const tab = (e as CustomEvent).detail?.tab ?? "login";
     if (tab === "register") checkJoinCodeRequired();
   });
 
-  document.getElementById("register-form")!.addEventListener("submit", async function(e) {
-    e.preventDefault();
+  document
+    .getElementById("register-form")!
+    .addEventListener("submit", async function (e) {
+      e.preventDefault();
 
-    const email = (document.getElementById("register-email") as HTMLInputElement).value;
-    const username = (document.getElementById("register-username") as HTMLInputElement).value;
-    const joinCode = (document.getElementById("register-join-code") as HTMLInputElement).value || null;
-    const errorEl = document.getElementById("register-error")!;
-    errorEl.classList.add("hidden");
+      const email = (
+        document.getElementById("register-email") as HTMLInputElement
+      ).value;
+      const username = (
+        document.getElementById("register-username") as HTMLInputElement
+      ).value;
+      const joinCode =
+        (document.getElementById("register-join-code") as HTMLInputElement)
+          .value || null;
+      const errorEl = document.getElementById("register-error")!;
+      errorEl.classList.add("hidden");
 
-    const res = await fetch("/auth/register", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        email: email,
-        username: username,
-        join_code: joinCode
-      })
-    });
+      const res = await fetch("/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email,
+          username: username,
+          join_code: joinCode,
+        }),
+      });
 
-    if (!res.ok) {
-      const data = await res.json();
-      errorEl.textContent = data.detail ?? "Registration failed.";
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        errorEl.textContent = data.detail ?? "Registration failed.";
+        errorEl.classList.remove("hidden");
+        return;
+      }
+
+      if (data.verification_required) {
+        document.dispatchEvent(
+          new CustomEvent("show-verify-step", {
+            detail: { email, expiresAt: data.verification_expires_at },
+          }),
+        );
+        return;
+      }
+
+      if (data.authenticated) {
+        window.location.href = "/submission";
+        return;
+      }
+
+      errorEl.textContent = "Unexpected registration response.";
       errorEl.classList.remove("hidden");
-      return;
-    }
-
-    window.location.href = "/submission";
-  });
+    });
 </script>
