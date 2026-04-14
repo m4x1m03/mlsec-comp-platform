@@ -149,6 +149,8 @@ def test_register_rolls_back_on_integrity_error():
 
 
 def test_register_rolls_back_on_http_exception(monkeypatch):
+    monkeypatch.setattr(auth_router, "_email_mfa_enabled", lambda: False)
+
     user_id = uuid4()
     fake_db = _FakeSession(
         responses=[

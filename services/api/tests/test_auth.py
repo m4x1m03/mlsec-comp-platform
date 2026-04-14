@@ -42,8 +42,12 @@ def test_login_unknown_email_requires_registration(client, db_session):
     assert "set-cookie" not in resp.headers
 
 
-def test_register_creates_user_identity_and_session(client, db_session):
-    """Registration creates user, identity, and session records."""
+def test_register_creates_user_identity_and_session(client, db_session, fake_redis, monkeypatch):
+    """Registration creates user and identity, then issues a session after email verification."""
+    monkeypatch.setattr(auth_router, "get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr(auth_router, "_generate_login_code", lambda: "999999")
+    monkeypatch.setattr(auth_router, "send_login_code_email", lambda **_kwargs: None)
+
     resp = client.post(
         "/auth/register",
         json={"email": "register-flow@example.com", "username": "register_user"},
@@ -51,13 +55,11 @@ def test_register_creates_user_identity_and_session(client, db_session):
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["user"]["email"] == "register-flow@example.com"
-    assert body["user"]["username"] == "register_user"
-    assert body["expires_at"] is not None
-    assert "set-cookie" in resp.headers
-    assert f"{_session_cookie_name()}=" in resp.headers["set-cookie"]
-    _assert_session_cookie_flags(resp.headers["set-cookie"])
+    assert body["verification_required"] is True
+    assert body["user"] is None
+    assert "set-cookie" not in resp.headers
 
+    # User and identity rows should already exist in the DB at this point.
     user_row = db_session.execute(
         text(
             """
@@ -85,6 +87,20 @@ def test_register_creates_user_identity_and_session(client, db_session):
     assert identity_row is not None
     assert identity_row[0] == "email_2fa"
     assert identity_row[1] == "register-flow@example.com"
+
+    # Complete verification to obtain the session cookie.
+    verify_resp = client.post(
+        "/auth/login/verify",
+        json={"email": "register-flow@example.com", "code": "999999"},
+    )
+    assert verify_resp.status_code == 200
+    verify_body = verify_resp.json()
+    assert verify_body["user"]["email"] == "register-flow@example.com"
+    assert verify_body["user"]["username"] == "register_user"
+    assert verify_body["expires_at"] is not None
+    assert "set-cookie" in verify_resp.headers
+    assert f"{_session_cookie_name()}=" in verify_resp.headers["set-cookie"]
+    _assert_session_cookie_flags(verify_resp.headers["set-cookie"])
 
     session_cookie = client.cookies.get(_session_cookie_name())
     assert session_cookie is not None
@@ -208,13 +224,23 @@ def test_me_escapes_legacy_malicious_username(client, db_session):
     assert me_resp.json()["user"]["username"] == "&lt;img src=x onerror=alert(1)&gt;"
 
 
-def test_logout_revokes_session_and_blocks_reuse(client, db_session):
+def test_logout_revokes_session_and_blocks_reuse(client, db_session, fake_redis, monkeypatch):
     """Logout should revoke the session and clear the cookie."""
+    monkeypatch.setattr(auth_router, "get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr(auth_router, "_generate_login_code", lambda: "111111")
+    monkeypatch.setattr(auth_router, "send_login_code_email", lambda **_kwargs: None)
+
     register_resp = client.post(
         "/auth/register",
         json={"email": "logout-flow@example.com", "username": "logout_user"},
     )
     assert register_resp.status_code == 201
+
+    verify_resp = client.post(
+        "/auth/login/verify",
+        json={"email": "logout-flow@example.com", "code": "111111"},
+    )
+    assert verify_resp.status_code == 200
 
     me_resp = client.get("/auth/me")
     assert me_resp.status_code == 200
