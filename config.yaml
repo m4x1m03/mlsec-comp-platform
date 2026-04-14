@@ -1,5 +1,5 @@
 worker:
-  num_workers: 4   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
+  num_workers: 2   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
   defense_job:
     mem_limit: "1g"
     nano_cpus: 1000000000
@@ -57,4 +57,4 @@ application:
   join_code: 'ABC'
   defense_submission_cooldown: 30   # seconds between defense submissions per user; 0 = no cooldown
   attack_submission_cooldown: 30    # seconds between attack submissions per user; 0 = no cooldown
-  email_mfa_enabled: true
+  email_mfa_enabled: false
