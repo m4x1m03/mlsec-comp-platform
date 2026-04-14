@@ -89,14 +89,14 @@
           <button
             type="button"
             id="login-code-resend"
-            class="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300 transition text-sm font-semibold"
+            class="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
           >
             Resend
           </button>
           <button
             type="button"
             id="login-code-edit"
-            class="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:text-gray-800 hover:border-gray-300 transition text-sm font-semibold"
+            class="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition duration-200 ease-in-out font-bold tracking-wide whitespace-nowrap"
           >
             Edit Email
           </button>
@@ -277,10 +277,9 @@
       return;
     }
 
-    (document.getElementById("login-form") as HTMLFormElement).reset();
-    (document.getElementById("register-form") as HTMLFormElement).reset();
-    window.location.href = "/submission";
     if (data.authenticated) {
+      (document.getElementById("login-form") as HTMLFormElement).reset();
+      (document.getElementById("register-form") as HTMLFormElement).reset();
       window.location.href = "/submission";
       return;
     }
@@ -351,6 +350,13 @@
   document.getElementById("tab-login")?.addEventListener("click", () => {
     showEmailStep();
   });
+
+  document.addEventListener("show-verify-step", (e: Event) => {
+    const { email, expiresAt } = (e as CustomEvent).detail;
+    pendingEmail = email;
+    document.querySelector<HTMLButtonElement>('.tab-btn[data-tab="login"]')?.click();
+    showCodeStep(email, expiresAt);
+  });
 </script>
 
 <script>
@@ -403,13 +409,27 @@
       })
     });
 
+    const data = await res.json().catch(() => ({}));
+
     if (!res.ok) {
-      const data = await res.json();
       errorEl.textContent = data.detail ?? "Registration failed.";
       errorEl.classList.remove("hidden");
       return;
     }
 
-    window.location.href = "/submission";
+    if (data.verification_required) {
+      document.dispatchEvent(new CustomEvent("show-verify-step", {
+        detail: { email, expiresAt: data.verification_expires_at }
+      }));
+      return;
+    }
+
+    if (data.authenticated) {
+      window.location.href = "/submission";
+      return;
+    }
+
+    errorEl.textContent = "Unexpected registration response.";
+    errorEl.classList.remove("hidden");
   });
 </script>

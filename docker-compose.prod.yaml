@@ -1,32 +1,14 @@
 services:
-  # TODO: PostgreSQL
   postgres:
     image: postgres:18
     container_name: postgres-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mlsec2}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlsec2_pw}
       POSTGRES_DB: mlsec
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./services/postgres/init:/docker-entrypoint-initdb.d
-    networks:
-      - backend_net
-
-  # Test database 
-  postgres-test:
-    image: postgres:18
-    container_name: test-postgres-db
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-mlsec2}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlsec2_pw}
-      POSTGRES_DB: mlsec_test
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata_test:/var/lib/postgresql
       - ./services/postgres/init:/docker-entrypoint-initdb.d
     networks:
       - backend_net
@@ -34,13 +16,11 @@ services:
   minio:
     image: minio/minio:latest
     container_name: mlsec-minio
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-mlsec2}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
     command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000" # API
-      - "9001:9001" # Console UI
     volumes:
       - miniodata:/data
     healthcheck:
@@ -54,12 +34,10 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-mlsec2}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-mlsec2_pw}
-    ports:
-      - "5672:5672" # AMQP
-      - "15672:15672" # Management UI
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
     networks:
@@ -68,9 +46,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: mlsec-redis
+    restart: unless-stopped
     command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -81,12 +58,12 @@ services:
     networks:
       - backend_net
 
-  # TODO: FastAPI
   api:
     build:
       context: ./services/api
       dockerfile: Dockerfile
     container_name: mlsec-api
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-mlsec2}:${POSTGRES_PASSWORD:-mlsec2_pw}@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-mlsec2}:${RABBITMQ_PASSWORD:-mlsec2_pw}@rabbitmq:5672//
@@ -95,22 +72,11 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec2}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
       MINIO_SECURE: "false"
-      ADMIN_ALLOWED_HOSTS: '["172.22.0.1"]' # Docker bridge gateway for localhost SSH tunnel access
-      ADMIN_TRUSTED_PROXY_HOSTS: '["127.0.0.1", "::1", "172.16.0.0/12"]' # Trust nginx on any Docker bridge subnet
-      ADMIN_ALLOWED_NETWORKS: '["172.16.0.0/12"]' # Allow Docker bridge gateway as effective client (localhost dev access)
-      AUTH_EMAIL_MFA_ENABLED: ${AUTH_EMAIL_MFA_ENABLED:-true}
-      AUTH_EMAIL_MFA_DELIVERY: ${AUTH_EMAIL_MFA_DELIVERY:-log}
-      AUTH_EMAIL_MFA_CODE_TTL_MINUTES: ${AUTH_EMAIL_MFA_CODE_TTL_MINUTES:-10}
-      AUTH_EMAIL_MFA_MAX_ATTEMPTS: ${AUTH_EMAIL_MFA_MAX_ATTEMPTS:-5}
-      AUTH_EMAIL_MFA_FROM: ${AUTH_EMAIL_MFA_FROM:-no-reply@mlsec.local}
-      AUTH_EMAIL_MFA_SUBJECT: ${AUTH_EMAIL_MFA_SUBJECT:-Your MLSEC login code}
-      AUTH_EMAIL_MFA_BASE_URL: ${AUTH_EMAIL_MFA_BASE_URL:-}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
-      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      # Production-specific settings (Adjust as needed for actual EC2 domain)
+      ADMIN_ALLOWED_HOSTS: ${ADMIN_ALLOWED_HOSTS:-["*"]}
+      ADMIN_TRUSTED_PROXY_HOSTS: ${ADMIN_TRUSTED_PROXY_HOSTS:-["127.0.0.1", "::1", "172.16.0.0/12"]}
+      ADMIN_ALLOWED_NETWORKS: ${ADMIN_ALLOWED_NETWORKS:-["172.16.0.0/12"]}
+      ADMIN_LOCALHOST_ONLY: "false"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -121,24 +87,11 @@ services:
       - redis
       - minio
 
-  # Gateway to control traffic for student containers
-  mlsec-gateway:
-    build:
-      context: ./services/gateway
-      dockerfile: Dockerfile
-    container_name: mlsec-gateway
-    cap_add:
-      - NET_ADMIN
-    sysctls:
-      - net.ipv4.ip_forward=1
-    networks:
-      - defense_net
-
-  # Worker Container (Celery)
   worker:
     build:
       context: ./services/worker
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-mlsec2}:${POSTGRES_PASSWORD:-mlsec2_pw}@postgres:5432/mlsec
       CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-mlsec2}:${RABBITMQ_PASSWORD:-mlsec2_pw}@rabbitmq:5672//
@@ -149,13 +102,13 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
       MINIO_SECURE: "false"
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
-      CELERY_CONCURRENCY: "${WORKER_CONCURRENCY:-1}" # Forces use of a single thread per Worker container
+      CELERY_CONCURRENCY: "${WORKER_CONCURRENCY:-4}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
       - worker_cache:/app/cache
     group_add:
-      - "${DOCKER_GID:-999}" # Allows Worker container to interact with Docker Engine
+      - "${DOCKER_GID:-999}"
     networks:
       - backend_net
       - defense_net
@@ -165,18 +118,15 @@ services:
       - redis
       - minio
 
-  # Frontend (Astro)
   frontend:
     build:
       context: ./services/frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.prod
     container_name: mlsec-frontend
+    restart: unless-stopped
     environment:
-      PUBLIC_API_URL: ""
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-}
       API_INTERNAL_URL: http://api:8000
-    volumes:
-      - ./services/frontend:/app
-      - /app/node_modules
     networks:
       - backend_net
     depends_on:
@@ -185,12 +135,13 @@ services:
   nginx:
     image: nginx:alpine
     container_name: mlsec-nginx
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./services/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - certbot-conf:/etc/letsencrypt:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot-www:/var/www/certbot:ro
     networks:
       - backend_net
@@ -201,39 +152,38 @@ services:
   certbot:
     image: certbot/certbot
     container_name: mlsec-certbot
+    restart: unless-stopped
     volumes:
-      - certbot-conf:/etc/letsencrypt
+      - /etc/letsencrypt:/etc/letsencrypt
       - certbot-www:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done'"
 
-  # Adminer (Can remove in production if we dont need it)
-  adminer:
-    image: adminer:latest
-    container_name: mlsec-adminer
-    ports:
-      - "8081:8080"
+  mlsec-gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    container_name: mlsec-gateway
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     networks:
-      - backend_net
-    depends_on:
-      - postgres
+      - defense_net
 
 networks:
-  # TODO: Secure communication network for evaluation end.
   backend_net:
     name: backend_net
     driver: bridge
   defense_net:
     name: defense_net
     driver: bridge
+
 volumes:
-  # TODO: Establish volumes for postgres, minio, rabbitmq
   pgdata:
-  pgdata_test:
   rabbitmqdata:
   redisdata:
   miniodata:
   worker_cache:
   certbot-conf:
   certbot-www:
-
-
