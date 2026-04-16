@@ -1,9 +1,15 @@
 ---
-import Navbar from '../Navbar.astro';
+import Navbar from "../Navbar.astro";
 
 interface Props {
   title: string;
-  currentPage: 'overview' | 'users' | 'logs' | 'competition' | 'workers' | 'submissions';
+  currentPage:
+    | "overview"
+    | "users"
+    | "logs"
+    | "competition"
+    | "workers"
+    | "submissions";
 }
 
 const { title, currentPage } = Astro.props;
@@ -26,57 +32,62 @@ const navLinks = [
     <title>MLSEC 2.0 Admin - {title}</title>
   </head>
   <body class="flex flex-col h-screen overflow-hidden bg-gray-50">
-
     <Navbar />
 
     <!-- Mobile: horizontal scrollable tab strip (hidden on md+) -->
-    <div class="md:hidden flex overflow-x-auto shrink-0 bg-gray-800 border-b border-gray-700" style="scrollbar-width: none;">
-      {navLinks.map(link => (
-        <a
-          href={link.href}
-          class:list={[
-            'px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors',
-            currentPage === link.id
-              ? 'border-white text-white'
-              : 'border-transparent text-gray-400 hover:text-gray-200',
-          ]}
-        >
-          {link.label}
-        </a>
-      ))}
+    <div
+      class="md:hidden flex overflow-x-auto shrink-0 bg-gray-800 border-b border-gray-700"
+      style="scrollbar-width: none;"
+    >
+      {
+        navLinks.map((link) => (
+          <a
+            href={link.href}
+            class:list={[
+              "px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors",
+              currentPage === link.id
+                ? "border-white text-white"
+                : "border-transparent text-gray-400 hover:text-gray-200",
+            ]}
+          >
+            {link.label}
+          </a>
+        ))
+      }
     </div>
 
     <div class="flex flex-1 min-h-0">
-
       <!-- Desktop: sidebar (hidden on mobile) -->
       <nav class="hidden md:flex w-52 bg-gray-800 flex-col shrink-0">
         <div class="px-5 py-3 border-b border-gray-700">
-          <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+          <span
+            class="text-xs font-semibold text-gray-400 uppercase tracking-wider"
+          >
             Admin Panel
           </span>
         </div>
         <div class="flex flex-col py-1">
-          {navLinks.map(link => (
-            <a
-              href={link.href}
-              class:list={[
-                'px-5 py-2.5 text-sm font-medium transition-colors',
-                currentPage === link.id
-                  ? 'bg-primary text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white',
-              ]}
-            >
-              {link.label}
-            </a>
-          ))}
+          {
+            navLinks.map((link) => (
+              <a
+                href={link.href}
+                class:list={[
+                  "px-5 py-2.5 text-sm font-medium transition-colors",
+                  currentPage === link.id
+                    ? "bg-primary text-white"
+                    : "text-gray-300 hover:bg-gray-700 hover:text-white",
+                ]}
+              >
+                {link.label}
+              </a>
+            ))
+          }
         </div>
       </nav>
 
       <main class="flex-1 overflow-auto p-3 md:p-6">
         <slot />
       </main>
-
     </div>
-
   </body>
 </html>
