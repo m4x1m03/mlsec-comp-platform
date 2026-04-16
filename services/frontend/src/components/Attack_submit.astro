@@ -1,43 +1,98 @@
 ---
+
 ---
 
-<div class="flex flex-col bg-white border border-gray-200 shadow-sm ml-6 mr-3 mb-6 mt-3 p-6 rounded-xl">
+<div
+  class="flex flex-col bg-white border border-gray-200 shadow-sm ml-6 mr-3 mb-6 mt-3 p-6 rounded-xl"
+>
   <h2 class="text-xl font-semibold text-gray-900 mb-5">Attack Submission</h2>
 
-  <p id="attack-cooldown" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"></p>
+  <p
+    class="text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 mb-4"
+  >
+    Submissions are disabled during the expo.
+  </p>
+
+  <p
+    id="attack-cooldown"
+    class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"
+  >
+  </p>
 
   <form id="attack-form" class="flex flex-col gap-4">
-
     <div>
-      <label class="block text-sm font-medium text-gray-700 mb-1">ZIP Archive</label>
+      <label class="block text-sm font-medium text-gray-700 mb-1"
+        >ZIP Archive</label
+      >
       <label
         for="attack-file"
         id="attack-file-label"
         class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition"
       >
-        <div id="attack-file-idle" class="flex flex-col items-center text-center px-4">
-          <svg class="w-8 h-8 mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6H16a5 5 0 011 9.9M12 12v9m0 0l-3-3m3 3l3-3" />
+        <div
+          id="attack-file-idle"
+          class="flex flex-col items-center text-center px-4"
+        >
+          <svg
+            class="w-8 h-8 mb-2 text-gray-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6H16a5 5 0 011 9.9M12 12v9m0 0l-3-3m3 3l3-3"
+            ></path>
           </svg>
           <p class="text-sm text-gray-600">
-            <span class="font-medium text-primary">Click to upload</span> or drag and drop
+            <span class="font-medium text-primary">Click to upload</span> or drag
+            and drop
           </p>
-          <p class="text-xs text-gray-400 mt-0.5">Password-protected ZIP (password: "infected"), max 5 MB per sample</p>
+          <p class="text-xs text-gray-400 mt-0.5">
+            Password-protected ZIP (password: "infected"), max 5 MB per sample
+          </p>
         </div>
-        <div id="attack-file-chosen" class="hidden flex-col items-center text-center px-4">
-          <svg class="w-8 h-8 mb-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <div
+          id="attack-file-chosen"
+          class="hidden flex-col items-center text-center px-4"
+        >
+          <svg
+            class="w-8 h-8 mb-2 text-primary"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
           </svg>
-          <p id="attack-file-name" class="text-sm font-medium text-gray-800 truncate max-w-xs"></p>
+          <p
+            id="attack-file-name"
+            class="text-sm font-medium text-gray-800 truncate max-w-xs"
+          >
+          </p>
           <p class="text-xs text-gray-400 mt-0.5">Click to change</p>
         </div>
-        <input id="attack-file" name="file" type="file" accept=".zip" class="hidden" />
+        <input
+          id="attack-file"
+          name="file"
+          type="file"
+          accept=".zip"
+          class="hidden"
+        />
       </label>
     </div>
 
     <div class="grid grid-cols-2 gap-3">
       <div>
-        <label for="attack-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+        <label
+          for="attack-name"
+          class="block text-sm font-medium text-gray-700 mb-1">Name</label
+        >
         <input
           type="text"
           id="attack-name"
@@ -47,7 +102,10 @@
         />
       </div>
       <div>
-        <label for="attack-version" class="block text-sm font-medium text-gray-700 mb-1">Version</label>
+        <label
+          for="attack-version"
+          class="block text-sm font-medium text-gray-700 mb-1">Version</label
+        >
         <input
           type="text"
           id="attack-version"
@@ -64,57 +122,64 @@
 
     <button
       type="submit"
-      class="w-full bg-primary hover:bg-secondary text-white font-semibold py-2.5 rounded-lg transition duration-200"
+      disabled
+      class="w-full bg-primary text-white font-semibold py-2.5 rounded-lg opacity-50 cursor-not-allowed"
     >
       Submit Attack
     </button>
-
   </form>
 </div>
 
 <script>
-  const attackFileInput = document.getElementById('attack-file') as HTMLInputElement;
-  const attackIdleView  = document.getElementById('attack-file-idle')!;
-  const attackChosenView = document.getElementById('attack-file-chosen')!;
-  const attackFileNameEl = document.getElementById('attack-file-name')!;
+  const attackFileInput = document.getElementById(
+    "attack-file",
+  ) as HTMLInputElement;
+  const attackIdleView = document.getElementById("attack-file-idle")!;
+  const attackChosenView = document.getElementById("attack-file-chosen")!;
+  const attackFileNameEl = document.getElementById("attack-file-name")!;
 
-  attackFileInput.addEventListener('change', () => {
+  attackFileInput.addEventListener("change", () => {
     const file = attackFileInput.files?.[0];
     if (file) {
       attackFileNameEl.textContent = file.name;
-      attackIdleView.classList.add('hidden');
-      attackChosenView.classList.remove('hidden');
-      attackChosenView.classList.add('flex');
+      attackIdleView.classList.add("hidden");
+      attackChosenView.classList.remove("hidden");
+      attackChosenView.classList.add("flex");
     } else {
-      attackIdleView.classList.remove('hidden');
-      attackChosenView.classList.add('hidden');
-      attackChosenView.classList.remove('flex');
+      attackIdleView.classList.remove("hidden");
+      attackChosenView.classList.add("hidden");
+      attackChosenView.classList.remove("flex");
     }
   });
 
   function _extractDetail(detail: unknown): string {
-    if (typeof detail === 'string') return detail;
+    if (typeof detail === "string") return detail;
     if (Array.isArray(detail) && detail.length > 0) {
-      return (detail as { msg?: string }[]).map(e => e.msg ?? String(e)).join('; ');
+      return (detail as { msg?: string }[])
+        .map((e) => e.msg ?? String(e))
+        .join("; ");
     }
-    return 'An unexpected error occurred.';
+    return "An unexpected error occurred.";
   }
 
   function _attachDismiss(el: HTMLElement) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = '×';
-    btn.className = 'ml-3 text-current opacity-60 hover:opacity-100 leading-none flex-shrink-0';
-    btn.setAttribute('aria-label', 'Dismiss');
-    btn.addEventListener('click', () => {
-      el.className = 'hidden text-sm rounded-lg px-3 py-2';
-      el.textContent = '';
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "×";
+    btn.className =
+      "ml-3 text-current opacity-60 hover:opacity-100 leading-none flex-shrink-0";
+    btn.setAttribute("aria-label", "Dismiss");
+    btn.addEventListener("click", () => {
+      el.className = "hidden text-sm rounded-lg px-3 py-2";
+      el.textContent = "";
     });
     el.appendChild(btn);
   }
 
   (function initAttackCooldown() {
-    const cooldownEl = document.getElementById('attack-cooldown') as HTMLParagraphElement;
+    const cooldownEl = document.getElementById(
+      "attack-cooldown",
+    ) as HTMLParagraphElement;
     let timer: ReturnType<typeof setInterval> | null = null;
 
     function startCountdown(seconds: number) {
@@ -123,15 +188,15 @@
 
       function tick() {
         if (remaining <= 0) {
-          cooldownEl.classList.add('hidden');
-          cooldownEl.textContent = '';
+          cooldownEl.classList.add("hidden");
+          cooldownEl.textContent = "";
           if (timer) clearInterval(timer);
           return;
         }
-        const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
-        const ss = String(remaining % 60).padStart(2, '0');
+        const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+        const ss = String(remaining % 60).padStart(2, "0");
         cooldownEl.textContent = `You can submit again in ${mm}:${ss}`;
-        cooldownEl.classList.remove('hidden');
+        cooldownEl.classList.remove("hidden");
         remaining--;
       }
 
@@ -141,7 +206,7 @@
 
     async function checkCooldown() {
       try {
-        const res = await fetch('/api/submissions/cooldown');
+        const res = await fetch("/api/submissions/cooldown");
         if (!res.ok) return;
         const data = await res.json();
         const secs: number | null = data.attack_remaining_seconds;
@@ -153,60 +218,80 @@
 
     checkCooldown();
 
-    document.addEventListener('submission-created', (e: Event) => {
-      if ((e as CustomEvent).detail?.type === 'attack') {
+    document.addEventListener("submission-created", (e: Event) => {
+      if ((e as CustomEvent).detail?.type === "attack") {
         checkCooldown();
       }
     });
   })();
 
-  document.getElementById('attack-form')!.addEventListener('submit', async (e) => {
-    e.preventDefault();
+  document
+    .getElementById("attack-form")!
+    .addEventListener("submit", async (e) => {
+      e.preventDefault();
 
-    const feedback    = document.getElementById('attack-feedback')!;
-    const btn         = document.querySelector<HTMLButtonElement>('#attack-form button[type="submit"]')!;
-    const version     = (document.getElementById('attack-version') as HTMLInputElement).value.trim();
-    const displayName = (document.getElementById('attack-name')    as HTMLInputElement).value.trim() || null;
-    const fileInput   = document.getElementById('attack-file') as HTMLInputElement;
-    const file        = fileInput.files?.[0];
+      const feedback = document.getElementById("attack-feedback")!;
+      const btn = document.querySelector<HTMLButtonElement>(
+        '#attack-form button[type="submit"]',
+      )!;
+      const version = (
+        document.getElementById("attack-version") as HTMLInputElement
+      ).value.trim();
+      const displayName =
+        (
+          document.getElementById("attack-name") as HTMLInputElement
+        ).value.trim() || null;
+      const fileInput = document.getElementById(
+        "attack-file",
+      ) as HTMLInputElement;
+      const file = fileInput.files?.[0];
 
-    if (!file) {
-      feedback.textContent = 'Please select a ZIP file.';
-      feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
-      _attachDismiss(feedback);
-      return;
-    }
+      if (!file) {
+        feedback.textContent = "Please select a ZIP file.";
+        feedback.className =
+          "flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200";
+        _attachDismiss(feedback);
+        return;
+      }
 
-    btn.disabled    = true;
-    btn.textContent = 'Submitting...';
-    feedback.className = 'hidden text-sm rounded-lg px-3 py-2';
+      btn.disabled = true;
+      btn.textContent = "Submitting...";
+      feedback.className = "hidden text-sm rounded-lg px-3 py-2";
 
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('version', version);
-      if (displayName) fd.append('display_name', displayName);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("version", version);
+        if (displayName) fd.append("display_name", displayName);
 
-      const res  = await fetch('/api/submissions/attack/zip', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(_extractDetail(data.detail) || `Error ${res.status}`);
+        const res = await fetch("/api/submissions/attack/zip", {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok)
+          throw new Error(_extractDetail(data.detail) || `Error ${res.status}`);
 
-      feedback.textContent = `Submitted (ID: ${data.submission_id})`;
-      feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200';
-      _attachDismiss(feedback);
-      (e.target as HTMLFormElement).reset();
-      attackIdleView.classList.remove('hidden');
-      attackChosenView.classList.add('hidden');
-      attackChosenView.classList.remove('flex');
-      document.dispatchEvent(new CustomEvent('submission-created', { detail: { type: 'attack' } }));
-
-    } catch (err: unknown) {
-      feedback.textContent = (err instanceof Error ? err.message : null) ?? 'Submission failed.';
-      feedback.className   = 'flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200';
-      _attachDismiss(feedback);
-    } finally {
-      btn.disabled    = false;
-      btn.textContent = 'Submit Attack';
-    }
-  });
+        feedback.textContent = `Submitted (ID: ${data.submission_id})`;
+        feedback.className =
+          "flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-green-50 text-green-700 border border-green-200";
+        _attachDismiss(feedback);
+        (e.target as HTMLFormElement).reset();
+        attackIdleView.classList.remove("hidden");
+        attackChosenView.classList.add("hidden");
+        attackChosenView.classList.remove("flex");
+        document.dispatchEvent(
+          new CustomEvent("submission-created", { detail: { type: "attack" } }),
+        );
+      } catch (err: unknown) {
+        feedback.textContent =
+          (err instanceof Error ? err.message : null) ?? "Submission failed.";
+        feedback.className =
+          "flex items-center justify-between text-sm rounded-lg px-3 py-2 bg-red-50 text-red-700 border border-red-200";
+        _attachDismiss(feedback);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Submit Attack";
+      }
+    });
 </script>
