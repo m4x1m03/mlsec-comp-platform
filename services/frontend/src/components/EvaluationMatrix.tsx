@@ -147,7 +147,7 @@ export default function EvaluationMatrix() {
               <th
                 rowSpan={defenders.length + 1}
                 className="sticky left-0 z-10 bg-white border-r border-gray-200 w-7 min-w-[28px]"
-                style={{ verticalAlign: 'middle', textAlign: 'center' }}
+                style={{ verticalAlign: 'middle', textAlign: 'center', boxShadow: '1px 0 0 #e5e7eb' }}
               >
                 <span
                   className="text-xs font-semibold text-gray-600 select-none"
