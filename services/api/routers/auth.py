@@ -186,12 +186,8 @@ def _join_code_required() -> bool:
 
 
 def _email_mfa_enabled() -> bool:
-    """Return whether email MFA is enabled (config.yaml overrides env)."""
-    settings = get_settings()
-    config = get_config()
-    if config.application.email_mfa_enabled is None:
-        return settings.auth_email_mfa_enabled
-    return bool(config.application.email_mfa_enabled)
+    """Return whether email MFA is enabled per config.yaml."""
+    return get_config().email.mfa_enabled
 
 
 def _validate_join_code_or_raise(submitted_code: str | None) -> None:
@@ -274,8 +270,6 @@ def login(
             required_registration_fields=REQUIRED_REGISTRATION_FIELDS,
         )
 
-    settings = get_settings()
-
     if not _email_mfa_enabled():
         session_token = create_session(db, user_id=row["id"])
         _set_session_cookie(response, access_token=session_token.access_token, expires_at=session_token.expires_at)
@@ -303,7 +297,7 @@ def login(
         )
 
     code = _generate_login_code()
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.auth_email_mfa_code_ttl_minutes)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=get_config().email.code_ttl_minutes)
     try:
         _store_login_challenge(email=req.email, user_id=str(row["id"]), code=code, expires_at=expires_at)
         send_login_code_email(to_email=row["email"], code=code, expires_at=expires_at)
@@ -340,7 +334,6 @@ def verify_login(
     db: Session = Depends(get_db),
 ) -> LoginResponse:
     """Verify a login code and issue a session token."""
-    settings = get_settings()
     if not _email_mfa_enabled():
         raise HTTPException(status_code=400, detail="Email verification is not enabled")
 
@@ -363,7 +356,7 @@ def verify_login(
         raise HTTPException(status_code=401, detail="Verification code expired")
 
     attempts = int(challenge.get("attempts", 0))
-    if attempts >= settings.auth_email_mfa_max_attempts:
+    if attempts >= get_config().email.max_attempts:
         _clear_login_challenge(req.email)
         raise HTTPException(status_code=429, detail="Too many verification attempts")
 
@@ -584,9 +577,8 @@ def register(
             ),
         )
 
-    settings = get_settings()
     code = _generate_login_code()
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.auth_email_mfa_code_ttl_minutes)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=get_config().email.code_ttl_minutes)
     try:
         _store_login_challenge(email=user_row["email"], user_id=str(user_row["id"]), code=code, expires_at=expires_at)
         send_login_code_email(to_email=user_row["email"], code=code, expires_at=expires_at)
