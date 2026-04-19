@@ -206,6 +206,7 @@
   window.addEventListener('pageshow', (e) => {
     if (e.persisted) {
       (document.getElementById('login-form') as HTMLFormElement)?.reset();
+      (document.getElementById('login-code-form') as HTMLFormElement)?.reset();
       (document.getElementById('register-form') as HTMLFormElement)?.reset();
     }
   });
@@ -232,6 +233,14 @@
 
   let pendingEmail = "";
 
+  function _extractDetail(detail: unknown): string {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      return (detail as { msg?: string }[]).map(e => e.msg ?? String(e)).join('; ');
+    }
+    return 'An unexpected error occurred.';
+  }
+
   function showEmailStep() {
     loginForm.classList.remove("hidden");
     loginCodeForm.classList.add("hidden");
@@ -251,54 +260,62 @@
     loginCodeInput.focus();
   }
 
-  async function requestLoginCode(email: string) {
+  async function requestLoginCode(email: string, btn?: HTMLButtonElement) {
     loginError.classList.add("hidden");
     loginCodeError.classList.add("hidden");
 
-    const res = await fetch("/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email })
-    });
+    const originalText = btn?.textContent ?? '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
 
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
 
-    if (!res.ok) {
-      loginError.textContent = data.detail ?? "Login failed.";
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        loginError.textContent = _extractDetail(data.detail) || "Login failed.";
+        loginError.classList.remove("hidden");
+        showEmailStep();
+        return;
+      }
+
+      if (data.requires_registration) {
+        loginError.textContent = "Email not recognized. Please register first.";
+        loginError.classList.remove("hidden");
+        showEmailStep();
+        return;
+      }
+
+      if (data.authenticated) {
+        (document.getElementById("login-form") as HTMLFormElement).reset();
+        (document.getElementById("register-form") as HTMLFormElement).reset();
+        window.location.href = "/submission";
+        return;
+      }
+
+      if (data.verification_required) {
+        showCodeStep(email, data.verification_expires_at);
+        return;
+      }
+
+      loginError.textContent = "Unexpected login response.";
       loginError.classList.remove("hidden");
       showEmailStep();
-      return;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = originalText; }
     }
-
-    if (data.requires_registration) {
-      loginError.textContent = "Email not recognized. Please register first.";
-      loginError.classList.remove("hidden");
-      showEmailStep();
-      return;
-    }
-
-    if (data.authenticated) {
-      (document.getElementById("login-form") as HTMLFormElement).reset();
-      (document.getElementById("register-form") as HTMLFormElement).reset();
-      window.location.href = "/submission";
-      return;
-    }
-
-    if (data.verification_required) {
-      showCodeStep(email, data.verification_expires_at);
-      return;
-    }
-
-    loginError.textContent = "Unexpected login response.";
-    loginError.classList.remove("hidden");
-    showEmailStep();
   }
 
   loginForm.addEventListener("submit", async function(e) {
     e.preventDefault();
     const email = loginEmailInput.value.trim();
     if (!email) return;
-    await requestLoginCode(email);
+    const submitBtn = loginForm.querySelector('button[type="submit"]') as HTMLButtonElement;
+    await requestLoginCode(email, submitBtn);
   });
 
   loginCodeForm.addEventListener("submit", async function(e) {
@@ -308,32 +325,42 @@
     const code = loginCodeInput.value.trim();
     if (!pendingEmail || !code) return;
 
-    const res = await fetch("/auth/login/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: pendingEmail, code })
-    });
+    const verifyBtn = loginCodeForm.querySelector('button[type="submit"]') as HTMLButtonElement;
+    const originalText = verifyBtn.textContent ?? '';
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying...';
 
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch("/auth/login/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: pendingEmail, code })
+      });
 
-    if (!res.ok) {
-      loginCodeError.textContent = data.detail ?? "Verification failed.";
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        loginCodeError.textContent = _extractDetail(data.detail) || "Verification failed.";
+        loginCodeError.classList.remove("hidden");
+        return;
+      }
+
+      if (data.authenticated) {
+        window.location.href = "/submission";
+        return;
+      }
+
+      loginCodeError.textContent = "Verification failed.";
       loginCodeError.classList.remove("hidden");
-      return;
+    } finally {
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = originalText;
     }
-
-    if (data.authenticated) {
-      window.location.href = "/submission";
-      return;
-    }
-
-    loginCodeError.textContent = "Verification failed.";
-    loginCodeError.classList.remove("hidden");
   });
 
   resendBtn.addEventListener("click", async () => {
     if (!pendingEmail) return;
-    await requestLoginCode(pendingEmail);
+    await requestLoginCode(pendingEmail, resendBtn);
   });
 
   editBtn.addEventListener("click", () => {
@@ -356,6 +383,14 @@
     pendingEmail = email;
     document.querySelector<HTMLButtonElement>('.tab-btn[data-tab="login"]')?.click();
     showCodeStep(email, expiresAt);
+  });
+
+  window.addEventListener("pagehide", () => {
+    pendingEmail = "";
+    (document.getElementById("login-form") as HTMLFormElement)?.reset();
+    (document.getElementById("login-code-form") as HTMLFormElement)?.reset();
+    (document.getElementById("register-form") as HTMLFormElement)?.reset();
+    showEmailStep();
   });
 </script>
 
@@ -397,39 +432,57 @@
     const errorEl = document.getElementById("register-error")!;
     errorEl.classList.add("hidden");
 
-    const res = await fetch("/auth/register", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        email: email,
-        username: username,
-        join_code: joinCode
-      })
-    });
+    const submitBtn = (this as HTMLFormElement).querySelector('button[type="submit"]') as HTMLButtonElement;
+    const originalText = submitBtn.textContent ?? '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending...';
 
-    const data = await res.json().catch(() => ({}));
+    try {
+      const res = await fetch("/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email: email,
+          username: username,
+          join_code: joinCode
+        })
+      });
 
-    if (!res.ok) {
-      errorEl.textContent = data.detail ?? "Registration failed.";
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        errorEl.textContent = _extractDetailReg(data.detail) || "Registration failed.";
+        errorEl.classList.remove("hidden");
+        return;
+      }
+
+      if (data.verification_required) {
+        document.dispatchEvent(new CustomEvent("show-verify-step", {
+          detail: { email, expiresAt: data.verification_expires_at }
+        }));
+        return;
+      }
+
+      if (data.authenticated) {
+        window.location.href = "/submission";
+        return;
+      }
+
+      errorEl.textContent = "Unexpected registration response.";
       errorEl.classList.remove("hidden");
-      return;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
     }
-
-    if (data.verification_required) {
-      document.dispatchEvent(new CustomEvent("show-verify-step", {
-        detail: { email, expiresAt: data.verification_expires_at }
-      }));
-      return;
-    }
-
-    if (data.authenticated) {
-      window.location.href = "/submission";
-      return;
-    }
-
-    errorEl.textContent = "Unexpected registration response.";
-    errorEl.classList.remove("hidden");
   });
+
+  function _extractDetailReg(detail: unknown): string {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      return (detail as { msg?: string }[]).map(e => e.msg ?? String(e)).join('; ');
+    }
+    return 'An unexpected error occurred.';
+  }
 </script>
