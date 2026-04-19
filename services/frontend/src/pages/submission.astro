@@ -4,6 +4,9 @@ import Navbar from "../components/Navbar.astro";
 import Footer from "../components/Footer.astro";
 import Submit from "../components/Submit.astro";
 import PastSubmit from "../components/Past_submit.astro";
+import { getSession } from "../lib/auth";
+
+const session = await getSession(Astro.request);
 ---
 
 <html lang="en">
@@ -17,10 +20,22 @@ import PastSubmit from "../components/Past_submit.astro";
 	</head>
 	<body class="flex flex-col min-h-screen bg-gray-50">
 		<Navbar />
-		<div class="flex flex-1 flex-col md:flex-row">
-			<Submit />
-			<PastSubmit />
-		</div>
+		{session ? (
+			<div class="flex flex-1 flex-col md:flex-row">
+				<Submit />
+				<PastSubmit />
+			</div>
+		) : (
+			<div class="flex flex-1 items-center justify-center">
+				<p class="text-gray-500 text-sm">You are not logged in. Please <button id="login-prompt-btn" class="text-primary hover:underline font-medium">log in</button> to submit samples.</p>
+			</div>
+		)}
 		<Footer />
 	</body>
 </html>
+
+<script>
+  document.getElementById('login-prompt-btn')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('open-login-modal'));
+  });
+</script>

@@ -4,8 +4,6 @@
 <div class="flex flex-col bg-white border border-gray-200 shadow-sm ml-6 mr-3 mt-6 mb-3 p-6 rounded-xl">
   <h2 class="text-xl font-semibold text-gray-900 mb-5">Defense Submission</h2>
 
-  <p class="text-sm text-gray-600 bg-gray-100 border border-gray-200 rounded-lg px-3 py-2 mb-4">Submissions are disabled during the expo.</p>
-
   <p id="defense-cooldown" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"></p>
 
   <form id="defense-form" class="flex flex-col gap-4">
@@ -97,8 +95,7 @@
 
     <button
       type="submit"
-      disabled
-      class="w-full bg-primary text-white font-semibold py-2.5 rounded-lg opacity-50 cursor-not-allowed"
+      class="w-full bg-primary hover:bg-secondary text-white font-semibold py-2.5 rounded-lg transition duration-200"
     >
       Submit Defense
     </button>
