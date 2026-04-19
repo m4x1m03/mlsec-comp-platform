@@ -6,23 +6,6 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-class AdminSystemCounts(BaseModel):
-    users_total: int
-    users_active: int
-    sessions_active: int
-    submissions_total: int
-    evaluation_runs_total: int
-    jobs_queued: int
-    jobs_running: int
-    jobs_failed: int
-
-
-class AdminOverviewResponse(BaseModel):
-    generated_at: datetime
-    environment: str
-    counts: AdminSystemCounts
-
-
 class AdminJobLogRecord(BaseModel):
     id: UUID
     job_type: str
