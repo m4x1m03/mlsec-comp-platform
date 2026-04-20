@@ -1,121 +1,52 @@
-# mlsec-comp-platform
-A platform for hosting an MLSEC-style adversarial malware competition.
+# MLSEC Competition Platform
 
-# Services
-This project uses a microservices-style architecture with Docker for hosting different components of the application.
+An open-source platform for hosting Machine Learning Security Evasion Competitions in-house. MLSEC 2.0 offers a suite for competitors to upload security artifacts and watch them be evaluated in real time.
 
-## Frontend
-The frontend can be launched either via Docker, npm, or VSCode.
-### Docker
-```
-docker-compose up frontend
-```
-### npm
-```
-cd ./services/frontend/
-npm install
-npm run dev
-```
-### VSCode
-Open the "Run and Debug" menu (Ctrl + Shift + D), select the "Development Server", run.
+## Quickstart
 
-*Note: You may need to perform `cd ./services/frontend/` and `npm install` before running with VSCode*
+1. Copy `.env-example` to `.env` and replace all placeholder values with real passwords and secrets.
+2. Review `config.yaml` and adjust settings to match your deployment (submission cooldowns, join code, email delivery, worker count, sandbox backend, etc.).
+3. If using a local sandbox backend, see [docs/sandbox.md](docs/sandbox.md) (WIP).
+4. Run `make prod-up` to launch all services in production mode.
+5. Register an account through the UI, then promote it to admin via the database:
 
-## API
-The API can be launched either via Docker or locally.
-
-### Docker
-```
-docker-compose up api
+```bash
+docker exec -it postgres-db psql -U mlsec2 -d mlsec \
+  -c "UPDATE users SET is_admin = TRUE WHERE email = 'your@email.com';"
 ```
 
-### Local
-```
-cd ./services/api/
-python -m venv .venv
-```
-Activate the venv, then install dependencies:
-```
-pip install -r requirements-dev.txt
-```
-Run the API:
-```
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+Replace `mlsec2` with the value of `POSTGRES_USER` from your `.env` if you changed it. See [Admin](docs/architecture.md#4-admin) in the architecture docs for what admin accounts can do.
 
-### Requirements
-- `services/api/requirements.txt` contains runtime dependencies for the API service.
-- `services/api/requirements-dev.txt` contains developer/test dependencies and includes `requirements.txt`.
+For local development, use `make up` instead.
 
-## API Testing 
-Place all test scripts into the tests folder
-Make sure to keep test_----.py naming convention 
-```
-cd services/api/ 
-pytest -v
-```
-or to allow printing 
-```
-pytest -s
-```
+## System Overview
 
-## Postgres
+The platform is a set of Docker containers orchestrated by Docker Compose. Configuration comes from two sources:
 
-### Starting Postgres db server 
-```
-docker-compose up postgres
-```
-### Accessing Postgres db 
-```
-docker exec -it postgres-db psql -U postgres -d mlsec
-```
-### Starting TEST Postgres db server 
-```
-docker-compose up postgres-test
-```
-### Accessing TEST Postgres db 
-```
-docker exec -it test-postgres-db psql -U postgres -d mlsec-test
-```
+- `.env` - secrets and host-specific deployment values (credentials, keys, network settings)
+- `config.yaml` - application behavior (cooldowns, resource limits, sandbox backend, email, etc.)
 
+Nginx terminates TLS on ports 80/443 and routes requests to the API or frontend. The API dispatches evaluation jobs to Celery workers via RabbitMQ. Workers run competitor defense containers in an isolated Docker network and evaluate them against submitted attack files.
 
-## MinIO
-WIP
+| Component | Technology | Purpose |
+|---|---|---|
+| Frontend | Astro 5 + React 19 + Tailwind CSS | Competitor-facing UI (submissions, leaderboard, rules) and admin dashboard |
+| API | FastAPI (Python 3.11) + SQLAlchemy | Auth, submission management, job dispatch, leaderboard streaming |
+| Database | PostgreSQL 18 | Users, sessions, submissions, jobs, evaluations, audit logs |
+| Task Queue | Celery 5 + RabbitMQ 3 | Async defense and attack job processing |
+| Worker | Celery worker (Python 3.11) | Builds defense images, runs evaluation, records results |
+| Object Storage | MinIO (S3-compatible) | Defense and attack ZIP artifacts |
+| Cache and Coordination | Redis 7 | Worker registry, attack distribution, leaderboard pub/sub, MFA codes |
+| Reverse Proxy | Nginx | TLS termination and request routing |
+| Network Isolation | Docker `defense_net` + gateway service | Isolates competitor container traffic during evaluation |
 
-## RabbitMQ
-RabbitMQ is used as the Celery broker (queue) for jobs.
+For a detailed description of how each component works, see [docs/architecture.md](docs/architecture.md).
 
-### Docker
-Start RabbitMQ (and the API/worker if you want to run jobs):
-```
-docker compose -f docker-compose.yaml up -d rabbitmq api worker
-```
+## Attribution
 
-### Management UI
-- http://localhost:15672
-- Username: `mlsec`
-- Password: `mlsec`
+Created as a Spring 2026 Computer Science Engineering Capstone project at Texas A&M University by:
 
-### Ports
-- `5672` (AMQP broker)
-- `15672` (management UI)
-
-## Celery
-Celery workers consume jobs from RabbitMQ and execute task stubs.
-
-### Docker
-Start the worker:
-```
-docker compose -f docker-compose.yaml up -d --build worker
-```
-
-View worker logs:
-```
-docker logs -f mlsec-worker
-```
-
-### Enqueuing jobs
-The API publishes Celery tasks when you call:
-- `POST /queue/defense`
-- `POST /queue/attack`
-
+- Aaron Thompson
+- Graham Dungan
+- Karl Farrar
+- Maxim Mouget
