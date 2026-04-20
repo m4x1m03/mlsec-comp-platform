@@ -64,8 +64,8 @@ def on_worker_ready(**_) -> None:  # type: ignore[no-untyped-def]
         from worker.cache_monitor import CacheMonitor
         from worker.config import get_config
         config = get_config()
-        persistence_duration = config.worker.attack.cache_persistence_duration
-        max_size_gb = getattr(config.worker.attack, "cache_max_size_gb", 10.0)
+        persistence_duration = config.attack.cache_persistence_duration
+        max_size_gb = config.attack.cache_max_size_gb
 
         _cache_monitor = CacheMonitor(
             celery_app=celery_app,

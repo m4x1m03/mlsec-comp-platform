@@ -72,11 +72,10 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-mlsec2}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-mlsec2_pw}
       MINIO_SECURE: "false"
-      # Production-specific settings (Adjust as needed for actual EC2 domain)
-      ADMIN_ALLOWED_HOSTS: ${ADMIN_ALLOWED_HOSTS:-["*"]}
+      ADMIN_LOCALHOST_ONLY: "false"
+      ADMIN_ALLOWED_HOSTS: ${ADMIN_ALLOWED_HOSTS:-[]}
       ADMIN_TRUSTED_PROXY_HOSTS: ${ADMIN_TRUSTED_PROXY_HOSTS:-["127.0.0.1", "::1", "172.16.0.0/12"]}
       ADMIN_ALLOWED_NETWORKS: ${ADMIN_ALLOWED_NETWORKS:-["172.16.0.0/12"]}
-      ADMIN_LOCALHOST_ONLY: "false"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:

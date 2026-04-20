@@ -44,6 +44,7 @@ def test_login_unknown_email_requires_registration(client, db_session):
 
 def test_register_creates_user_identity_and_session(client, db_session, fake_redis, monkeypatch):
     """Registration creates user and identity, then issues a session after email verification."""
+    monkeypatch.setattr(auth_router, "_email_mfa_enabled", lambda: True)
     monkeypatch.setattr(auth_router, "get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(auth_router, "_generate_login_code", lambda: "999999")
     monkeypatch.setattr(auth_router, "send_login_code_email", lambda **_kwargs: None)
@@ -133,6 +134,7 @@ def test_login_registered_user_verifies_code_and_issues_session_token(client, db
     ).fetchone()
     assert user_row is not None
 
+    monkeypatch.setattr(auth_router, "_email_mfa_enabled", lambda: True)
     monkeypatch.setattr(auth_router, "get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(auth_router, "_generate_login_code", lambda: "123456")
     monkeypatch.setattr(auth_router, "send_login_code_email", lambda **_kwargs: None)
@@ -226,6 +228,7 @@ def test_me_escapes_legacy_malicious_username(client, db_session):
 
 def test_logout_revokes_session_and_blocks_reuse(client, db_session, fake_redis, monkeypatch):
     """Logout should revoke the session and clear the cookie."""
+    monkeypatch.setattr(auth_router, "_email_mfa_enabled", lambda: True)
     monkeypatch.setattr(auth_router, "get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(auth_router, "_generate_login_code", lambda: "111111")
     monkeypatch.setattr(auth_router, "send_login_code_email", lambda **_kwargs: None)

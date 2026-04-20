@@ -11,7 +11,7 @@ import docker
 import requests
 from celery.utils.log import get_task_logger
 
-from worker.config import EvaluationConfig, HeuristicValidationConfig
+from worker.config import EvaluationConfig, ValidationConfig
 from worker.db import (
     get_active_heurval_set,
     get_heurval_samples,
@@ -267,7 +267,7 @@ async def validate_heuristic(
     container_name: str,
     docker_client: docker.DockerClient,
     eval_cfg: EvaluationConfig,
-    heurval_cfg: HeuristicValidationConfig,
+    heurval_cfg: ValidationConfig,
 ) -> dict:
     """Run heuristic validation for a defense container against the active sample set.
 

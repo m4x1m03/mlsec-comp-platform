@@ -57,7 +57,7 @@ def get_config() -> AppConfig:
     try:
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
-        minio_data = data.get("worker", {}).get("minio", {})
+        minio_data = data.get("storage", {})
         app_data = data.get("application", {}) or {}
         email_data = data.get("email", {}) or {}
         join_code = app_data.get("join_code")

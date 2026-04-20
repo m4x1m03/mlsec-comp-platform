@@ -10,7 +10,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class DefenseJobConfig(BaseModel):
+class ContainerConfig(BaseModel):
+    """Docker resource limits applied to each competitor's running defense container."""
     mem_limit: str = "1g"
     nano_cpus: int = 1000000000
     pids_limit: int = 100
@@ -19,9 +20,10 @@ class DefenseJobConfig(BaseModel):
 
 
 class EvaluationConfig(BaseModel):
+    """Controls how attack files are batched and sent to the defense container."""
     requests_timeout_seconds: int = 5
-    max_empty_polls: int = 3  # Close queue after N consecutive empty polls
     batch_size: int = 4
+    max_empty_polls: int = 3       # consecutive empty queue polls before the worker shuts down
     stats_sampling_rate: int = 10
 
     defense_max_ram: int = 1024      # MB - sample marked evaded and container restarted if exceeded
@@ -41,95 +43,83 @@ class EvaluationConfig(BaseModel):
         return self
 
 
-class HeuristicValidationConfig(BaseModel):
-    enable_heuristic_validation: bool = True
-    heurval_malware_fpr_minimum: float = 0.0
-    heurval_malware_tpr_minimum: float = 0.0
-    heurval_goodware_fpr_minimum: float = 0.0
-    heurval_goodware_tpr_minimum: float = 0.0
-    reject_heurval_failures: bool = True
+class ValidationConfig(BaseModel):
+    """Heuristic pre-acceptance checks run against a defense before leaderboard entry."""
+    enabled: bool = True
+    malware_fpr_minimum: float = 0.0
+    malware_tpr_minimum: float = 0.0
+    goodware_fpr_minimum: float = 0.0
+    goodware_tpr_minimum: float = 0.0
+    reject_failures: bool = True
 
 
-class SourceConfig(BaseModel):
-    """Configuration for building defense artifacts from various sources."""
-    # Resource limits
+class BuildConfig(BaseModel):
+    """Building a defense Docker image from a submitted ZIP or GitHub repository."""
     max_zip_size_mb: int = 512
     max_uncompressed_zip_size_mb: int = 2048
     max_build_time_seconds: int = 300
     build_mem_limit: str = "2g"
     temp_build_dir: str = "/tmp/mlsec-builds"
 
-    # Security settings for build isolation
     use_buildkit: bool = True
     network_disabled: bool = True
     no_cache: bool = True
-    build_cpu_quota: int = 100000  # 1 core = 100000
+    build_cpu_quota: int = 100000
     max_dockerfile_size_kb: int = 100
 
-    # Cleanup settings
-    cleanup_built_images: bool = True   # Remove GitHub/ZIP images after evaluation
-    cleanup_pulled_images: bool = True  # Remove Docker Hub images after evaluation
+    cleanup_built_images: bool = True
+    cleanup_pulled_images: bool = True
+
+
+class DefenseConfig(BaseModel):
+    """All settings related to defense submissions."""
+    container: ContainerConfig = Field(default_factory=ContainerConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    build: BuildConfig = Field(default_factory=BuildConfig)
 
 
 class AttackConfig(BaseModel):
-    """Configuration for attack validation and evaluation."""
-    # True = skip template seeding and all behavioral checks entirely.
-    # Overrides check_similarity when set to True.
+    """All settings related to attack submissions."""
     skip_seeding: bool = False
-
-    # Whether to run similarity evaluation at all.
-    # False = skip evaluation, accept all attacks that pass validation.
     check_similarity: bool = True
-
-    # Only meaningful when check_similarity=True.
-    # True  = reject attack if avg similarity < minimum_attack_similarity.
-    # False = log similarity score but accept regardless of the result.
     reject_dissimilar_attacks: bool = True
-
-    minimum_attack_similarity: int = 50  # 0–100 threshold
-
-    template_path: str | None = None  # Removed: template is now managed via the admin endpoint and DB
+    minimum_attack_similarity: int = 50
     max_zip_size_mb: int = 100
     sandbox_backend: str = "virustotal"  # "virustotal" | "local"
-    cache_persistence_duration: int = 300  # seconds of queue inactivity before clearing sample cache
+    cache_persistence_duration: int = 300
+    cache_max_size_gb: int = 10
     virustotal_api_key: str = Field(
         default_factory=lambda: os.getenv("VIRUSTOTAL_API_KEY", "")
     )
 
 
-class MinIOConfig(BaseModel):
-    """Configuration for MinIO object storage."""
-    endpoint: str = Field(default_factory=lambda: os.getenv(
-        "MINIO_ENDPOINT", "minio:9000"))
-    access_key: str = Field(default_factory=lambda: os.getenv(
-        "MINIO_ACCESS_KEY", "mlsec2"))
-    secret_key: str = Field(default_factory=lambda: os.getenv(
-        "MINIO_SECRET_KEY", "mlsec2_pw"))
+class StorageConfig(BaseModel):
+    """MinIO object storage settings (credentials come from environment variables)."""
+    endpoint: str = Field(default_factory=lambda: os.getenv("MINIO_ENDPOINT", "minio:9000"))
+    access_key: str = Field(default_factory=lambda: os.getenv("MINIO_ACCESS_KEY", "mlsec2"))
+    secret_key: str = Field(default_factory=lambda: os.getenv("MINIO_SECRET_KEY", "mlsec2_pw"))
     bucket_name: str = "mlsec-submissions"
-    secure: bool = Field(default_factory=lambda: os.getenv(
-        "MINIO_SECURE", "false").lower() == "true")
+    secure: bool = Field(default_factory=lambda: os.getenv("MINIO_SECURE", "false").lower() == "true")
 
 
-class WorkerSettings(BaseModel):
+class WorkerConfig(BaseModel):
+    """Worker process settings."""
     num_workers: int = Field(default=4, ge=1)
-    defense_job: DefenseJobConfig = Field(default_factory=DefenseJobConfig)
-    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
-    heuristic_validation: HeuristicValidationConfig = Field(default_factory=HeuristicValidationConfig)
-    source: SourceConfig = Field(default_factory=SourceConfig)
-    minio: MinIOConfig = Field(default_factory=MinIOConfig)
-    attack: AttackConfig = Field(default_factory=AttackConfig)
 
 
 class AppConfig(BaseModel):
-    worker: WorkerSettings = Field(default_factory=WorkerSettings)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    defense: DefenseConfig = Field(default_factory=DefenseConfig)
+    attack: AttackConfig = Field(default_factory=AttackConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
 
 @lru_cache(maxsize=1)
 def get_config() -> AppConfig:
     config_path = Path("/app/config.yaml")
     if not config_path.exists():
-        logger.warning(
-            f"Config file not found at {config_path}, using defaults")
+        logger.warning(f"Config file not found at {config_path}, using defaults")
         return AppConfig()
 
     try:
@@ -139,6 +129,5 @@ def get_config() -> AppConfig:
                 return AppConfig()
             return AppConfig(**data)
     except Exception as e:
-        logger.error(
-            f"Failed to load config from {config_path}: {e}. Falling back to defaults.")
+        logger.error(f"Failed to load config from {config_path}: {e}. Falling back to defaults.")
         return AppConfig()

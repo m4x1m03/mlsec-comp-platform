@@ -175,7 +175,7 @@ def test_evaluate_downloads_from_minio(db_session, fake_redis, test_helpers, mon
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -263,7 +263,7 @@ def test_evaluate_sends_to_gateway(db_session, fake_redis, test_helpers, monkeyp
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -348,7 +348,7 @@ def test_evaluate_records_results(db_session, fake_redis, test_helpers, monkeypa
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -450,7 +450,7 @@ def test_evaluate_updates_heartbeat(db_session, fake_redis, test_helpers, monkey
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -519,7 +519,7 @@ def test_evaluate_handles_minio_error(db_session, fake_redis, test_helpers, monk
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -604,7 +604,7 @@ def test_evaluate_handles_gateway_timeout(db_session, fake_redis, test_helpers, 
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -697,7 +697,7 @@ def test_evaluate_handles_invalid_response(db_session, fake_redis, test_helpers,
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     async def instant_sleep(_):
@@ -794,7 +794,7 @@ def test_time_limit_evaded_reason_stored_in_db(
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     mock_docker = MagicMock()
@@ -897,7 +897,7 @@ def test_container_restart_error_removes_defense_from_batch(
         defense_max_restarts=3,
     )
     mock_cfg = MagicMock()
-    mock_cfg.worker.evaluation = eval_cfg
+    mock_cfg.defense.evaluation = eval_cfg
     monkeypatch.setattr("worker.defense.evaluate.get_config", lambda: mock_cfg)
 
     failed_defenses = []

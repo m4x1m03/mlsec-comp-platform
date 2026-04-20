@@ -14,8 +14,8 @@ from worker.config import (
     AppConfig,
     AttackConfig,
     EvaluationConfig,
-    HeuristicValidationConfig,
-    WorkerSettings,
+    ValidationConfig,
+    WorkerConfig,
 )
 
 
@@ -25,7 +25,6 @@ def test_attack_config_defaults():
     assert cfg.check_similarity is True
     assert cfg.reject_dissimilar_attacks is True
     assert cfg.minimum_attack_similarity == 50
-    assert cfg.template_path is None
     assert cfg.max_zip_size_mb == 100
     assert cfg.sandbox_backend == "virustotal"
     assert cfg.virustotal_api_key == ""
@@ -38,31 +37,21 @@ def test_attack_config_reads_virustotal_api_key_from_env(monkeypatch):
     assert cfg.virustotal_api_key == "test-key-123"
 
 
-def test_worker_settings_includes_attack():
-    """WorkerSettings has an attack sub-config."""
-    settings = WorkerSettings()
-    assert hasattr(settings, "attack")
-    assert isinstance(settings.attack, AttackConfig)
-
-
-def test_worker_settings_includes_heuristic_validation():
-    """WorkerSettings has a heuristic_validation sub-config."""
-    settings = WorkerSettings()
-    assert hasattr(settings, "heuristic_validation")
-    assert isinstance(settings.heuristic_validation, HeuristicValidationConfig)
+def test_worker_config_includes_num_workers():
+    """WorkerConfig has a num_workers field."""
+    settings = WorkerConfig()
+    assert hasattr(settings, "num_workers")
 
 
 def test_app_config_loads_attack_from_yaml():
     """AppConfig.attack section is populated from a YAML file."""
     yaml_content = {
-        "worker": {
-            "attack": {
-                "check_similarity": False,
-                "reject_dissimilar_attacks": False,
-                "minimum_attack_similarity": 30,
-                "max_zip_size_mb": 50,
-                "sandbox_backend": "local",
-            }
+        "attack": {
+            "check_similarity": False,
+            "reject_dissimilar_attacks": False,
+            "minimum_attack_similarity": 30,
+            "max_zip_size_mb": 50,
+            "sandbox_backend": "local",
         }
     }
     with tempfile.NamedTemporaryFile(
@@ -76,20 +65,19 @@ def test_app_config_loads_attack_from_yaml():
             data = yaml.safe_load(f)
         cfg = AppConfig(**data)
 
-        assert cfg.worker.attack.check_similarity is False
-        assert cfg.worker.attack.reject_dissimilar_attacks is False
-        assert cfg.worker.attack.minimum_attack_similarity == 30
-        assert cfg.worker.attack.max_zip_size_mb == 50
-        assert cfg.worker.attack.sandbox_backend == "local"
+        assert cfg.attack.check_similarity is False
+        assert cfg.attack.reject_dissimilar_attacks is False
+        assert cfg.attack.minimum_attack_similarity == 30
+        assert cfg.attack.max_zip_size_mb == 50
+        assert cfg.attack.sandbox_backend == "local"
     finally:
         os.unlink(tmp_path)
 
 
 def test_app_config_attack_defaults_when_section_absent():
     """attack section defaults apply when YAML omits the section."""
-    yaml_content = {"worker": {"defense_job": {"container_timeout": 60}}}
-    cfg = AppConfig(**yaml_content)
-    assert cfg.worker.attack.minimum_attack_similarity == 50
+    cfg = AppConfig(**{"defense": {"container": {"container_timeout": 60}}})
+    assert cfg.attack.minimum_attack_similarity == 50
 
 
 def test_check_similarity_false_skips_evaluation():
@@ -106,7 +94,7 @@ def test_reject_dissimilar_attacks_can_be_disabled():
 
 
 def test_evaluation_config_defaults():
-    """EvaluationConfig has the expected new fields with sensible defaults."""
+    """EvaluationConfig has the expected fields with sensible defaults."""
     cfg = EvaluationConfig()
     assert cfg.defense_max_ram == 1024
     assert cfg.defense_max_time == 5000
@@ -126,50 +114,50 @@ def test_evaluation_config_timeout_equal_to_time_is_valid():
     assert cfg.defense_max_timeout == cfg.defense_max_time
 
 
-def test_heuristic_validation_config_defaults():
-    """HeuristicValidationConfig has sensible defaults."""
-    cfg = HeuristicValidationConfig()
-    assert cfg.enable_heuristic_validation is True
-    assert cfg.heurval_malware_fpr_minimum == 0.0
-    assert cfg.heurval_malware_tpr_minimum == 0.0
-    assert cfg.heurval_goodware_fpr_minimum == 0.0
-    assert cfg.heurval_goodware_tpr_minimum == 0.0
-    assert cfg.reject_heurval_failures is True
+def test_validation_config_defaults():
+    """ValidationConfig has sensible defaults."""
+    cfg = ValidationConfig()
+    assert cfg.enabled is True
+    assert cfg.malware_fpr_minimum == 0.0
+    assert cfg.malware_tpr_minimum == 0.0
+    assert cfg.goodware_fpr_minimum == 0.0
+    assert cfg.goodware_tpr_minimum == 0.0
+    assert cfg.reject_failures is True
 
 
-def test_heuristic_validation_config_loads_from_yaml():
-    """HeuristicValidationConfig is populated from YAML."""
+def test_validation_config_loads_from_yaml():
+    """ValidationConfig is populated from YAML."""
     yaml_content = {
-        "worker": {
-            "heuristic_validation": {
-                "enable_heuristic_validation": False,
-                "heurval_malware_tpr_minimum": 0.8,
-                "heurval_goodware_tpr_minimum": 0.9,
-                "reject_heurval_failures": False,
+        "defense": {
+            "validation": {
+                "enabled": False,
+                "malware_tpr_minimum": 0.8,
+                "goodware_tpr_minimum": 0.9,
+                "reject_failures": False,
             }
         }
     }
     cfg = AppConfig(**yaml_content)
-    hv = cfg.worker.heuristic_validation
-    assert hv.enable_heuristic_validation is False
-    assert hv.heurval_malware_tpr_minimum == 0.8
-    assert hv.heurval_goodware_tpr_minimum == 0.9
-    assert hv.reject_heurval_failures is False
+    hv = cfg.defense.validation
+    assert hv.enabled is False
+    assert hv.malware_tpr_minimum == 0.8
+    assert hv.goodware_tpr_minimum == 0.9
+    assert hv.reject_failures is False
 
 
-def test_worker_settings_num_workers_default():
-    """WorkerSettings defaults num_workers to 4."""
-    settings = WorkerSettings()
+def test_worker_config_num_workers_default():
+    """WorkerConfig defaults num_workers to 4."""
+    settings = WorkerConfig()
     assert settings.num_workers == 4
 
 
-def test_worker_settings_num_workers_loads_from_yaml():
+def test_worker_config_num_workers_loads_from_yaml():
     """num_workers is populated from a YAML dict."""
     cfg = AppConfig(**{"worker": {"num_workers": 2}})
     assert cfg.worker.num_workers == 2
 
 
-def test_worker_settings_num_workers_must_be_at_least_one():
+def test_worker_config_num_workers_must_be_at_least_one():
     """num_workers=0 is rejected with a ValidationError."""
     with pytest.raises(pydantic.ValidationError):
-        WorkerSettings(num_workers=0)
+        WorkerConfig(num_workers=0)

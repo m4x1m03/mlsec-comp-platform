@@ -24,7 +24,7 @@ def _mock_functional_validation(monkeypatch):
 
 
 def _mock_no_check_similarity(monkeypatch):
-    """Patch config.worker.attack to disable similarity check."""
+    """Patch config.attack to disable similarity check."""
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = False
     mock_attack_cfg.max_zip_size_mb = 100
@@ -133,7 +133,7 @@ def test_attack_job_creates_defense_jobs(db_session, fake_redis, test_helpers, m
     """Test attack job creates new defense jobs when no workers available."""
     _mock_functional_validation(monkeypatch)
     _mock_no_check_similarity(monkeypatch)
-    monkeypatch.setattr(tasks_mod.config.worker.evaluation, "batch_size", 1)
+    monkeypatch.setattr(tasks_mod.config.defense.evaluation, "batch_size", 1)
 
     # Monkeypatch Redis client
     from worker import tasks
@@ -412,7 +412,7 @@ def test_attack_job_mixed_open_closed_workers(db_session, fake_redis, test_helpe
     """Test attack job handles mix of open and closed workers."""
     _mock_functional_validation(monkeypatch)
     _mock_no_check_similarity(monkeypatch)
-    monkeypatch.setattr(tasks_mod.config.worker.evaluation, "batch_size", 1)
+    monkeypatch.setattr(tasks_mod.config.defense.evaluation, "batch_size", 1)
 
     # Monkeypatch Redis client
     from worker import tasks

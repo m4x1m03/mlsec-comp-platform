@@ -323,7 +323,7 @@ async def evaluate_defenses_async(
     )
 
     registry = WorkerRegistry()
-    eval_cfg = get_config().worker.evaluation
+    eval_cfg = get_config().defense.evaluation
 
     worker_config = config.get("worker", {})
     eval_config = worker_config.get("evaluation", {})
