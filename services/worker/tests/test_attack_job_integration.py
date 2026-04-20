@@ -28,7 +28,7 @@ def _mock_no_check_similarity(monkeypatch):
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = False
     mock_attack_cfg.max_zip_size_mb = 100
-    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
+    monkeypatch.setattr(tasks_mod.config, "attack", mock_attack_cfg)
 
 
 def test_attack_job_basic_flow(db_session, fake_redis, test_helpers, monkeypatch):
@@ -645,7 +645,7 @@ def _common_setup(db_session, fake_redis, test_helpers, monkeypatch):
     mock_attack_cfg = Mock()
     mock_attack_cfg.check_similarity = False
     mock_attack_cfg.max_zip_size_mb = 100
-    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
+    monkeypatch.setattr(tasks_mod.config, "attack", mock_attack_cfg)
 
     # Silence defense-job enqueuing
     monkeypatch.setattr(tasks_mod.run_batch_defense_job, "apply_async", lambda kw: None)
@@ -693,7 +693,7 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
     mock_attack_cfg.reject_dissimilar_attacks = True
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100
-    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
+    monkeypatch.setattr(tasks_mod.config, "attack", mock_attack_cfg)
 
     # Provide an active template so the seeding check and heuristic block run
     monkeypatch.setattr(
@@ -748,7 +748,7 @@ def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_h
     mock_attack_cfg.reject_dissimilar_attacks = True
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100
-    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
+    monkeypatch.setattr(tasks_mod.config, "attack", mock_attack_cfg)
 
     monkeypatch.setattr(
         "worker.tasks.get_active_template",
@@ -837,7 +837,7 @@ def test_attack_job_heuristic_accepted_despite_low_score(db_session, fake_redis,
     mock_attack_cfg.reject_dissimilar_attacks = False
     mock_attack_cfg.minimum_attack_similarity = 50
     mock_attack_cfg.max_zip_size_mb = 100
-    monkeypatch.setattr(tasks_mod.config.worker, "attack", mock_attack_cfg)
+    monkeypatch.setattr(tasks_mod.config, "attack", mock_attack_cfg)
 
     run_attack_job(job_id=job_id, attack_submission_id=attack_id)
 

@@ -143,8 +143,8 @@ def fake_redis():
 def config_dict():
     """Provide test configuration dictionary."""
     return {
-        "worker": {
-            "defense_job": {
+        "defense": {
+            "container": {
                 "mem_limit": "512m",
                 "nano_cpus": 1000000000,
                 "pids_limit": 100,
@@ -154,20 +154,15 @@ def config_dict():
             "evaluation": {
                 "requests_timeout_seconds": 5,
             },
+            "build": {
+                "max_zip_size_mb": 512,
+                "max_build_time_seconds": 300,
+                "build_mem_limit": "1g",
+                "temp_build_dir": "/tmp/builds",
+            },
         },
-        "minio": {
-            "endpoint": "minio:9000",
-            "access_key": "mlsec2",
-            "secret_key": "mlsec2_pw",
-            "bucket": "mlsec-submissions",
-            "attack_files_bucket": "attack-files",
-            "secure": False,
-        },
-        "source": {
-            "max_zip_size_mb": 512,
-            "max_build_time_seconds": 300,
-            "build_mem_limit": "1g",
-            "temp_build_dir": "/tmp/builds",
+        "storage": {
+            "bucket_name": "mlsec-submissions",
         },
     }
 

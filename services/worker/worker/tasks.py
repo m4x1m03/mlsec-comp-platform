@@ -451,7 +451,7 @@ def run_batch_defense_job(
 
     worker_id = f"worker_{job_id}_{int(time.time())}"
     registry = WorkerRegistry()
-    config_dict = config.model_dump()["worker"]
+    config_dict = config.model_dump()
     defense_contexts: list[dict] = []
 
     async def _body() -> None:
@@ -552,7 +552,7 @@ def run_batch_defense_job(
         logger.info(f"Cleaning up resources for batch job {job_id}")
         registry.unregister(worker_id)
         cleanup_client = docker.from_env()
-        source_config = config_dict.get("source", {})
+        source_config = config_dict.get("defense", {}).get("build", {})
         for ctx in defense_contexts:
             try:
                 ctx["container"].stop(timeout=2)

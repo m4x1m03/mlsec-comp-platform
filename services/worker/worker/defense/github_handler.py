@@ -87,7 +87,7 @@ def build_from_github_repo(
         client = docker.from_env()
 
         # Extract security settings from config
-        source_config = config.get('source', {})
+        source_config = config.get('defense', {}).get('build', {})
         no_cache = source_config.get('no_cache', True)
         build_timeout = source_config.get('max_build_time_seconds', 300)
         network_disabled = source_config.get('network_disabled', True)
