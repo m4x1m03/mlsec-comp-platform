@@ -1,4 +1,4 @@
-# MLSEC Competition Platform
+# Machine Learning Security Evasion Competition Platform 2.0
 
 An open-source platform for hosting Machine Learning Security Evasion Competitions in-house. MLSEC 2.0 offers a suite for competitors to upload security artifacts and watch them be evaluated in real time.
 
