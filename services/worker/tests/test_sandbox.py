@@ -10,12 +10,14 @@ import pytest
 import requests
 
 from worker.attack.sandbox import (
+    CapeBackend,
     SandboxReport,
     SandboxUnavailableError,
     VirusTotalBackend,
     get_sandbox_backend,
 )
 from worker.attack.sandbox.base import SandboxBackend
+from worker.attack.sandbox.cape import _convert_cape_to_vt_attrs, _raise_for_cape_error
 from worker.attack.sandbox.virustotal import _raise_for_vt_error
 from worker.config import AttackConfig
 
@@ -346,3 +348,196 @@ def test_factory_unknown_backend_raises():
     cfg = AttackConfig(sandbox_backend="unknown_sandbox")
     with pytest.raises(ValueError, match="unknown_sandbox"):
         get_sandbox_backend(cfg)
+
+
+def test_factory_returns_cape():
+    cfg = AttackConfig(sandbox_backend="cape", cape_url="http://cape-host:8000")
+    backend = get_sandbox_backend(cfg)
+    assert isinstance(backend, CapeBackend)
+
+
+def test_factory_cape_no_url_raises():
+    cfg = AttackConfig(sandbox_backend="cape", cape_url="")
+    with pytest.raises(ValueError, match="CAPE_URL"):
+        get_sandbox_backend(cfg)
+
+
+# ---------------------------------------------------------------------------
+# _raise_for_cape_error
+# ---------------------------------------------------------------------------
+
+def test_raise_for_cape_error_401():
+    with pytest.raises(SandboxUnavailableError, match="401"):
+        _raise_for_cape_error(_mock_response(401), context="test")
+
+
+def test_raise_for_cape_error_404():
+    with pytest.raises(SandboxUnavailableError, match="404"):
+        _raise_for_cape_error(_mock_response(404), context="test")
+
+
+def test_raise_for_cape_error_500():
+    with pytest.raises(SandboxUnavailableError, match="500"):
+        _raise_for_cape_error(_mock_response(500, "internal error"), context="test")
+
+
+def test_raise_for_cape_error_200_passes():
+    _raise_for_cape_error(_mock_response(200), context="test")  # no exception
+
+
+# ---------------------------------------------------------------------------
+# _convert_cape_to_vt_attrs
+# ---------------------------------------------------------------------------
+
+_CAPE_REPORT = {
+    "behavior": {
+        "summary": {
+            "files": ["C:\\Windows\\system32\\test.dll"],
+            "deleted_files": ["C:\\temp\\drop.exe"],
+            "keys": ["HKLM\\SOFTWARE\\Test"],
+            "executed_commands": ["cmd.exe /c whoami"],
+            "mutexes": ["Global\\TestMutex"],
+        },
+        "processes": [
+            {
+                "process_name": "malware.exe",
+                "calls": [
+                    {"api": "CreateFile"},
+                    {"api": "RegOpenKey"},
+                    {"api": "CreateFile"},
+                ],
+            }
+        ],
+    },
+    "network": {
+        "hosts": [{"ip": "1.2.3.4", "port": 80}],
+        "tcp": [{"dst": "5.6.7.8", "dport": 443}],
+        "udp": [],
+        "http": [{"method": "GET", "uri": "http://evil.com/payload"}],
+    },
+    "signatures": [{"name": "network_cnc_http"}, {"name": ""}],
+}
+
+
+def test_convert_cape_to_vt_attrs_basic():
+    result = _convert_cape_to_vt_attrs(_CAPE_REPORT)
+
+    assert result["files_opened"] == ["C:\\Windows\\system32\\test.dll"]
+    assert result["files_written"] == ["C:\\Windows\\system32\\test.dll"]
+    assert result["files_deleted"] == ["C:\\temp\\drop.exe"]
+    assert result["registry_keys_opened"] == ["HKLM\\SOFTWARE\\Test"]
+    assert result["registry_keys_set"] == [{"key": "HKLM\\SOFTWARE\\Test", "value": ""}]
+    assert result["command_executions"] == ["cmd.exe /c whoami"]
+    assert result["mutexes_created"] == ["Global\\TestMutex"]
+    assert result["processes_created"] == ["malware.exe"]
+    assert set(result["calls_highlighted"]) == {"CreateFile", "RegOpenKey"}
+    assert {"destination_ip": "1.2.3.4", "destination_port": 80} in result["ip_traffic"]
+    assert {"destination_ip": "5.6.7.8", "destination_port": 443} in result["ip_traffic"]
+    assert result["http_conversations"] == [{"request_method": "GET", "url": "http://evil.com/payload"}]
+    assert result["signature_matches"] == [{"name": "network_cnc_http"}]
+
+
+def test_convert_cape_to_vt_attrs_empty():
+    result = _convert_cape_to_vt_attrs({})
+    assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# CapeBackend.analyze_file
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cape():
+    return CapeBackend(url="http://cape-host:8000", poll_interval_s=0, max_polls=3, timeout=5)
+
+
+_CAPE_SUBMIT_RESP = {"data": {"task_ids": [42]}}
+_CAPE_VIEW_COMPLETE = {"data": {"status": "reported"}}
+_CAPE_VIEW_PENDING = {"data": {"status": "pending"}}
+
+
+def test_cape_analyze_file_happy_path(cape, sample_file):
+    with patch("worker.attack.sandbox.cape.requests.post") as mock_post, \
+         patch("worker.attack.sandbox.cape.requests.get") as mock_get, \
+         patch("worker.attack.sandbox.cape.time.sleep"):
+
+        mock_post.return_value = _make_response(200, _CAPE_SUBMIT_RESP)
+        mock_get.side_effect = [
+            _make_response(200, _CAPE_VIEW_COMPLETE),
+            _make_response(200, _CAPE_REPORT),
+        ]
+
+        report = cape.analyze_file(sample_file)
+
+    assert report.report_ref == "42"
+    assert report.source == "cape"
+    assert report.behash is None
+    assert report.raw_report is not None
+    assert "processes_created" in report.raw_report
+
+
+def test_cape_analyze_file_polls_multiple_times(cape, sample_file):
+    with patch("worker.attack.sandbox.cape.requests.post") as mock_post, \
+         patch("worker.attack.sandbox.cape.requests.get") as mock_get, \
+         patch("worker.attack.sandbox.cape.time.sleep"):
+
+        mock_post.return_value = _make_response(200, _CAPE_SUBMIT_RESP)
+        mock_get.side_effect = [
+            _make_response(200, _CAPE_VIEW_PENDING),
+            _make_response(200, _CAPE_VIEW_COMPLETE),
+            _make_response(200, _CAPE_REPORT),
+        ]
+
+        report = cape.analyze_file(sample_file)
+
+    assert report.report_ref == "42"
+
+
+def test_cape_poll_timeout(cape, sample_file):
+    with patch("worker.attack.sandbox.cape.requests.post") as mock_post, \
+         patch("worker.attack.sandbox.cape.requests.get") as mock_get, \
+         patch("worker.attack.sandbox.cape.time.sleep"):
+
+        mock_post.return_value = _make_response(200, _CAPE_SUBMIT_RESP)
+        mock_get.return_value = _make_response(200, _CAPE_VIEW_PENDING)
+
+        with pytest.raises(SandboxUnavailableError, match="did not complete"):
+            cape.analyze_file(sample_file)
+
+
+def test_cape_submit_401(cape, sample_file):
+    with patch("worker.attack.sandbox.cape.requests.post") as mock_post:
+        mock_post.return_value = _make_response(401, {})
+        with pytest.raises(SandboxUnavailableError, match="401"):
+            cape.analyze_file(sample_file)
+
+
+def test_cape_submit_network_error(cape, sample_file):
+    with patch("worker.attack.sandbox.cape.requests.post") as mock_post:
+        mock_post.side_effect = requests.ConnectionError("unreachable")
+        with pytest.raises(SandboxUnavailableError, match="submission"):
+            cape.analyze_file(sample_file)
+
+
+def test_cape_poll_network_error(cape, sample_file):
+    with patch("worker.attack.sandbox.cape.requests.post") as mock_post, \
+         patch("worker.attack.sandbox.cape.requests.get") as mock_get:
+
+        mock_post.return_value = _make_response(200, _CAPE_SUBMIT_RESP)
+        mock_get.side_effect = requests.ConnectionError("unreachable")
+
+        with pytest.raises(SandboxUnavailableError, match="poll"):
+            cape.analyze_file(sample_file)
+
+
+# ---------------------------------------------------------------------------
+# Cross-backend similarity (CAPE vs VT)
+# ---------------------------------------------------------------------------
+
+def test_compute_similarity_cape_vs_vt_no_behash_fast_path():
+    """CAPE report vs VT report uses comparator, not behash fast path."""
+    shared_raw = {"tags": ["A", "B"], "processes_created": ["cmd.exe"]}
+    r_vt = SandboxReport(behash="abc", raw_report=shared_raw, source="virustotal")
+    r_cape = SandboxReport(behash="abc", raw_report=shared_raw, source="cape")
+    score = SandboxBackend.compute_similarity(r_vt, r_cape)
+    assert score == 100.0  # identical content; comparator result correct

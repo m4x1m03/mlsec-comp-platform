@@ -92,6 +92,15 @@ class AttackConfig(BaseModel):
     virustotal_api_key: str = Field(
         default_factory=lambda: os.getenv("VIRUSTOTAL_API_KEY", "")
     )
+    cape_url: str = Field(
+        default_factory=lambda: os.getenv("CAPE_URL", "")
+    )
+    cape_username: str = Field(
+        default_factory=lambda: os.getenv("CAPE_USERNAME", "")
+    )
+    cape_password: str = Field(
+        default_factory=lambda: os.getenv("CAPE_PASSWORD", "")
+    )
 
 
 class StorageConfig(BaseModel):
