@@ -12,7 +12,7 @@ from worker.defense.zip_handler import build_from_zip_archive
 def test_build_from_real_zip_file(config_dict, mock_minio_client, defense_zip_file):
     """Test building image from actual ZIP file: good_defense.zip."""
     # Allow network access so pip install can run inside the build
-    config_dict.setdefault('source', {})['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['network_disabled'] = False
 
     # Upload the real ZIP file to fake MinIO
     zip_path = defense_zip_file
@@ -60,7 +60,7 @@ def test_build_from_real_zip_file(config_dict, mock_minio_client, defense_zip_fi
 
 def test_zip_image_runnable(config_dict, mock_minio_client, defense_zip_file):
     """Test that image built from ZIP can be instantiated."""
-    config_dict.setdefault('source', {})['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['network_disabled'] = False
 
     # Upload the real ZIP file
     zip_path = defense_zip_file
@@ -105,7 +105,7 @@ def test_zip_image_runnable(config_dict, mock_minio_client, defense_zip_file):
 
 def test_zip_size_validation(config_dict, mock_minio_client, defense_zip_file):
     """Test that ZIP size limits are enforced."""
-    config_dict.setdefault('source', {})['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['network_disabled'] = False
 
     # Upload the ZIP file
     zip_path = defense_zip_file
@@ -123,7 +123,7 @@ def test_zip_size_validation(config_dict, mock_minio_client, defense_zip_file):
     submission_id = random.randint(100000, 999999)
 
     # Set a reasonable size limit
-    config_dict['source']['max_zip_size_mb'] = 512
+    config_dict['defense']['build']['max_zip_size_mb'] = 512
 
     # Should succeed (good_defense.zip is small)
     image_name = build_from_zip_archive(
@@ -165,7 +165,7 @@ def test_zip_with_tiny_size_limit(config_dict, mock_minio_client, defense_zip_fi
     submission_id = random.randint(100000, 999999)
 
     # Set an impossibly small size limit (1 byte)
-    config_dict['source']['max_zip_size_mb'] = 0.000001
+    config_dict.setdefault('defense', {}).setdefault('build', {})['max_zip_size_mb'] = 0.000001
 
     # Should fail with size error
     with pytest.raises(ValueError) as exc_info:

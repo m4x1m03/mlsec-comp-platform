@@ -117,7 +117,7 @@ def test_build_from_real_github_repo(config_dict):
     submission_id = random.randint(100000, 999999)
 
     # Allow network access so pip install can run inside the build
-    config_dict.setdefault('source', {})['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['network_disabled'] = False
 
     # Build the image
     image_name = build_from_github_repo(
@@ -148,7 +148,7 @@ def test_github_image_runnable(config_dict):
     git_repo_url = "https://github.com/gmgrahamgm/good_defense"
     submission_id = random.randint(100000, 999999)
 
-    config_dict.setdefault('source', {})['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['network_disabled'] = False
 
     # Build the image
     image_name = build_from_github_repo(
@@ -177,7 +177,7 @@ def test_github_with_https_url(config_dict):
     git_repo_url = "https://github.com/gmgrahamgm/good_defense.git"
     submission_id = random.randint(100000, 999999)
 
-    config_dict.setdefault('source', {})['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['network_disabled'] = False
 
     # Build the image (should handle .git suffix)
     image_name = build_from_github_repo(
@@ -215,8 +215,8 @@ def test_github_build_timeout_config(config_dict):
     submission_id = random.randint(100000, 999999)
 
     # Set a very long timeout to ensure build completes
-    config_dict.setdefault('source', {})['max_build_time_seconds'] = 600
-    config_dict['source']['network_disabled'] = False
+    config_dict.setdefault('defense', {}).setdefault('build', {})['max_build_time_seconds'] = 600
+    config_dict['defense']['build']['network_disabled'] = False
 
     image_name = build_from_github_repo(
         git_repo_url, submission_id, config_dict)
