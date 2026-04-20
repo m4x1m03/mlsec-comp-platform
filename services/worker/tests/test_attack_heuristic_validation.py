@@ -23,8 +23,8 @@ from worker.attack.sandbox.base import SandboxReport, SandboxUnavailableError
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_report(signals=None, behash=None, ref=None):
-    return SandboxReport(behavioral_signals=signals, behash=behash, report_ref=ref)
+def _make_report(raw_report=None, behash=None, ref=None, source="virustotal"):
+    return SandboxReport(raw_report=raw_report, behash=behash, report_ref=ref, source=source)
 
 
 def _make_template_zip(tmp_path: Path, files: dict[str, bytes], top: str = "samples") -> Path:
@@ -119,8 +119,8 @@ def test_seeding_skips_already_seeded_files():
         {"filename": "b.exe", "object_key": "template/t/t.zip", "sha256": ""},
     ]
     already_seeded = {
-        "a.exe": {"behavioral_signals": {"tags": ["X"]}, "behash": "h1", "sandbox_report_ref": "r1"},
-        "b.exe": {"behavioral_signals": {"tags": ["Y"]}, "behash": "h2", "sandbox_report_ref": "r2"},
+        "a.exe": {"raw_report": {"tags": ["X"]}, "behash": "h1", "sandbox_report_ref": "r1", "source": "virustotal"},
+        "b.exe": {"raw_report": {"tags": ["Y"]}, "behash": "h2", "sandbox_report_ref": "r2", "source": "virustotal"},
     }
 
     with patch("worker.attack.validation.get_template_reports_for_template", return_value=already_seeded), \
@@ -138,7 +138,7 @@ def test_seeding_submits_missing_files(tmp_path):
         {"filename": "a.exe", "object_key": "template/t/t.zip", "sha256": ""},
         {"filename": "b.exe", "object_key": "template/t/t.zip", "sha256": ""},
     ]
-    report = _make_report(signals={"tags": ["X"]}, behash="hh", ref="ref-1")
+    report = _make_report(raw_report={"tags": ["X"]}, behash="hh", ref="ref-1")
     mock_sandbox = MagicMock()
     mock_sandbox.analyze_file.return_value = report
 
@@ -159,9 +159,9 @@ def test_seeding_submits_only_unseeded_files(tmp_path):
         {"filename": "b.exe", "object_key": "template/t/t.zip", "sha256": ""},
     ]
     already_seeded = {
-        "a.exe": {"behavioral_signals": {"tags": ["X"]}, "behash": "h1", "sandbox_report_ref": "r1"},
+        "a.exe": {"raw_report": {"tags": ["X"]}, "behash": "h1", "sandbox_report_ref": "r1", "source": "virustotal"},
     }
-    report = _make_report(signals={"tags": ["Y"]}, behash="hh", ref="ref-2")
+    report = _make_report(raw_report={"tags": ["Y"]}, behash="hh", ref="ref-2")
     mock_sandbox = MagicMock()
     mock_sandbox.analyze_file.return_value = report
 
@@ -177,12 +177,12 @@ def test_seeding_submits_only_unseeded_files(tmp_path):
     assert upsert_kwargs["template_id"] == TEMPLATE_ID
 
 
-def test_seeding_warns_on_null_signals(tmp_path, caplog):
-    """When sandbox returns no signals, a warning is logged and partial result stored."""
+def test_seeding_warns_on_null_report(tmp_path, caplog):
+    """When sandbox returns no behavioral data, a warning is logged and partial result stored."""
     zip_path = _make_template_zip(tmp_path, {"a.exe": b"x"})
     template_files = [{"filename": "a.exe", "object_key": "template/t/t.zip", "sha256": ""}]
     mock_sandbox = MagicMock()
-    mock_sandbox.analyze_file.return_value = _make_report(signals=None, behash=None, ref="ref-1")
+    mock_sandbox.analyze_file.return_value = _make_report(raw_report=None, behash=None, ref="ref-1")
 
     with patch("worker.attack.validation.get_template_reports_for_template", return_value={}), \
          patch("worker.attack.validation.get_sample_path", return_value=zip_path), \
@@ -191,7 +191,7 @@ def test_seeding_warns_on_null_signals(tmp_path, caplog):
         with caplog.at_level(logging.WARNING, logger="worker.attack.validation"):
             ensure_template_seeded(TEMPLATE_ID, template_files, mock_sandbox)
 
-    assert "no behavioral signals" in caplog.text
+    assert "no behavioral data" in caplog.text
     mock_upsert.assert_called_once()
 
 
@@ -214,7 +214,7 @@ def test_seeding_upsert_called_with_template_id(tmp_path):
     data = b"hello"
     zip_path = _make_template_zip(tmp_path, {"a.exe": data})
     template_files = [{"filename": "a.exe", "object_key": "template/t/t.zip", "sha256": ""}]
-    report = _make_report(signals={"tags": ["X"]}, behash="abc", ref="vt-ref-1")
+    report = _make_report(raw_report={"tags": ["X"]}, behash="abc", ref="vt-ref-1")
     mock_sandbox = MagicMock()
     mock_sandbox.analyze_file.return_value = report
 
@@ -228,7 +228,8 @@ def test_seeding_upsert_called_with_template_id(tmp_path):
     assert kwargs["filename"] == "a.exe"
     assert kwargs["sandbox_report_ref"] == "vt-ref-1"
     assert kwargs["behash"] == "abc"
-    assert kwargs["behavioral_signals"] == {"tags": ["X"]}
+    assert kwargs["raw_report"] == {"tags": ["X"]}
+    assert kwargs["source"] == "virustotal"
     assert kwargs["sha256"] == hashlib.sha256(data).hexdigest()
 
 
@@ -239,17 +240,17 @@ def test_seeding_upsert_called_with_template_id(tmp_path):
 @pytest.fixture
 def template_reports():
     return {
-        "a.exe": {"behash": "h1", "behavioral_signals": {"tags": ["X"]}, "sandbox_report_ref": "r1"},
-        "b.exe": {"behash": "h2", "behavioral_signals": {"tags": ["Y"]}, "sandbox_report_ref": "r2"},
+        "a.exe": {"behash": "h1", "raw_report": {"tags": ["X"]}, "sandbox_report_ref": "r1", "source": "virustotal"},
+        "b.exe": {"behash": "h2", "raw_report": {"tags": ["Y"]}, "sandbox_report_ref": "r2", "source": "virustotal"},
     }
 
 
 def test_heuristic_validation_identical_behash(template_reports):
-    """Files with identical behash get 100% similarity, average is 100.0."""
+    """Files with identical behash get 100% similarity; average is 100.0."""
     mock_sandbox = MagicMock()
     mock_sandbox.analyze_file.side_effect = [
-        _make_report(behash="h1", signals={"tags": ["X"]}),
-        _make_report(behash="h2", signals={"tags": ["Y"]}),
+        _make_report(behash="h1", raw_report={"tags": ["X"]}, source="virustotal"),
+        _make_report(behash="h2", raw_report={"tags": ["Y"]}, source="virustotal"),
     ]
     score = validate_heuristic(
         [("a.exe", "/tmp/a.exe"), ("b.exe", "/tmp/b.exe")], mock_sandbox, template_reports
@@ -258,11 +259,11 @@ def test_heuristic_validation_identical_behash(template_reports):
 
 
 def test_heuristic_validation_no_overlap(template_reports):
-    """Completely different signals produce 0% similarity."""
+    """Completely different tags produce 0% similarity."""
     mock_sandbox = MagicMock()
     mock_sandbox.analyze_file.side_effect = [
-        _make_report(behash="x1", signals={"tags": ["Z"]}),
-        _make_report(behash="x2", signals={"tags": ["W"]}),
+        _make_report(behash="x1", raw_report={"tags": ["Z"]}),
+        _make_report(behash="x2", raw_report={"tags": ["W"]}),
     ]
     score = validate_heuristic(
         [("a.exe", "/tmp/a.exe"), ("b.exe", "/tmp/b.exe")], mock_sandbox, template_reports
@@ -274,8 +275,8 @@ def test_heuristic_validation_partial_overlap(template_reports):
     """One file identical (100%), one file no overlap (0%) gives average 50.0."""
     mock_sandbox = MagicMock()
     mock_sandbox.analyze_file.side_effect = [
-        _make_report(behash="h1"),
-        _make_report(behash="x2", signals={"tags": ["W"]}),
+        _make_report(behash="h1", source="virustotal"),
+        _make_report(behash="x2", raw_report={"tags": ["W"]}),
     ]
     score = validate_heuristic(
         [("a.exe", "/tmp/a.exe"), ("b.exe", "/tmp/b.exe")], mock_sandbox, template_reports
@@ -294,9 +295,9 @@ def test_heuristic_validation_empty_files(template_reports):
 def test_heuristic_validation_missing_template_report():
     """File not in template_reports scores 0.0; matched file scores normally."""
     mock_sandbox = MagicMock()
-    mock_sandbox.analyze_file.return_value = _make_report(signals={"tags": ["X"]})
+    mock_sandbox.analyze_file.return_value = _make_report(raw_report={"tags": ["X"]})
     reports = {
-        "a.exe": {"behash": "h1", "behavioral_signals": {"tags": ["X"]}, "sandbox_report_ref": "r1"},
+        "a.exe": {"behash": "h1", "raw_report": {"tags": ["X"]}, "sandbox_report_ref": "r1", "source": "virustotal"},
     }
     score = validate_heuristic(
         [("a.exe", "/tmp/a.exe"), ("missing.exe", "/tmp/missing.exe")], mock_sandbox, reports

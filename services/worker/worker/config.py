@@ -86,7 +86,7 @@ class AttackConfig(BaseModel):
     reject_dissimilar_attacks: bool = True
     minimum_attack_similarity: int = 50
     max_zip_size_mb: int = 100
-    sandbox_backend: str = "virustotal"  # "virustotal" | "local"
+    sandbox_backend: str = "virustotal"  # "virustotal" | "cape"
     cache_persistence_duration: int = 300
     cache_max_size_gb: int = 10
     virustotal_api_key: str = Field(

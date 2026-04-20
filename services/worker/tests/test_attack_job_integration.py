@@ -708,7 +708,7 @@ def test_attack_job_heuristic_validation_rejected(db_session, fake_redis, test_h
     # Provide a non-empty template reports list so heuristic runs
     monkeypatch.setattr(
         "worker.tasks.get_template_reports_for_template",
-        lambda tid: [{"filename": "sample1.exe", "behash": "abc", "behavioral_signals": {"tags": ["T1"]}}],
+        lambda tid: [{"filename": "sample1.exe", "behash": "abc", "raw_report": {"tags": ["T1"]}, "source": "virustotal"}],
     )
     monkeypatch.setattr(
         "worker.attack.sandbox.get_sandbox_backend",
@@ -760,7 +760,7 @@ def test_attack_job_heuristic_sandbox_unavailable(db_session, fake_redis, test_h
     )
     monkeypatch.setattr(
         "worker.tasks.get_template_reports_for_template",
-        lambda tid: [{"filename": "sample1.exe", "behash": None, "behavioral_signals": None}],
+        lambda tid: [{"filename": "sample1.exe", "behash": None, "raw_report": None, "source": "virustotal"}],
     )
     monkeypatch.setattr(
         "worker.attack.sandbox.get_sandbox_backend",
@@ -819,7 +819,7 @@ def test_attack_job_heuristic_accepted_despite_low_score(db_session, fake_redis,
     )
     monkeypatch.setattr(
         "worker.tasks.get_template_reports_for_template",
-        lambda tid: [{"filename": "sample1.exe", "behash": "abc", "behavioral_signals": {"tags": ["T1"]}}],
+        lambda tid: [{"filename": "sample1.exe", "behash": "abc", "raw_report": {"tags": ["T1"]}, "source": "virustotal"}],
     )
     monkeypatch.setattr(
         "worker.attack.sandbox.get_sandbox_backend",

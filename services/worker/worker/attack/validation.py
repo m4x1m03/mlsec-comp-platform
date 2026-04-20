@@ -314,7 +314,7 @@ def ensure_template_seeded(
 
     Downloads the template ZIP from MinIO, extracts it, and submits each
     unseeded file to the sandbox.  Already-seeded files (rows with non-NULL
-    ``behavioral_signals``) are skipped.
+    ``sandbox_report_ref``) are skipped.
 
     Args:
         template_id: UUID of the attack_template row to seed.
@@ -371,9 +371,9 @@ def ensure_template_seeded(
 
             report = sandbox.analyze_file(str(local_path))
 
-            if report.behavioral_signals is None:
+            if report.raw_report is None:
                 logger.warning(
-                    "Template file '%s' returned no behavioral signals "
+                    "Template file '%s' returned no behavioral data "
                     "(report_ref=%s). Storing partial result; will retry on next seeding pass.",
                     inner_name,
                     report.report_ref,
@@ -385,13 +385,15 @@ def ensure_template_seeded(
                 sha256=sha256,
                 sandbox_report_ref=report.report_ref,
                 behash=report.behash,
-                behavioral_signals=report.behavioral_signals,
+                raw_report=report.raw_report,
+                source=report.source,
             )
             logger.info(
-                "Template file '%s' seeded (behash=%s, signals=%s).",
+                "Template file '%s' seeded (behash=%s, raw_report=%s, source=%s).",
                 inner_name,
                 report.behash,
-                "present" if report.behavioral_signals else "absent",
+                "present" if report.raw_report else "absent",
+                report.source,
             )
 
 
@@ -411,7 +413,7 @@ def validate_heuristic(
             *inner_filename* must match the key scheme used in *template_reports*.
         sandbox: Configured :class:`~sandbox.base.SandboxBackend` instance.
         template_reports: Pre-fetched dict mapping ``inner_filename`` →
-            ``{"behash": str|None, "behavioral_signals": dict|None}``,
+            ``{"behash": str|None, "raw_report": dict|None, "source": str}``,
             typically from :func:`~worker.db.get_template_reports`.
 
     Returns:
@@ -437,19 +439,20 @@ def validate_heuristic(
             scores.append(0.0)
             continue
 
-        if template_record.get("behavioral_signals") is None:
+        if template_record.get("raw_report") is None:
             logger.warning(
                 "Template file '%s' was submitted to sandbox but returned no behavioral "
-                "signals (report_ref=%s). Skipping file in similarity scoring.",
+                "data (report_ref=%s). Skipping file in similarity scoring.",
                 inner_name,
                 template_record.get("sandbox_report_ref"),
             )
             continue
 
         template_report = SandboxReport(
-            behavioral_signals=template_record.get("behavioral_signals"),
+            raw_report=template_record.get("raw_report"),
             behash=template_record.get("behash"),
             report_ref=template_record.get("sandbox_report_ref"),
+            source=template_record.get("source", "virustotal"),
         )
 
         logger.info("Submitting submission file '%s' to sandbox.", inner_name)
