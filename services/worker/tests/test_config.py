@@ -51,7 +51,7 @@ def test_app_config_loads_attack_from_yaml():
             "reject_dissimilar_attacks": False,
             "minimum_attack_similarity": 30,
             "max_zip_size_mb": 50,
-            "sandbox_backend": "local",
+            "sandbox_backend": "cape",
         }
     }
     with tempfile.NamedTemporaryFile(
@@ -69,7 +69,7 @@ def test_app_config_loads_attack_from_yaml():
         assert cfg.attack.reject_dissimilar_attacks is False
         assert cfg.attack.minimum_attack_similarity == 30
         assert cfg.attack.max_zip_size_mb == 50
-        assert cfg.attack.sandbox_backend == "local"
+        assert cfg.attack.sandbox_backend == "cape"
     finally:
         os.unlink(tmp_path)
 

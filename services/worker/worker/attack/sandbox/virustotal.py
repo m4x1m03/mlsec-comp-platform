@@ -1,8 +1,8 @@
 """VirusTotal sandbox backend.
 
 Uploads a file to VirusTotal, polls until the analysis is complete, fetches
-the behavioral sandbox report, extracts a normalised ``behavioral_signals``
-dict, and returns a :class:`~base.SandboxReport`.
+the behavioral sandbox report, and returns a :class:`~base.SandboxReport`
+containing the raw behavioral attributes dict.
 """
 
 from __future__ import annotations
@@ -16,14 +16,11 @@ import requests
 
 from .base import SandboxBackend, SandboxReport, SandboxUnavailableError
 
-_PURE_WIN_PATH_SEP = "\\"
-
 logger = logging.getLogger(__name__)
 
 _VT_BASE = "https://www.virustotal.com/api/v3"
 
-# Fields extracted from the VT behavioral report attributes
-_LIST_FIELDS = (
+_SIGNAL_FIELDS = (
     "tags",
     "calls_highlighted",
     "processes_created",
@@ -46,6 +43,8 @@ class VirusTotalBackend(SandboxBackend):
         poll_interval_s: Seconds to wait between status-poll attempts.
         max_polls: Maximum number of poll attempts before giving up.
         timeout: HTTP request timeout in seconds.
+        behavior_poll_interval_s: Seconds to wait between behavioral data polls.
+        behavior_max_polls: Maximum behavioral data fetch attempts.
     """
 
     def __init__(
@@ -64,26 +63,22 @@ class VirusTotalBackend(SandboxBackend):
         self._behavior_poll_interval_s = behavior_poll_interval_s
         self._behavior_max_polls = behavior_max_polls
 
-    # ------------------------------------------------------------------
-    # SandboxBackend interface
-    # ------------------------------------------------------------------
-
     def analyze_file(self, file_path: str) -> SandboxReport:
         """Upload *file_path* to VT, wait for analysis, return behavioral report.
 
         Steps:
-        1. Upload file → get analysis ID.
+        1. Upload file and get analysis ID.
         2. Poll ``/analyses/{id}`` until ``status == "completed"``.
         3. Extract SHA-256 from completed analysis metadata.
-        4. Fetch ``/files/{sha256}/behaviours`` → pick first report with data.
-        5. Extract and return normalised behavioral signals.
+        4. Fetch ``/files/{sha256}/behaviours`` and pick the first report with data.
+        5. Return the raw behavioral attributes dict.
 
         Args:
             file_path: Absolute path to the file to analyse.
 
         Returns:
-            :class:`~base.SandboxReport` with behavioral signals, behash, and
-            the VT analysis ID as ``report_ref``.
+            :class:`~base.SandboxReport` with the raw behavioral attributes,
+            behash, and the VT analysis ID as ``report_ref``.
 
         Raises:
             SandboxUnavailableError: On network failures, HTTP errors (401,
@@ -91,18 +86,14 @@ class VirusTotalBackend(SandboxBackend):
         """
         analysis_id = self._upload_file(file_path)
         sha256 = self._poll_until_complete(analysis_id)
-        behaviours = self._fetch_behaviours(sha256)
-        signals, behash = _extract_signals(behaviours)
+        attrs = self._fetch_behaviours(sha256)
 
         return SandboxReport(
-            behavioral_signals=signals,
-            behash=behash,
+            raw_report=attrs if attrs else None,
+            behash=attrs.get("behash") or None if attrs else None,
             report_ref=analysis_id,
+            source="virustotal",
         )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _headers(self) -> dict[str, str]:
         return {"x-apikey": self._api_key}
@@ -193,9 +184,9 @@ class VirusTotalBackend(SandboxBackend):
         """Fetch ``/files/{sha256}/behaviours`` and return the first useful report.
 
         Polls with retries because behavioral sandbox results are produced
-        asynchronously after the static analysis completes.  Each attempt
+        asynchronously after the static analysis completes. Each attempt
         checks whether any report contains at least one populated signal
-        field.  If no useful data appears after ``behavior_max_polls``
+        field. If no useful data appears after ``behavior_max_polls``
         attempts, returns ``{}`` so the caller stores a partial result and
         retries on the next seeding pass.
         """
@@ -226,10 +217,9 @@ class VirusTotalBackend(SandboxBackend):
                     sha256, attempt, self._behavior_max_polls, self._behavior_poll_interval_s,
                 )
             else:
-                # Pick the first report with at least one populated signal field
                 for report in reports:
                     attrs = report.get("attributes", {})
-                    if any(attrs.get(f) for f in _LIST_FIELDS):
+                    if any(attrs.get(f) for f in _SIGNAL_FIELDS):
                         logger.info(
                             "Behavioral data available for sha256=%s after %d poll(s).",
                             sha256, attempt,
@@ -253,10 +243,6 @@ class VirusTotalBackend(SandboxBackend):
         return {}
 
 
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
-
 def _raise_for_vt_error(response: requests.Response, context: str) -> None:
     """Raise :exc:`SandboxUnavailableError` for known VT error status codes."""
     if response.status_code == 401:
@@ -272,88 +258,3 @@ def _raise_for_vt_error(response: requests.Response, context: str) -> None:
             f"VirusTotal returned HTTP {response.status_code} during {context}: "
             f"{response.text[:200]}"
         )
-
-
-def _extract_signals(attrs: dict[str, Any]) -> tuple[dict | None, str | None]:
-    """Extract normalised behavioral signals and behash from VT report attributes.
-
-    Args:
-        attrs: The ``attributes`` dict from a single VT behavioral report entry.
-
-    Returns:
-        ``(behavioral_signals, behash)`` both may be ``None`` if the report
-        is empty.
-    """
-    if not attrs:
-        return None, None
-
-    signals: dict[str, list[str]] = {}
-
-    # Simple list fields values are already strings
-    for field_name in _LIST_FIELDS:
-        raw = attrs.get(field_name) or []
-        if raw:
-            # For modules_loaded keep only the basename to avoid path churn.
-            # VT paths are always Windows-style (backslash separators), so we
-            # split on "\" directly rather than using pathlib.Path, which
-            # behaves differently on Linux/macOS hosts.
-            if field_name == "modules_loaded":
-                signals[field_name] = [
-                    v.split(_PURE_WIN_PATH_SEP)[-1] for v in raw]
-            else:
-                signals[field_name] = list(raw)
-
-    # registry_keys_set is a list of {key, value} dicts keep only key names
-    reg_keys = attrs.get("registry_keys_set") or []
-    if reg_keys:
-        signals["registry_keys_set"] = [
-            entry["key"] for entry in reg_keys if isinstance(entry, dict) and "key" in entry
-        ]
-
-    # registry_keys_opened plain list of strings
-    reg_opened = attrs.get("registry_keys_opened") or []
-    if reg_opened:
-        signals["registry_keys_opened"] = list(reg_opened)
-
-    # files_dropped keep SHA-256 hashes of dropped files
-    dropped = attrs.get("files_dropped") or []
-    if dropped:
-        signals["files_dropped"] = [
-            entry["sha256"]
-            for entry in dropped
-            if isinstance(entry, dict) and "sha256" in entry
-        ]
-
-    # ip_traffic normalise to "ip:port" strings
-    ip_traffic = attrs.get("ip_traffic") or []
-    if ip_traffic:
-        signals["ip_traffic"] = [
-            f"{entry.get('destination_ip', '')}:{entry.get('destination_port', '')}"
-            for entry in ip_traffic
-            if isinstance(entry, dict)
-        ]
-
-    # sigma rule IDs
-    sigma = attrs.get("sigma_analysis_results") or []
-    if sigma:
-        signals["sigma_rule_ids"] = [
-            entry["rule_id"]
-            for entry in sigma
-            if isinstance(entry, dict) and "rule_id" in entry
-        ]
-
-    # ids rule IDs
-    ids_results = attrs.get("ids_results") or []
-    if ids_results:
-        signals["ids_rule_ids"] = [
-            entry["rule_id"]
-            for entry in ids_results
-            if isinstance(entry, dict) and "rule_id" in entry
-        ]
-
-    behash: str | None = attrs.get("behash") or None
-
-    if not signals and behash is None:
-        return None, None
-
-    return signals if signals else None, behash

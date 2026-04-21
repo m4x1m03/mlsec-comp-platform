@@ -86,12 +86,20 @@ class AttackConfig(BaseModel):
     reject_dissimilar_attacks: bool = True
     minimum_attack_similarity: int = 50
     max_zip_size_mb: int = 100
-    sandbox_backend: str = "virustotal"  # "virustotal" | "local"
+    sandbox_backend: str = "virustotal"  # "virustotal" | "cape"
     cache_persistence_duration: int = 300
     cache_max_size_gb: int = 10
     virustotal_api_key: str = Field(
         default_factory=lambda: os.getenv("VIRUSTOTAL_API_KEY", "")
     )
+    cape_url: str = Field(
+        default_factory=lambda: os.getenv("CAPE_URL", "")
+    )
+    cape_token: str = Field(
+        default_factory=lambda: os.getenv("CAPE_TOKEN", "")
+    )
+    cape_sandbox_name: str = Field(default="win10")
+    behavior_sample_rate: float = Field(default=1.0)
 
 
 class StorageConfig(BaseModel):

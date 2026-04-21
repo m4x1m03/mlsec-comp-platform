@@ -650,14 +650,14 @@ def get_template_reports() -> list[dict]:
 
     Returns:
         List of dicts with keys: filename, sha256, sandbox_report_ref, behash,
-        behavioral_signals
+        raw_report, source
     """
     from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
+                SELECT filename, sha256, sandbox_report_ref, behash, raw_report, source
                 FROM template_file_reports
                 ORDER BY filename
             """)
@@ -668,7 +668,8 @@ def get_template_reports() -> list[dict]:
                 "sha256": row[1],
                 "sandbox_report_ref": row[2],
                 "behash": row[3],
-                "behavioral_signals": row[4],
+                "raw_report": row[4],
+                "source": row[5],
             }
             for row in result
         ]
@@ -680,22 +681,24 @@ def upsert_template_report(
     sha256: str,
     sandbox_report_ref: str | None,
     behash: str | None,
-    behavioral_signals: dict | None,
+    raw_report: dict | None,
+    source: str = "virustotal",
 ) -> None:
     """
     Update behavioral data on an existing template file report row.
 
     Rows are created during template upload. This function only updates
-    sandbox_report_ref, behash, and behavioral_signals on a row that
+    sandbox_report_ref, behash, raw_report, and source on a row that
     already exists for the given (template_id, filename) pair.
 
     Args:
         template_id: UUID of the attack_template row this report belongs to
         filename: Relative path within the attack template
         sha256: SHA-256 hex digest of the file
-        sandbox_report_ref: Backend-specific analysis ID (e.g. VT analysis ID)
-        behash: VT behavioral hash, or None if analysis has not completed
-        behavioral_signals: Extracted behavioral indicators dict, or None
+        sandbox_report_ref: Backend-specific analysis ID (e.g. VT analysis ID or CAPE task ID)
+        behash: VT behavioral hash, or None if unavailable
+        raw_report: Raw behavioral attributes dict, or None
+        source: Which backend produced this report ("virustotal" or "cape")
     """
     import json
     from sqlalchemy import text
@@ -707,7 +710,8 @@ def upsert_template_report(
                 SET sha256             = :sha256,
                     sandbox_report_ref = :report_ref,
                     behash             = :behash,
-                    behavioral_signals = CAST(:signals AS jsonb),
+                    raw_report         = CAST(:raw_report AS jsonb),
+                    source             = :source,
                     evaluated_at       = CURRENT_TIMESTAMP
                 WHERE template_id = CAST(:template_id AS uuid)
                   AND filename    = :filename
@@ -718,7 +722,8 @@ def upsert_template_report(
                 "sha256": sha256,
                 "report_ref": sandbox_report_ref,
                 "behash": behash,
-                "signals": json.dumps(behavioral_signals) if behavioral_signals is not None else None,
+                "raw_report": json.dumps(raw_report) if raw_report is not None else None,
+                "source": source,
             }
         )
 
@@ -809,18 +814,18 @@ def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
     Return filename-keyed behavioral reports for the given template.
 
     All attempted files are included (sandbox_report_ref IS NOT NULL), even
-    those where the sandbox returned no behavioral signals. Callers should
-    check whether behavioral_signals is None before using a record for scoring.
+    those where the sandbox returned no behavioral data. Callers should
+    check whether raw_report is None before using a record for scoring.
 
     Returns:
-        dict mapping filename to {sha256, sandbox_report_ref, behash, behavioral_signals}
+        dict mapping filename to {sha256, sandbox_report_ref, behash, raw_report, source}
     """
     from sqlalchemy import text
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
             text("""
-                SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
+                SELECT filename, sha256, sandbox_report_ref, behash, raw_report, source
                 FROM template_file_reports
                 WHERE template_id = CAST(:tid AS uuid)
                   AND sandbox_report_ref IS NOT NULL
@@ -832,7 +837,8 @@ def get_template_reports_for_template(template_id: str) -> dict[str, dict]:
             "sha256": row[1],
             "sandbox_report_ref": row[2],
             "behash": row[3],
-            "behavioral_signals": row[4],
+            "raw_report": row[4],
+            "source": row[5],
         }
         for row in rows
     }

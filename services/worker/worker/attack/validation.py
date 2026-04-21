@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import random
 import zipfile
 
 from pathlib import Path, PurePosixPath
@@ -314,7 +315,7 @@ def ensure_template_seeded(
 
     Downloads the template ZIP from MinIO, extracts it, and submits each
     unseeded file to the sandbox.  Already-seeded files (rows with non-NULL
-    ``behavioral_signals``) are skipped.
+    ``sandbox_report_ref``) are skipped.
 
     Args:
         template_id: UUID of the attack_template row to seed.
@@ -371,9 +372,9 @@ def ensure_template_seeded(
 
             report = sandbox.analyze_file(str(local_path))
 
-            if report.behavioral_signals is None:
+            if report.raw_report is None:
                 logger.warning(
-                    "Template file '%s' returned no behavioral signals "
+                    "Template file '%s' returned no behavioral data "
                     "(report_ref=%s). Storing partial result; will retry on next seeding pass.",
                     inner_name,
                     report.report_ref,
@@ -385,13 +386,15 @@ def ensure_template_seeded(
                 sha256=sha256,
                 sandbox_report_ref=report.report_ref,
                 behash=report.behash,
-                behavioral_signals=report.behavioral_signals,
+                raw_report=report.raw_report,
+                source=report.source,
             )
             logger.info(
-                "Template file '%s' seeded (behash=%s, signals=%s).",
+                "Template file '%s' seeded (behash=%s, raw_report=%s, source=%s).",
                 inner_name,
                 report.behash,
-                "present" if report.behavioral_signals else "absent",
+                "present" if report.raw_report else "absent",
+                report.source,
             )
 
 
@@ -403,6 +406,7 @@ def validate_heuristic(
     submission_files: list[tuple[str, str]],
     sandbox: SandboxBackend,
     template_reports: dict[str, dict],
+    sample_rate: float = 1.0,
 ) -> float:
     """Score behavioral similarity between submission files and template counterparts.
 
@@ -411,8 +415,10 @@ def validate_heuristic(
             *inner_filename* must match the key scheme used in *template_reports*.
         sandbox: Configured :class:`~sandbox.base.SandboxBackend` instance.
         template_reports: Pre-fetched dict mapping ``inner_filename`` →
-            ``{"behash": str|None, "behavioral_signals": dict|None}``,
+            ``{"behash": str|None, "raw_report": dict|None, "source": str}``,
             typically from :func:`~worker.db.get_template_reports`.
+        sample_rate: Fraction of files to check (0.0, 1.0]. At least one file
+            is always checked. Defaults to 1.0 (all files).
 
     Returns:
         Average similarity score (0.0-100.0) across all matched files.
@@ -424,6 +430,16 @@ def validate_heuristic(
     if not submission_files:
         logger.warning("validate_heuristic called with no submission files.")
         return 0.0
+
+    if sample_rate < 1.0:
+        total = len(submission_files)
+        k = max(1, round(total * sample_rate))
+        submission_files = random.sample(submission_files, k)
+        logger.info(
+            "Sampling %d of %d submission file(s) for heuristic validation "
+            "(sample_rate=%.2f).",
+            k, total, sample_rate,
+        )
 
     scores: list[float] = []
 
@@ -437,19 +453,20 @@ def validate_heuristic(
             scores.append(0.0)
             continue
 
-        if template_record.get("behavioral_signals") is None:
+        if template_record.get("raw_report") is None:
             logger.warning(
                 "Template file '%s' was submitted to sandbox but returned no behavioral "
-                "signals (report_ref=%s). Skipping file in similarity scoring.",
+                "data (report_ref=%s). Skipping file in similarity scoring.",
                 inner_name,
                 template_record.get("sandbox_report_ref"),
             )
             continue
 
         template_report = SandboxReport(
-            behavioral_signals=template_record.get("behavioral_signals"),
+            raw_report=template_record.get("raw_report"),
             behash=template_record.get("behash"),
             report_ref=template_record.get("sandbox_report_ref"),
+            source=template_record.get("source", "virustotal"),
         )
 
         logger.info("Submitting submission file '%s' to sandbox.", inner_name)
@@ -488,6 +505,7 @@ def validate_attack(
     submission_files: list[tuple[str, str]],
     sandbox: SandboxBackend,
     template_reports: dict[str, dict],
+    sample_rate: float = 1.0,
 ) -> float:
     """Run functional validation then heuristic validation.
 
@@ -505,6 +523,8 @@ def validate_attack(
         sandbox: Configured sandbox backend for behavioral analysis.
         template_reports: Pre-fetched template behavioral reports keyed by
             inner filename.
+        sample_rate: Fraction of files to check (0.0, 1.0]. Forwarded to
+            :func:`validate_heuristic`. Defaults to 1.0 (all files).
 
     Returns:
         Average behavioral similarity score (0.0-100.0).
@@ -515,4 +535,4 @@ def validate_attack(
             validation.
     """
     validate_functional(zip_path, expected_files, max_uncompressed_mb)
-    return validate_heuristic(submission_files, sandbox, template_reports)
+    return validate_heuristic(submission_files, sandbox, template_reports, sample_rate)

@@ -5,14 +5,14 @@ Public API:
 - :class:`SandboxBackend` - abstract base class
 - :class:`SandboxReport` - result dataclass
 - :exc:`SandboxUnavailableError` - transient backend failure
-- :class:`LocalSandboxBackend` - stub (not yet implemented)
-- :class:`VirusTotalBackend` - fully implemented VT backend
+- :class:`VirusTotalBackend` - VirusTotal backend
+- :class:`CapeBackend` - CAPEv2 local sandbox backend
 - :func:`get_sandbox_backend` - factory function
 """
 
 from .base import SandboxBackend, SandboxReport, SandboxUnavailableError
-from .local import LocalSandboxBackend
 from .virustotal import VirusTotalBackend
+from .cape import CapeBackend
 
 
 def get_sandbox_backend(config) -> SandboxBackend:
@@ -26,12 +26,9 @@ def get_sandbox_backend(config) -> SandboxBackend:
 
     Raises:
         ValueError: If ``config.sandbox_backend`` is unknown, or if
-            ``virustotal`` is selected but no API key is configured.
+            required credentials are missing.
     """
     backend = config.sandbox_backend
-
-    if backend == "local":
-        return LocalSandboxBackend()
 
     if backend == "virustotal":
         if not config.virustotal_api_key:
@@ -40,9 +37,20 @@ def get_sandbox_backend(config) -> SandboxBackend:
             )
         return VirusTotalBackend(api_key=config.virustotal_api_key)
 
+    if backend == "cape":
+        if not config.cape_url:
+            raise ValueError(
+                "sandbox_backend='cape' requires CAPE_URL to be set."
+            )
+        return CapeBackend(
+            url=config.cape_url,
+            token=config.cape_token,
+            sandbox_name=config.cape_sandbox_name,
+        )
+
     raise ValueError(
         f"Unknown sandbox_backend: {backend!r}. "
-        "Valid options: 'virustotal', 'local'."
+        "Valid options: 'virustotal', 'cape'."
     )
 
 
@@ -50,7 +58,7 @@ __all__ = [
     "SandboxBackend",
     "SandboxReport",
     "SandboxUnavailableError",
-    "LocalSandboxBackend",
     "VirusTotalBackend",
+    "CapeBackend",
     "get_sandbox_backend",
 ]

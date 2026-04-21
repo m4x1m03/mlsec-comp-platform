@@ -13,17 +13,17 @@ from worker.db import (
     update_attack_file_behavior,
 )
 
-_SIGNALS = {
+_RAW_REPORT = {
     "tags": ["DIRECT_CPU_CLOCK_ACCESS"],
     "calls_highlighted": ["GetTickCount"],
     "modules_loaded": ["ADVAPI32.dll"],
-    "ip_traffic": ["209.197.3.8:80"],
+    "ip_traffic": [{"destination_ip": "209.197.3.8", "destination_port": 80}],
     "registry_keys_set": [],
     "files_written": ["c:\\users\\<USER>\\appdata\\temp\\drop.dll"],
-    "files_dropped": ["abc123"],
+    "files_dropped": [],
     "mutexes_created": [],
     "processes_created": ["cmd.exe"],
-    "sigma_rule_ids": ["T1059"],
+    "sigma_analysis_results": [{"rule_id": "T1059"}],
 }
 
 
@@ -91,16 +91,16 @@ def test_get_template_reports_returns_all(db_session):
     db_session.execute(
         text("""
             INSERT INTO template_file_reports
-                (template_id, filename, object_key, sha256, sandbox_report_ref, behash, behavioral_signals)
+                (template_id, filename, object_key, sha256, sandbox_report_ref, behash, raw_report)
             VALUES
-                (CAST(:tid AS uuid), 'file1', 'templates/file1', :sha1, 'vt-analysis-001', 'behash-abc', CAST(:signals AS jsonb)),
+                (CAST(:tid AS uuid), 'file1', 'templates/file1', :sha1, 'vt-analysis-001', 'behash-abc', CAST(:raw_report AS jsonb)),
                 (CAST(:tid AS uuid), 'file2', 'templates/file2', :sha2, NULL, NULL, NULL)
         """),
         {
             "tid": str(template_id),
             "sha1": "a" * 64,
             "sha2": "b" * 64,
-            "signals": json.dumps(_SIGNALS),
+            "raw_report": json.dumps(_RAW_REPORT),
         },
     )
     db_session.commit()
@@ -115,12 +115,12 @@ def test_get_template_reports_returns_all(db_session):
     assert file1["sha256"] == "a" * 64
     assert file1["sandbox_report_ref"] == "vt-analysis-001"
     assert file1["behash"] == "behash-abc"
-    assert file1["behavioral_signals"]["tags"] == ["DIRECT_CPU_CLOCK_ACCESS"]
+    assert file1["raw_report"]["tags"] == ["DIRECT_CPU_CLOCK_ACCESS"]
 
     file2 = next(r for r in reports if r["filename"] == "file2")
     assert file2["sandbox_report_ref"] is None
     assert file2["behash"] is None
-    assert file2["behavioral_signals"] is None
+    assert file2["raw_report"] is None
 
 
 def test_get_template_reports_dict_keys(db_session):
@@ -148,7 +148,7 @@ def test_get_template_reports_dict_keys(db_session):
 
     assert len(reports) == 1
     assert set(reports[0].keys()) == {
-        "filename", "sha256", "sandbox_report_ref", "behash", "behavioral_signals"
+        "filename", "sha256", "sandbox_report_ref", "behash", "raw_report", "source"
     }
 
 
@@ -180,12 +180,13 @@ def test_upsert_template_report_inserts_new_row(db_session):
         sha256="d" * 64,
         sandbox_report_ref="vt-001",
         behash="behash-xyz",
-        behavioral_signals=_SIGNALS,
+        raw_report=_RAW_REPORT,
+        source="virustotal",
     )
 
     row = db_session.execute(
         text("""
-            SELECT filename, sha256, sandbox_report_ref, behash, behavioral_signals
+            SELECT filename, sha256, sandbox_report_ref, behash, raw_report
             FROM template_file_reports WHERE filename = '1'
         """)
     ).fetchone()
@@ -222,7 +223,8 @@ def test_upsert_template_report_updates_existing_row(db_session):
         sha256="e" * 64,
         sandbox_report_ref="vt-old",
         behash="behash-old",
-        behavioral_signals={"tags": ["OLD_TAG"]},
+        raw_report={"tags": ["OLD_TAG"]},
+        source="virustotal",
     )
 
     upsert_template_report(
@@ -231,7 +233,8 @@ def test_upsert_template_report_updates_existing_row(db_session):
         sha256="f" * 64,
         sandbox_report_ref="vt-new",
         behash="behash-new",
-        behavioral_signals={"tags": ["NEW_TAG"]},
+        raw_report={"tags": ["NEW_TAG"]},
+        source="virustotal",
     )
 
     count = db_session.execute(
@@ -241,7 +244,7 @@ def test_upsert_template_report_updates_existing_row(db_session):
 
     row = db_session.execute(
         text("""
-            SELECT sha256, sandbox_report_ref, behash, behavioral_signals
+            SELECT sha256, sandbox_report_ref, behash, raw_report
             FROM template_file_reports WHERE filename = '2'
         """)
     ).fetchone()
@@ -275,12 +278,13 @@ def test_upsert_template_report_allows_null_fields(db_session):
         sha256="0" * 64,
         sandbox_report_ref=None,
         behash=None,
-        behavioral_signals=None,
+        raw_report=None,
+        source="virustotal",
     )
 
     row = db_session.execute(
         text("""
-            SELECT sandbox_report_ref, behash, behavioral_signals
+            SELECT sandbox_report_ref, behash, raw_report
             FROM template_file_reports WHERE filename = 'pending'
         """)
     ).fetchone()
@@ -315,7 +319,8 @@ def test_upsert_template_report_can_fill_nulls_on_update(db_session):
         sha256="1" * 64,
         sandbox_report_ref=None,
         behash=None,
-        behavioral_signals=None,
+        raw_report=None,
+        source="virustotal",
     )
 
     upsert_template_report(
@@ -324,12 +329,13 @@ def test_upsert_template_report_can_fill_nulls_on_update(db_session):
         sha256="1" * 64,
         sandbox_report_ref="vt-filled",
         behash="behash-filled",
-        behavioral_signals={"tags": ["FILLED"]},
+        raw_report={"tags": ["FILLED"]},
+        source="virustotal",
     )
 
     row = db_session.execute(
         text("""
-            SELECT sandbox_report_ref, behash, behavioral_signals
+            SELECT sandbox_report_ref, behash, raw_report
             FROM template_file_reports WHERE filename = 'later'
         """)
     ).fetchone()

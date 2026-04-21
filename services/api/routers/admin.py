@@ -1264,7 +1264,7 @@ def get_template(
     seeded = db.execute(
         text("""
             SELECT COUNT(*) FROM template_file_reports
-            WHERE template_id = :tid AND behavioral_signals IS NOT NULL
+            WHERE template_id = :tid AND raw_report IS NOT NULL
         """),
         {"tid": template_id},
     ).scalar() or 0

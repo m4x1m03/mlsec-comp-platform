@@ -226,9 +226,10 @@ CREATE TABLE IF NOT EXISTS template_file_reports (
     filename TEXT NOT NULL,           -- relative path within the attack template
     object_key TEXT NOT NULL,         -- MinIO path for this template file
     sha256 TEXT NOT NULL,
-    sandbox_report_ref TEXT,          -- backend-specific analysis ID (e.g. VT analysis ID)
-    behash TEXT,                      -- VT behavioral hash; NULL until analysis completes
-    behavioral_signals JSONB,         -- extracted behavioral indicators; NULL until analysis completes
+    sandbox_report_ref TEXT,          -- backend-specific analysis ID (e.g. VT analysis ID or CAPE task ID)
+    behash TEXT,                      -- VT behavioral hash; NULL until analysis completes or for CAPE reports
+    raw_report JSONB,                 -- raw behavioral attributes dict; NULL until analysis completes
+    source TEXT NOT NULL DEFAULT 'virustotal', -- sandbox backend that produced this report
 
     evaluated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

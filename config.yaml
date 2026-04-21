@@ -60,9 +60,11 @@ attack:
   reject_dissimilar_attacks: false  # only applies when check_similarity=true
                                     #   true  = reject if score < minimum_attack_similarity
                                     #   false = log score but accept regardless
-  minimum_attack_similarity: 50   # 0-100 threshold (used when check_similarity=true)
+  minimum_attack_similarity: 65   # 0-100 threshold (used when check_similarity=true)
   max_zip_size_mb: 100
-  sandbox_backend: "virustotal"   # "virustotal" | "local"
+  sandbox_backend: "virustotal"   # "virustotal" | "cape"
+  cape_sandbox_name: "win10"
+  behavior_sample_rate: 1.0       # fraction of attack files to behaviorally check (0.0-1.0)
   cache_persistence_duration: 300 # seconds of inactivity before clearing the sample cache
   cache_max_size_gb: 10           # maximum size of local sample cache before pruning
 
