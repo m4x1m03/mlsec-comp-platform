@@ -65,6 +65,7 @@ attack:
   sandbox_backend: "virustotal"   # "virustotal" | "cape"
   cape_sandbox_name: "win10"
   behavior_sample_rate: 1.0       # fraction of attack files to behaviorally check (0.0-1.0)
+  deny_duplicate_attacks: true   # reject attack submissions whose file hashes match another competitor's validated submission
   cache_persistence_duration: 300 # seconds of inactivity before clearing the sample cache
   cache_max_size_gb: 10           # maximum size of local sample cache before pruning
 
