@@ -95,12 +95,10 @@ class AttackConfig(BaseModel):
     cape_url: str = Field(
         default_factory=lambda: os.getenv("CAPE_URL", "")
     )
-    cape_username: str = Field(
-        default_factory=lambda: os.getenv("CAPE_USERNAME", "")
+    cape_token: str = Field(
+        default_factory=lambda: os.getenv("CAPE_TOKEN", "")
     )
-    cape_password: str = Field(
-        default_factory=lambda: os.getenv("CAPE_PASSWORD", "")
-    )
+    cape_sandbox_name: str = Field(default="win10")
 
 
 class StorageConfig(BaseModel):

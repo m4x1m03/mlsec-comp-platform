@@ -20,7 +20,7 @@ from .base import SandboxBackend, SandboxReport, SandboxUnavailableError
 logger = logging.getLogger(__name__)
 
 _CAPE_COMPLETE_STATUSES = {"reported"}
-_CAPE_PENDING_STATUSES = {"pending", "processing", "running", "distributed"}
+_CAPE_PENDING_STATUSES = {"pending", "processing", "running", "distributed", "completed"}
 
 
 class CapeBackend(SandboxBackend):
@@ -32,9 +32,11 @@ class CapeBackend(SandboxBackend):
 
     Args:
         url: Base URL of the CAPE instance (e.g. ``http://cape-host:8000``).
-        username: HTTP Basic auth username. Pass an empty string if the
-            instance requires no authentication.
-        password: HTTP Basic auth password.
+        token: Optional API token. When non-empty, sent as
+            ``Authorization: Token <token>``. Leave empty for unauthenticated
+            access.
+        sandbox_name: Name of the CAPE machine/tag to route tasks to
+            (e.g. ``win10``). Sent as the ``tags`` field on submission.
         poll_interval_s: Seconds to wait between task-status polls.
         max_polls: Maximum number of poll attempts before giving up.
         timeout: HTTP request timeout in seconds.
@@ -43,14 +45,17 @@ class CapeBackend(SandboxBackend):
     def __init__(
         self,
         url: str,
-        username: str = "",
-        password: str = "",
+        token: str = "",
+        sandbox_name: str = "win10",
         poll_interval_s: int = 15,
         max_polls: int = 40,
         timeout: int = 30,
     ) -> None:
         self._url = url.rstrip("/")
-        self._auth: tuple[str, str] | None = (username, password) if username else None
+        self._headers: dict[str, str] = (
+            {"Authorization": f"Token {token}"} if token else {}
+        )
+        self._sandbox_name = sandbox_name
         self._poll_interval_s = poll_interval_s
         self._max_polls = max_polls
         self._timeout = timeout
@@ -95,7 +100,8 @@ class CapeBackend(SandboxBackend):
                 response = requests.post(
                     f"{self._url}/apiv2/tasks/create/file/",
                     files={"file": (path.name, fh)},
-                    auth=self._auth,
+                    data={"tags": self._sandbox_name},
+                    headers=self._headers,
                     timeout=self._timeout,
                 )
         except requests.RequestException as exc:
@@ -116,12 +122,12 @@ class CapeBackend(SandboxBackend):
         return task_id
 
     def _poll_until_complete(self, task_id: int) -> None:
-        """Poll ``/apiv2/tasks/view/{task_id}/`` until the task reaches ``reported``."""
+        """Poll ``/apiv2/tasks/view/{task_id}/`` until the task reaches a complete status."""
         url = f"{self._url}/apiv2/tasks/view/{task_id}/"
         for attempt in range(1, self._max_polls + 1):
             try:
                 response = requests.get(
-                    url, auth=self._auth, timeout=self._timeout
+                    url, headers=self._headers, timeout=self._timeout
                 )
             except requests.RequestException as exc:
                 raise SandboxUnavailableError(
@@ -139,13 +145,18 @@ class CapeBackend(SandboxBackend):
 
             if status in _CAPE_COMPLETE_STATUSES:
                 logger.info(
-                    "CAPE task %d complete after %d poll(s).", task_id, attempt
+                    "CAPE task %d reached status %r after %d poll(s).",
+                    task_id, status, attempt,
                 )
                 return
 
             if status not in _CAPE_PENDING_STATUSES:
+                known = sorted(_CAPE_COMPLETE_STATUSES | _CAPE_PENDING_STATUSES)
                 raise SandboxUnavailableError(
-                    f"CAPE task {task_id} entered unexpected status {status!r}."
+                    f"CAPE task {task_id} entered unexpected status {status!r}. "
+                    f"Known statuses: {known}. "
+                    "If this status is a valid terminal state, add it to "
+                    "_CAPE_COMPLETE_STATUSES in cape.py."
                 )
 
             logger.debug(
@@ -164,7 +175,7 @@ class CapeBackend(SandboxBackend):
         url = f"{self._url}/apiv2/tasks/get/report/{task_id}/"
         try:
             response = requests.get(
-                url, auth=self._auth, timeout=self._timeout
+                url, headers=self._headers, timeout=self._timeout
             )
         except requests.RequestException as exc:
             raise SandboxUnavailableError(
@@ -250,6 +261,22 @@ def _convert_cape_to_vt_attrs(cape: dict[str, Any]) -> dict[str, Any]:
     ]
     if processes_created:
         vt["processes_created"] = processes_created
+
+    # --- modules section ---
+    _LOADLIB_APIS = {"loadlibrarya", "loadlibraryw", "loadlibraryexa", "loadlibraryexw"}
+    modules: set[str] = set()
+    for proc in behavior.get("processes") or []:
+        for call in proc.get("calls") or []:
+            if call.get("api", "").lower() in _LOADLIB_APIS:
+                for arg in call.get("arguments") or []:
+                    if arg.get("name") == "lpLibFileName":
+                        val = arg.get("value", "")
+                        # Use replace to handle Windows backslash paths on Linux hosts
+                        name = val.replace("\\", "/").split("/")[-1].lower() if val else ""
+                        if name.endswith(".dll"):
+                            modules.add(name)
+    if modules:
+        vt["modules_loaded"] = sorted(modules)
 
     # --- system_api section ---
     api_calls: set[str] = set()

@@ -44,8 +44,8 @@ def get_sandbox_backend(config) -> SandboxBackend:
             )
         return CapeBackend(
             url=config.cape_url,
-            username=config.cape_username,
-            password=config.cape_password,
+            token=config.cape_token,
+            sandbox_name=config.cape_sandbox_name,
         )
 
     raise ValueError(
