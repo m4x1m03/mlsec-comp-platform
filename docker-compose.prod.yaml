@@ -76,6 +76,8 @@ services:
       ADMIN_ALLOWED_HOSTS: ${ADMIN_ALLOWED_HOSTS:-[]}
       ADMIN_TRUSTED_PROXY_HOSTS: ${ADMIN_TRUSTED_PROXY_HOSTS:-["127.0.0.1", "::1", "172.16.0.0/12"]}
       ADMIN_ALLOWED_NETWORKS: ${ADMIN_ALLOWED_NETWORKS:-["172.16.0.0/12"]}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["https://mlsec2.com"]}
+      CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX:-"^https?://(mlsec2\.com|localhost|127\.0\.0\.1)(:\d+)?$"}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
@@ -139,7 +141,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./services/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./services/nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot-www:/var/www/certbot:ro
     networks:
