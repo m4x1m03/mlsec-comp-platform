@@ -139,6 +139,7 @@ services:
       MINIO_SECURE: "false"
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       CELERY_CONCURRENCY: "${WORKER_CONCURRENCY:-1}" # Forces use of a single thread per Worker container
+    user: "10001"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config.yaml:/app/config.yaml:ro
