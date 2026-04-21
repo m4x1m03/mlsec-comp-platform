@@ -126,7 +126,7 @@ def test_admin_action_token_requires_origin(client, db_session):
     resp = client.post("/admin/actions/token", headers={"Authorization": f"Bearer {access_token}"})
 
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Admin actions require a localhost browser origin"
+    assert resp.json()["detail"] == "Admin actions require a valid browser origin"
 
 
 def test_admin_disable_user_requires_action_token(client, db_session):
