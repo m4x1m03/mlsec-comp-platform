@@ -78,6 +78,8 @@ services:
       ADMIN_ALLOWED_NETWORKS: ${ADMIN_ALLOWED_NETWORKS:-["172.16.0.0/12"]}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["https://yourdomain.com"]}
       CORS_ALLOW_ORIGIN_REGEX: ${CORS_ALLOW_ORIGIN_REGEX:-"^https?://(yourdomain\.com|localhost|127\.0\.0\.1)(:\d+)?$"}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     networks:
