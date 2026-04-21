@@ -11,7 +11,7 @@ import docker
 import requests
 from celery.utils.log import get_task_logger
 
-from worker.config import EvaluationConfig, HeuristicValidationConfig
+from worker.config import EvaluationConfig, ValidationConfig
 from worker.db import (
     get_active_heurval_set,
     get_heurval_samples,
@@ -39,7 +39,7 @@ def validate_dockerfile_safety(dockerfile_path: Path, config: dict) -> None:
     Raises:
         ValueError: If Dockerfile fails security checks
     """
-    source_config = config.get('source', {})
+    source_config = config.get('defense', {}).get('build', {})
     max_size_kb = source_config.get('max_dockerfile_size_kb', 100)
     max_size_bytes = max_size_kb * 1024
 
@@ -160,7 +160,7 @@ def _validate_image_size(image_name: str, config: dict) -> None:
         size_mb = size_bytes / (1024 * 1024)
 
         # Get limit from config
-        defense_job_config = config.get('defense_job', {})
+        defense_job_config = config.get('defense', {}).get('container', {})
         max_size_mb = defense_job_config.get('max_uncompressed_size_mb', 1024)
 
         logger.info(
@@ -211,7 +211,7 @@ def _validate_post_endpoint(container_url: str, config: dict) -> None:
         probe_data += b"\x00" * (4096 - len(probe_data))
 
     # Get timeout from config
-    eval_config = config.get('evaluation', {})
+    eval_config = config.get('defense', {}).get('evaluation', {})
     timeout = eval_config.get('requests_timeout_seconds', 5)
 
     # Send POST request direct to container (via gateway NAT)
@@ -267,7 +267,7 @@ async def validate_heuristic(
     container_name: str,
     docker_client: docker.DockerClient,
     eval_cfg: EvaluationConfig,
-    heurval_cfg: HeuristicValidationConfig,
+    heurval_cfg: ValidationConfig,
 ) -> dict:
     """Run heuristic validation for a defense container against the active sample set.
 

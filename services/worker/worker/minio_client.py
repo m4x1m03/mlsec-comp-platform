@@ -12,7 +12,7 @@ from .config import get_config
 @lru_cache(maxsize=1)
 def get_minio_client() -> Minio:
     """Singleton MinIO client factory."""
-    cfg = get_config().worker.minio
+    cfg = get_config().storage
     return Minio(
         cfg.endpoint,
         access_key=cfg.access_key,
@@ -22,4 +22,4 @@ def get_minio_client() -> Minio:
 
 
 def get_bucket_name() -> str:
-    return get_config().worker.minio.bucket_name
+    return get_config().storage.bucket_name

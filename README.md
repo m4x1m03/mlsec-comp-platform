@@ -1,121 +1,100 @@
-# mlsec-comp-platform
-A platform for hosting an MLSEC-style adversarial malware competition.
+# Machine Learning Security Evasion Competition Platform 2.0
 
-# Services
-This project uses a microservices-style architecture with Docker for hosting different components of the application.
+An open-source platform for hosting Machine Learning Security Evasion Competitions in-house. MLSEC 2.0 offers a suite for competitors to upload security artifacts and watch them be evaluated in real time.
 
-## Frontend
-The frontend can be launched either via Docker, npm, or VSCode.
-### Docker
-```
-docker-compose up frontend
-```
-### npm
-```
-cd ./services/frontend/
-npm install
-npm run dev
-```
-### VSCode
-Open the "Run and Debug" menu (Ctrl + Shift + D), select the "Development Server", run.
+## Quickstart
 
-*Note: You may need to perform `cd ./services/frontend/` and `npm install` before running with VSCode*
+1. Copy `.env-example` to `.env` and replace all placeholder values with real passwords and secrets.
+2. Review `config.yaml` and adjust settings to match your deployment (submission cooldowns, join code, email delivery, worker count, sandbox backend, etc.).
+3. If using a local sandbox backend, see [docs/sandbox.md](docs/sandbox.md) (WIP).
+4. Run `make prod-up` to launch all services in production mode.
 
-## API
-The API can be launched either via Docker or locally.
+For local development, use `make up` instead.
 
-### Docker
-```
-docker-compose up api
+## Starting a Competition
+
+### 1. Create an admin account
+
+Register a normal account through the UI, then promote it to admin via the database:
+
+```bash
+docker exec -it postgres-db psql -U mlsec2 -d mlsec \
+  -c "UPDATE users SET is_admin = TRUE WHERE email = 'your@email.com';"
 ```
 
-### Local
+Replace `mlsec2` with the value of `POSTGRES_USER` from your `.env` if you changed it. See [Admin](docs/architecture.md#4-admin) in the architecture docs for a full description of admin capabilities.
+
+### 2. Verify your configuration
+
+Before opening the competition, confirm that `config.yaml` and `.env` reflect the intended settings: submission cooldowns, resource limits for defense containers, sandbox backend, and whether a join code or email MFA is required for registration.
+
+### 3. Submit a defense validation set
+
+The defense validation set is used to pre-screen competitor defenses before they enter the leaderboard. It is a standard (non-password-protected) ZIP file containing two folders:
+
 ```
-cd ./services/api/
-python -m venv .venv
-```
-Activate the venv, then install dependencies:
-```
-pip install -r requirements-dev.txt
-```
-Run the API:
-```
-uvicorn main:app --host 0.0.0.0 --port 8000
+validation.zip
+├── malware/
+│   ├── sample_a.exe
+│   └── sample_b.exe
+└── goodware/
+    ├── clean_a.exe
+    └── clean_b.exe
 ```
 
-### Requirements
-- `services/api/requirements.txt` contains runtime dependencies for the API service.
-- `services/api/requirements-dev.txt` contains developer/test dependencies and includes `requirements.txt`.
+Each folder holds representative binary samples of the respective class. When heuristic validation runs, these files are sent to the defense container and its true positive and false positive rates are measured against the configurable thresholds in `config.yaml` under `defense.validation`.
 
-## API Testing 
-Place all test scripts into the tests folder
-Make sure to keep test_----.py naming convention 
-```
-cd services/api/ 
-pytest -v
-```
-or to allow printing 
-```
-pytest -s
-```
+Upload the validation set from the **Competition** tab of the admin panel.
 
-## Postgres
+### 4. Submit an attack template
 
-### Starting Postgres db server 
+The attack template is a non-password protected ZIP file containing the sample binaries that competitors are expected to make evasive. It defines the exact file set that every submitted attack must match structurally.
+
 ```
-docker-compose up postgres
-```
-### Accessing Postgres db 
-```
-docker exec -it postgres-db psql -U postgres -d mlsec
-```
-### Starting TEST Postgres db server 
-```
-docker-compose up postgres-test
-```
-### Accessing TEST Postgres db 
-```
-docker exec -it test-postgres-db psql -U postgres -d mlsec-test
+template.zip
+├── sample_a.exe
+├── sample_b.exe
+├── sample_c.exe
+└── sample_d.exe
 ```
 
+Files in the template can optionally be seeded for behavioral analysis. When seeded, the platform submits each file to the configured sandbox (VirusTotal API key or CAPE) and records its behavioral signals. These signals are later used to score how similar a competitor's attack is to the original template. Seeding requires an active sandbox; see `config.yaml` under `attack` and `docs/sandbox.md` for configuration details.
 
-## MinIO
-WIP
+Upload the attack template from the **Competition** tab of the admin panel. Seeding begins automatically after upload if a sandbox is configured.
 
-## RabbitMQ
-RabbitMQ is used as the Celery broker (queue) for jobs.
+### 5. Open the competition
 
-### Docker
-Start RabbitMQ (and the API/worker if you want to run jobs):
-```
-docker compose -f docker-compose.yaml up -d rabbitmq api worker
-```
+Once the defense validation set and attack template are uploaded and seeding is complete, open the competition from the **Competition** tab. You can open it immediately or schedule an automatic close time.
 
-### Management UI
-- http://localhost:15672
-- Username: `mlsec`
-- Password: `mlsec`
 
-### Ports
-- `5672` (AMQP broker)
-- `15672` (management UI)
+## System Overview
 
-## Celery
-Celery workers consume jobs from RabbitMQ and execute task stubs.
+The platform is a set of Docker containers orchestrated by Docker Compose. Configuration comes from two sources:
 
-### Docker
-Start the worker:
-```
-docker compose -f docker-compose.yaml up -d --build worker
-```
+- `.env` - secrets and host-specific deployment values (credentials, keys, network settings)
+- `config.yaml` - application behavior (cooldowns, resource limits, sandbox backend, email, etc.)
 
-View worker logs:
-```
-docker logs -f mlsec-worker
-```
+Nginx terminates TLS on ports 80/443 and routes requests to the API or frontend. The API dispatches evaluation jobs to Celery workers via RabbitMQ. Workers run competitor defense containers in an isolated Docker network and evaluate them against submitted attack files.
 
-### Enqueuing jobs
-The API publishes Celery tasks when you call:
-- `POST /queue/defense`
-- `POST /queue/attack`
+| Component | Technology | Purpose |
+|---|---|---|
+| Frontend | Astro 5 + React 19 + Tailwind CSS | Competitor-facing UI (submissions, leaderboard, rules) and admin dashboard |
+| API | FastAPI (Python 3.11) + SQLAlchemy | Auth, submission management, job dispatch, leaderboard streaming |
+| Database | PostgreSQL 18 | Users, sessions, submissions, jobs, evaluations, audit logs |
+| Task Queue | Celery 5 + RabbitMQ 3 | Async defense and attack job processing |
+| Worker | Celery worker (Python 3.11) | Builds defense images, runs evaluation, records results |
+| Object Storage | MinIO (S3-compatible) | Defense and attack ZIP artifacts |
+| Cache and Coordination | Redis 7 | Worker registry, attack distribution, leaderboard pub/sub, MFA codes |
+| Reverse Proxy | Nginx | TLS termination and request routing |
+| Network Isolation | Docker `defense_net` + gateway service | Isolates competitor container traffic during evaluation |
 
+For a detailed description of how each component works, see [docs/architecture.md](docs/architecture.md).
+
+## Attribution
+
+MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texas A&M University. This project was sponsored by Dr. Marcus Botacin, and created by:
+
+- Aaron Thompson
+- Graham Dungan
+- Karl Farrar
+- Maxim Mouget

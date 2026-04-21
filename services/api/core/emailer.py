@@ -7,6 +7,7 @@ from email.message import EmailMessage
 import logging
 import smtplib
 
+from core.config import get_config
 from core.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -22,27 +23,28 @@ def _format_expiry(expires_at: datetime) -> str:
 
 def send_login_code_email(*, to_email: str, code: str, expires_at: datetime) -> None:
     """Send a login verification code email."""
+    email_cfg = get_config().email
     settings = get_settings()
 
-    subject = settings.auth_email_mfa_subject
-    from_email = settings.auth_email_mfa_from
+    subject = email_cfg.subject
+    from_email = email_cfg.from_address
 
     body = (
         "Use the verification code below to finish signing in:\n\n"
         f"{code}\n\n"
         f"This code expires at {_format_expiry(expires_at)}.\n"
     )
-    if settings.auth_email_mfa_base_url:
-        body += f"\nReturn to {settings.auth_email_mfa_base_url} to complete sign-in.\n"
+    if email_cfg.base_url:
+        body += f"\nReturn to {email_cfg.base_url} to complete sign-in.\n"
 
-    if settings.auth_email_mfa_delivery == "log":
+    if email_cfg.delivery == "log":
         logger.info("Login code for %s: %s (expires %s)", to_email, code, _format_expiry(expires_at))
         return
 
-    if settings.auth_email_mfa_delivery != "smtp":
-        raise RuntimeError(f"Unsupported email delivery mode: {settings.auth_email_mfa_delivery}")
+    if email_cfg.delivery != "smtp":
+        raise RuntimeError(f"Unsupported email delivery mode: {email_cfg.delivery}")
 
-    if not settings.smtp_host:
+    if not email_cfg.smtp_host:
         raise RuntimeError("SMTP host is not configured")
 
     msg = EmailMessage()
@@ -52,12 +54,12 @@ def send_login_code_email(*, to_email: str, code: str, expires_at: datetime) -> 
     msg.set_content(body)
 
     try:
-        if settings.smtp_use_ssl:
-            smtp = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10)
+        if email_cfg.smtp_use_ssl:
+            smtp = smtplib.SMTP_SSL(email_cfg.smtp_host, email_cfg.smtp_port, timeout=10)
         else:
-            smtp = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10)
+            smtp = smtplib.SMTP(email_cfg.smtp_host, email_cfg.smtp_port, timeout=10)
         with smtp:
-            if settings.smtp_use_tls and not settings.smtp_use_ssl:
+            if email_cfg.smtp_use_tls and not email_cfg.smtp_use_ssl:
                 smtp.starttls()
             if settings.smtp_user and settings.smtp_password:
                 smtp.login(settings.smtp_user, settings.smtp_password)

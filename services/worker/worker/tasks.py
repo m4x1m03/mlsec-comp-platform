@@ -213,9 +213,9 @@ async def _setup_defense_container(
             name=container_name,
             detach=True,
             network=network_name,
-            mem_limit=config.worker.defense_job.mem_limit,
-            nano_cpus=config.worker.defense_job.nano_cpus,
-            pids_limit=config.worker.defense_job.pids_limit,
+            mem_limit=config.defense.container.mem_limit,
+            nano_cpus=config.defense.container.nano_cpus,
+            pids_limit=config.defense.container.pids_limit,
             read_only=True,
             privileged=False,
             user="1000:1000",
@@ -292,7 +292,7 @@ async def _validate_defense_container(
     import requests
 
     defense_submission_id = ctx["defense_submission_id"]
-    container_timeout = config.worker.defense_job.container_timeout
+    container_timeout = config.defense.container.container_timeout
 
     try:
         start_wait = time.time()
@@ -325,7 +325,7 @@ async def _validate_defense_container(
             mark_defense_failed(defense_submission_id, str(e))
             return False
 
-        if heurval_cfg.enable_heuristic_validation:
+        if heurval_cfg.enabled:
             try:
                 metrics = await validate_defense_heuristic(
                     defense_submission_id=defense_submission_id,
@@ -345,27 +345,27 @@ async def _validate_defense_container(
                 mark_defense_failed(defense_submission_id, error_msg)
                 return False
 
-            if metrics and heurval_cfg.reject_heurval_failures:
+            if metrics and heurval_cfg.reject_failures:
                 fails = []
-                if metrics.get("malware_tpr", 0.0) < heurval_cfg.heurval_malware_tpr_minimum:
+                if metrics.get("malware_tpr", 0.0) < heurval_cfg.malware_tpr_minimum:
                     fails.append(
                         f"malware_tpr {metrics['malware_tpr']:.3f} < "
-                        f"{heurval_cfg.heurval_malware_tpr_minimum}"
+                        f"{heurval_cfg.malware_tpr_minimum}"
                     )
-                if metrics.get("malware_fpr", 0.0) < heurval_cfg.heurval_malware_fpr_minimum:
+                if metrics.get("malware_fpr", 0.0) < heurval_cfg.malware_fpr_minimum:
                     fails.append(
                         f"malware_fpr {metrics['malware_fpr']:.3f} < "
-                        f"{heurval_cfg.heurval_malware_fpr_minimum}"
+                        f"{heurval_cfg.malware_fpr_minimum}"
                     )
-                if metrics.get("goodware_tpr", 0.0) < heurval_cfg.heurval_goodware_tpr_minimum:
+                if metrics.get("goodware_tpr", 0.0) < heurval_cfg.goodware_tpr_minimum:
                     fails.append(
                         f"goodware_tpr {metrics['goodware_tpr']:.3f} < "
-                        f"{heurval_cfg.heurval_goodware_tpr_minimum}"
+                        f"{heurval_cfg.goodware_tpr_minimum}"
                     )
-                if metrics.get("goodware_fpr", 0.0) < heurval_cfg.heurval_goodware_fpr_minimum:
+                if metrics.get("goodware_fpr", 0.0) < heurval_cfg.goodware_fpr_minimum:
                     fails.append(
                         f"goodware_fpr {metrics['goodware_fpr']:.3f} < "
-                        f"{heurval_cfg.heurval_goodware_fpr_minimum}"
+                        f"{heurval_cfg.goodware_fpr_minimum}"
                     )
                 if fails:
                     error_msg = f"Heuristic validation failed: {'; '.join(fails)}"
@@ -451,7 +451,7 @@ def run_batch_defense_job(
 
     worker_id = f"worker_{job_id}_{int(time.time())}"
     registry = WorkerRegistry()
-    config_dict = config.model_dump()["worker"]
+    config_dict = config.model_dump()
     defense_contexts: list[dict] = []
 
     async def _body() -> None:
@@ -512,13 +512,13 @@ def run_batch_defense_job(
             f"Setup complete: {len(defense_contexts)}/{len(defense_specs)} containers started"
         )
 
-        heurval_cfg = config.worker.heuristic_validation
+        heurval_cfg = config.defense.validation
         validate_results = await asyncio.gather(*[
             _validate_defense_container(
                 ctx=ctx,
                 config_dict=config_dict,
                 heurval_cfg=heurval_cfg,
-                eval_cfg=config.worker.evaluation,
+                eval_cfg=config.defense.evaluation,
             )
             for ctx in defense_contexts
         ])
@@ -552,7 +552,7 @@ def run_batch_defense_job(
         logger.info(f"Cleaning up resources for batch job {job_id}")
         registry.unregister(worker_id)
         cleanup_client = docker.from_env()
-        source_config = config_dict.get("source", {})
+        source_config = config_dict.get("defense", {}).get("build", {})
         for ctx in defense_contexts:
             try:
                 ctx["container"].stop(timeout=2)
@@ -630,7 +630,7 @@ def seed_attack_template(self, *, template_id: str, job_id: str | None = None) -
     if job_id:
         set_job_status(job_id=job_id, status="running")
 
-    if config.worker.attack.skip_seeding:
+    if config.attack.skip_seeding:
         logger.info("skip_seeding=true; skipping template seeding for template %s.", template_id)
         if job_id:
             set_job_status(job_id=job_id, status="done")
@@ -646,7 +646,7 @@ def seed_attack_template(self, *, template_id: str, job_id: str | None = None) -
                 set_job_status(job_id=job_id, status="done")
             return
 
-        attack_cfg = config.worker.attack
+        attack_cfg = config.attack
         sandbox = get_sandbox_backend(attack_cfg)
         ensure_template_seeded(template_id, template_files, sandbox)
         logger.info("Seeding complete for template %s", template_id)
@@ -756,7 +756,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                 logger.info(f"Downloaded to {temp_zip.name}")
 
                 # Functional validation (ZIP structure, password, safety)
-                attack_cfg = config.worker.attack
+                attack_cfg = config.attack
                 active_template = get_active_template()
 
                 # Defer job if behavioral seeding is still in progress
@@ -878,7 +878,8 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                         sandbox = get_sandbox_backend(attack_cfg)
                         try:
                             avg_similarity = validate_heuristic(
-                                submission_files, sandbox, template_reports
+                                submission_files, sandbox, template_reports,
+                                sample_rate=attack_cfg.behavior_sample_rate,
                             )
                         except SandboxUnavailableError as e:
                             error_msg = str(e)
@@ -978,7 +979,7 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
 
         # Batch remaining defenses
         if remaining_defenses:
-            batch_size = config.worker.evaluation.batch_size
+            batch_size = config.defense.evaluation.batch_size
             for i in range(0, len(remaining_defenses), batch_size):
                 batch = remaining_defenses[i:i + batch_size]
                 new_job_id = _insert_job(

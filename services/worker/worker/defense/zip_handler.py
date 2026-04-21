@@ -70,7 +70,7 @@ def build_from_zip_archive(
 
         # Verify file size
         zip_size_bytes = os.path.getsize(temp_zip.name)
-        source_config = config.get('source', {})
+        source_config = config.get('defense', {}).get('build', {})
         max_zip_size_mb = source_config.get('max_zip_size_mb', 512)
         max_zip_size_bytes = max_zip_size_mb * 1024 * 1024
 

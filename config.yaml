@@ -1,60 +1,93 @@
+# Number of concurrent Celery worker containers
+# Total possible simultaneous competitor containers = num_workers * defense.evaluation.batch_size
 worker:
-  num_workers: 2   # number of concurrent Worker containers (Total Possible Competitor Containers = num_workers*batch_size)
-  defense_job:
-    mem_limit: "1g"
-    nano_cpus: 1000000000
-    pids_limit: 100
-    container_timeout: 30
-    max_uncompressed_size_mb: 1024
+  num_workers: 2
+
+# All settings related to defense submissions
+defense:
+
+  # Docker resource limits applied to each competitor's running defense container
+  container:
+    mem_limit: "1g"              # Docker memory limit for each competitor container
+    nano_cpus: 1000000000        # CPU quota in nanocpus; 1000000000 = 1 full CPU core
+    pids_limit: 100              # max processes/threads inside the competitor container
+    container_timeout: 30        # seconds before the container is force-killed
+    max_uncompressed_size_mb: 1024  # max allowed uncompressed submission size in MB
+
+  # Controls how attack files are batched and sent to the defense container during evaluation
   evaluation:
-    requests_timeout_seconds: 5
-    batch_size: 2
+    requests_timeout_seconds: 5  # per-request HTTP timeout when sending samples to the defense container
+    batch_size: 2                # number of attack files sent to the defense container per request
+    max_empty_polls: 3           # consecutive empty queue polls before the evaluation worker shuts down
     defense_max_ram: 1024        # MB - soft RAM threshold; sample marked evaded and container restarted if exceeded
     defense_max_time: 5000       # ms - per-sample time limit; exceeded = evaded
     defense_max_timeout: 20000   # ms - forced restart threshold (must be >= defense_max_time)
     defense_max_restarts: 3      # max container restarts before error state
-    stats_sampling_rate: 25      # Number of samples evaluated before checking container stats again (This has a massive impact on total evaluation time)
-  heuristic_validation:
-    enable_heuristic_validation: false
-    heurval_malware_fpr_minimum: 0.0
-    heurval_malware_tpr_minimum: 0.30
-    heurval_goodware_fpr_minimum: 0.0
-    heurval_goodware_tpr_minimum: 0.30
-    reject_heurval_failures: false
-  source:
-    # Resource limits
+    stats_sampling_rate: 25      # samples evaluated between container stats checks (has a large impact on total evaluation time)
+
+  # Heuristic pre-acceptance checks run against a defense before it enters the leaderboard
+  validation:
+    enabled: false               # run validation against uploaded sample sets before accepting a defense
+    malware_fpr_minimum: 0.0    # minimum acceptable false-positive rate on malware samples
+    malware_tpr_minimum: 0.30   # minimum acceptable true-positive rate on malware samples
+    goodware_fpr_minimum: 0.0   # minimum acceptable false-positive rate on goodware samples
+    goodware_tpr_minimum: 0.30  # minimum acceptable true-positive rate on goodware samples
+    reject_failures: false       # if true, submissions that fail thresholds are rejected outright
+
+  # Building a defense Docker image from a submitted ZIP or GitHub repository
+  build:
     max_zip_size_mb: 512
     max_uncompressed_zip_size_mb: 2048
     max_build_time_seconds: 300
     build_mem_limit: "2g"
-    temp_build_dir: "/tmp/mlsec-builds"  # Inside container only - NOT mounted from host
+    temp_build_dir: "/tmp/mlsec-builds"  # inside container only - NOT mounted from host
 
     # Security settings for build isolation
-    use_buildkit: true                    # Enable Docker BuildKit security features
-    network_disabled: false               # Allow network access during builds (needed for pip install)
-    no_cache: true                        # Prevent cache poisoning
-    build_cpu_quota: 100000               # Limit CPU usage to 1 core (prevent resource spamming)
-    max_dockerfile_size_kb: 100           # Limit Dockerfile size (negotiable, we can remove this)
+    use_buildkit: true           # enable Docker BuildKit security features
+    network_disabled: false      # allow network access during builds (needed for pip install)
+    no_cache: true               # prevent cache poisoning
+    build_cpu_quota: 100000      # limit CPU usage to 1 core (100000 = 1 core)
+    max_dockerfile_size_kb: 100  # limit Dockerfile size
 
     # Cleanup settings
-    cleanup_built_images: true            # Remove built images after evaluation (GitHub/ZIP sources only)
-    cleanup_pulled_images: true           # Remove pulled images after evaluation (Docker Hub sources only)
-  minio:
-    bucket_name: "mlsec-submissions"
-  attack:
-    skip_seeding: true              # true = skip template seeding and all behavioral checks
-    check_similarity: false           # false = skip evaluation, accept all validated attacks
-    reject_dissimilar_attacks: false  # only applies when check_similarity=true
-                                     #   true  = reject if score < minimum_attack_similarity
-                                     #   false = log score but accept regardless
-    minimum_attack_similarity: 50    # 0-100 threshold (used when check_similarity=true)
-    max_zip_size_mb: 100
-    sandbox_backend: "virustotal"    # "virustotal" | "local"
-    cache_persistence_duration: 300  # seconds of inactivity before clearing the sample cache
-    cache_max_size_gb: 10            # Maximum size of local sample cache before pruning
+    cleanup_built_images: true   # remove built images after evaluation (ZIP/GitHub sources)
+    cleanup_pulled_images: true  # remove pulled images after evaluation (Docker Hub sources)
 
+# All settings related to attack submissions
+attack:
+  skip_seeding: true              # true = skip template seeding and all behavioral checks
+  check_similarity: false         # false = skip evaluation, accept all validated attacks
+  reject_dissimilar_attacks: false  # only applies when check_similarity=true
+                                    #   true  = reject if score < minimum_attack_similarity
+                                    #   false = log score but accept regardless
+  minimum_attack_similarity: 65   # 0-100 threshold (used when check_similarity=true)
+  max_zip_size_mb: 100
+  sandbox_backend: "virustotal"   # "virustotal" | "cape"
+  cape_sandbox_name: "win10"
+  behavior_sample_rate: 1.0       # fraction of attack files to behaviorally check (0.0-1.0)
+  cache_persistence_duration: 300 # seconds of inactivity before clearing the sample cache
+  cache_max_size_gb: 10           # maximum size of local sample cache before pruning
+
+# MinIO object storage (credentials come from environment variables)
+storage:
+  bucket_name: "mlsec-submissions"
+
+# Platform-wide application settings
 application:
-  join_code: 'ABC'
+  join_code: 'ABC'                  # required code users must enter at registration; omit or leave blank to disable
   defense_submission_cooldown: 30   # seconds between defense submissions per user; 0 = no cooldown
   attack_submission_cooldown: 30    # seconds between attack submissions per user; 0 = no cooldown
-  email_mfa_enabled: true
+
+# Email and MFA settings (SMTP credentials live in .env)
+email:
+  mfa_enabled: false                # require email verification on every login
+  delivery: log                     # "log" (print code to server logs) or "smtp" (send real email)
+  code_ttl_minutes: 10              # how long a login code remains valid
+  max_attempts: 5                   # failed attempts before the code is invalidated
+  base_url: mlsec2.com              # platform URL included in the email body
+  from_address: "MLSEC Platform <mlsec2.noreply@gmail.com>"  # email From header
+  subject: "Your MLSEC verification code"                    # email Subject header
+  smtp_host: smtp.gmail.com         # SMTP server hostname
+  smtp_port: 587                    # SMTP server port
+  smtp_use_tls: true                # use STARTTLS (recommended for port 587)
+  smtp_use_ssl: false               # use implicit SSL (for port 465)

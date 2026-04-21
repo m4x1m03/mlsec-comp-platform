@@ -379,7 +379,7 @@ def test_defense_job_container_not_ready(db_session, fake_redis, test_helpers, m
     # Patch the config singleton so the readiness poll times out quickly
     from worker import config as worker_config_module
     monkeypatch.setattr(
-        worker_config_module.get_config().worker.defense_job, "container_timeout", 2
+        worker_config_module.get_config().defense.container, "container_timeout", 2
     )
 
     # Run defense job (container failure is per-defense; the batch job still completes)
@@ -776,7 +776,7 @@ def test_defense_job_removes_docker_hub_images(db_session, fake_redis, test_help
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
     patched_config = worker.tasks.config.model_copy(deep=True)
-    patched_config.worker.source.cleanup_pulled_images = True
+    patched_config.defense.build.cleanup_pulled_images = True
     monkeypatch.setattr(worker.tasks, "config", patched_config)
 
     # Create Docker Hub defense
@@ -851,7 +851,7 @@ def test_defense_job_keeps_docker_hub_images_when_disabled(db_session, fake_redi
     monkeypatch.setattr(WorkerRegistry, "__init__", fake_init)
 
     patched_config = worker.tasks.config.model_copy(deep=True)
-    patched_config.worker.source.cleanup_pulled_images = False
+    patched_config.defense.build.cleanup_pulled_images = False
     monkeypatch.setattr(worker.tasks, "config", patched_config)
 
     # Create Docker Hub defense
@@ -1033,17 +1033,17 @@ def test_defense_job_respects_cleanup_config(db_session, fake_redis, test_helper
     attack_id = test_helpers.create_attack()
 
     # Modify config to disable cleanup and monkeypatch it
-    config_dict['worker']['source'] = config_dict.get('source', {})
-    config_dict['worker']['source']['cleanup_built_images'] = False
+    config_dict['defense']['build'] = config_dict.get('defense', {}).get('build', {})
+    config_dict['defense']['build']['cleanup_built_images'] = False
 
     # Monkeypatch the config object to return our modified config_dict
     mock_config = Mock()
     mock_config.model_dump.return_value = config_dict
-    mock_config.worker.defense_job.mem_limit = config_dict['worker']['defense_job']['mem_limit']
-    mock_config.worker.defense_job.nano_cpus = config_dict['worker']['defense_job']['nano_cpus']
-    mock_config.worker.defense_job.pids_limit = config_dict['worker']['defense_job']['pids_limit']
-    mock_config.worker.defense_job.container_timeout = config_dict[
-        'worker']['defense_job']['container_timeout']
+    mock_config.defense.container.mem_limit = config_dict['defense']['container']['mem_limit']
+    mock_config.defense.container.nano_cpus = config_dict['defense']['container']['nano_cpus']
+    mock_config.defense.container.pids_limit = config_dict['defense']['container']['pids_limit']
+    mock_config.defense.container.container_timeout = config_dict[
+        'defense']['container']['container_timeout']
     monkeypatch.setattr("worker.tasks.config", mock_config)
 
     # Mock Docker

@@ -24,7 +24,6 @@ from core.admin import (
 from core.audit import log_audit_event
 from core.auth import AuthenticatedUser
 from core.database import get_db
-from core.settings import get_settings
 from core.celery_app import get_celery
 from core.storage import upload_attack_template, upload_heurval_sample, upload_heurval_set_zip
 from core.submission_control import get_submission_control, set_close_at, set_manual_closed
@@ -38,12 +37,10 @@ from schemas.admin import (
     AdminEvaluationLogsResponse,
     AdminJobLogRecord,
     AdminJobLogsResponse,
-    AdminOverviewResponse,
     AdminRevokeSessionsResponse,
     AdminSetAdminRequest,
     AdminSubmissionControlResponse,
     AdminSubmissionScheduleRequest,
-    AdminSystemCounts,
     AdminUserRecord,
     AdminUserActionResponse,
     AdminUsersResponse,
@@ -102,44 +99,6 @@ def _log_admin_action_failure(
         success=False,
         message=message,
         metadata=payload or None,
-    )
-
-
-@router.get("/overview", response_model=AdminOverviewResponse)
-def get_overview(
-    _: AuthenticatedUser = Depends(require_admin_user),
-    db: Session = Depends(get_db),
-) -> AdminOverviewResponse:
-    """Return summary counts for the admin dashboard."""
-    counts_row = (
-        db.execute(
-            text(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM users) AS users_total,
-                    (SELECT COUNT(*) FROM users WHERE disabled_at IS NULL) AS users_active,
-                    (
-                        SELECT COUNT(*)
-                        FROM user_sessions
-                        WHERE revoked_at IS NULL
-                          AND expires_at > NOW()
-                    ) AS sessions_active,
-                    (SELECT COUNT(*) FROM submissions WHERE deleted_at IS NULL) AS submissions_total,
-                    (SELECT COUNT(*) FROM evaluation_runs) AS evaluation_runs_total,
-                    (SELECT COUNT(*) FROM jobs WHERE status = 'queued') AS jobs_queued,
-                    (SELECT COUNT(*) FROM jobs WHERE status = 'running') AS jobs_running,
-                    (SELECT COUNT(*) FROM jobs WHERE status = 'failed') AS jobs_failed
-                """
-            )
-        )
-        .mappings()
-        .one()
-    )
-
-    return AdminOverviewResponse(
-        generated_at=datetime.now(timezone.utc),
-        environment=get_settings().env,
-        counts=AdminSystemCounts(**counts_row),
     )
 
 
@@ -1305,7 +1264,7 @@ def get_template(
     seeded = db.execute(
         text("""
             SELECT COUNT(*) FROM template_file_reports
-            WHERE template_id = :tid AND behavioral_signals IS NOT NULL
+            WHERE template_id = :tid AND raw_report IS NOT NULL
         """),
         {"tid": template_id},
     ).scalar() or 0

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from worker.config import EvaluationConfig, HeuristicValidationConfig
+from worker.config import EvaluationConfig, ValidationConfig
 from worker.defense.evaluate import ContainerRestartError, EvalOutcome
 from worker.defense.validation import validate_heuristic
 
@@ -25,17 +25,17 @@ def _make_eval_cfg() -> EvaluationConfig:
     )
 
 
-def _make_heurval_cfg(**overrides) -> HeuristicValidationConfig:
+def _make_heurval_cfg(**overrides) -> ValidationConfig:
     defaults = dict(
-        enable_heuristic_validation=True,
-        heurval_malware_tpr_minimum=0.0,
-        heurval_malware_fpr_minimum=0.0,
-        heurval_goodware_tpr_minimum=0.0,
-        heurval_goodware_fpr_minimum=0.0,
-        reject_heurval_failures=False,
+        enabled=True,
+        malware_tpr_minimum=0.0,
+        malware_fpr_minimum=0.0,
+        goodware_tpr_minimum=0.0,
+        goodware_fpr_minimum=0.0,
+        reject_failures=False,
     )
     defaults.update(overrides)
-    return HeuristicValidationConfig(**defaults)
+    return ValidationConfig(**defaults)
 
 
 def _make_sample(is_malware: bool, idx: int = 0) -> dict:
@@ -205,8 +205,8 @@ def test_reject_heurval_failures_true_low_tpr_raises():
     samples = [_make_sample(is_malware=True, idx=0)]
     eval_cfg = _make_eval_cfg()
     heurval_cfg = _make_heurval_cfg(
-        reject_heurval_failures=True,
-        heurval_malware_tpr_minimum=0.8,
+        reject_failures=True,
+        malware_tpr_minimum=0.8,
     )
     docker_client = MagicMock()
 
@@ -239,8 +239,8 @@ def test_reject_heurval_failures_false_low_tpr_accepted():
     samples = [_make_sample(is_malware=True, idx=0)]
     eval_cfg = _make_eval_cfg()
     heurval_cfg = _make_heurval_cfg(
-        reject_heurval_failures=False,
-        heurval_malware_tpr_minimum=0.9,
+        reject_failures=False,
+        malware_tpr_minimum=0.9,
     )
     docker_client = MagicMock()
 

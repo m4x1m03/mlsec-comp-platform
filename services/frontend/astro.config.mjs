@@ -8,6 +8,9 @@ const apiTarget = process.env.API_INTERNAL_URL || 'http://127.0.0.1:8000';
 
 // https://astro.build/config
 export default defineConfig({
+  devToolbar: {
+    enabled: false
+  },
   output: 'server',
   integrations: [react(), tailwind()],
   vite: {
