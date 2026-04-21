@@ -878,7 +878,8 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                         sandbox = get_sandbox_backend(attack_cfg)
                         try:
                             avg_similarity = validate_heuristic(
-                                submission_files, sandbox, template_reports
+                                submission_files, sandbox, template_reports,
+                                sample_rate=attack_cfg.behavior_sample_rate,
                             )
                         except SandboxUnavailableError as e:
                             error_msg = str(e)

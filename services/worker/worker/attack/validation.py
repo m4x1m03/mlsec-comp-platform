@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import random
 import zipfile
 
 from pathlib import Path, PurePosixPath
@@ -405,6 +406,7 @@ def validate_heuristic(
     submission_files: list[tuple[str, str]],
     sandbox: SandboxBackend,
     template_reports: dict[str, dict],
+    sample_rate: float = 1.0,
 ) -> float:
     """Score behavioral similarity between submission files and template counterparts.
 
@@ -415,6 +417,8 @@ def validate_heuristic(
         template_reports: Pre-fetched dict mapping ``inner_filename`` →
             ``{"behash": str|None, "raw_report": dict|None, "source": str}``,
             typically from :func:`~worker.db.get_template_reports`.
+        sample_rate: Fraction of files to check (0.0, 1.0]. At least one file
+            is always checked. Defaults to 1.0 (all files).
 
     Returns:
         Average similarity score (0.0-100.0) across all matched files.
@@ -426,6 +430,16 @@ def validate_heuristic(
     if not submission_files:
         logger.warning("validate_heuristic called with no submission files.")
         return 0.0
+
+    if sample_rate < 1.0:
+        total = len(submission_files)
+        k = max(1, round(total * sample_rate))
+        submission_files = random.sample(submission_files, k)
+        logger.info(
+            "Sampling %d of %d submission file(s) for heuristic validation "
+            "(sample_rate=%.2f).",
+            k, total, sample_rate,
+        )
 
     scores: list[float] = []
 
@@ -491,6 +505,7 @@ def validate_attack(
     submission_files: list[tuple[str, str]],
     sandbox: SandboxBackend,
     template_reports: dict[str, dict],
+    sample_rate: float = 1.0,
 ) -> float:
     """Run functional validation then heuristic validation.
 
@@ -508,6 +523,8 @@ def validate_attack(
         sandbox: Configured sandbox backend for behavioral analysis.
         template_reports: Pre-fetched template behavioral reports keyed by
             inner filename.
+        sample_rate: Fraction of files to check (0.0, 1.0]. Forwarded to
+            :func:`validate_heuristic`. Defaults to 1.0 (all files).
 
     Returns:
         Average behavioral similarity score (0.0-100.0).
@@ -518,4 +535,4 @@ def validate_attack(
             validation.
     """
     validate_functional(zip_path, expected_files, max_uncompressed_mb)
-    return validate_heuristic(submission_files, sandbox, template_reports)
+    return validate_heuristic(submission_files, sandbox, template_reports, sample_rate)

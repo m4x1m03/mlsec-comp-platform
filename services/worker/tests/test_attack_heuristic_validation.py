@@ -311,3 +311,103 @@ def test_heuristic_validation_propagates_sandbox_error(template_reports):
     mock_sandbox.analyze_file.side_effect = SandboxUnavailableError("timeout")
     with pytest.raises(SandboxUnavailableError, match="timeout"):
         validate_heuristic([("a.exe", "/tmp/a.exe")], mock_sandbox, template_reports)
+
+
+# ---------------------------------------------------------------------------
+# validate_heuristic - sample_rate
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def four_file_reports():
+    """Template reports for four files used in sampling tests."""
+    return {
+        f"f{i}.exe": {
+            "behash": f"h{i}",
+            "raw_report": {"tags": [f"T{i}"]},
+            "sandbox_report_ref": f"r{i}",
+            "source": "virustotal",
+        }
+        for i in range(1, 5)
+    }
+
+
+def test_sample_rate_default_processes_all_files(four_file_reports):
+    """Default sample_rate=1.0 submits every file to the sandbox."""
+    mock_sandbox = MagicMock()
+    mock_sandbox.analyze_file.side_effect = [
+        _make_report(behash=f"h{i}", raw_report={"tags": [f"T{i}"]}, source="virustotal")
+        for i in range(1, 5)
+    ]
+    files = [(f"f{i}.exe", f"/tmp/f{i}.exe") for i in range(1, 5)]
+    validate_heuristic(files, mock_sandbox, four_file_reports)
+    assert mock_sandbox.analyze_file.call_count == 4
+
+
+def test_sample_rate_1_processes_all_files(four_file_reports):
+    """Explicit sample_rate=1.0 submits every file to the sandbox."""
+    mock_sandbox = MagicMock()
+    mock_sandbox.analyze_file.side_effect = [
+        _make_report(behash=f"h{i}", raw_report={"tags": [f"T{i}"]}, source="virustotal")
+        for i in range(1, 5)
+    ]
+    files = [(f"f{i}.exe", f"/tmp/f{i}.exe") for i in range(1, 5)]
+    validate_heuristic(files, mock_sandbox, four_file_reports, sample_rate=1.0)
+    assert mock_sandbox.analyze_file.call_count == 4
+
+
+def test_sample_rate_selects_correct_count(four_file_reports):
+    """sample_rate=0.5 with 4 files submits exactly 2 to the sandbox."""
+    mock_sandbox = MagicMock()
+    mock_sandbox.analyze_file.return_value = _make_report(
+        behash="h1", raw_report={"tags": ["T1"]}, source="virustotal"
+    )
+    files = [(f"f{i}.exe", f"/tmp/f{i}.exe") for i in range(1, 5)]
+    selected = [("f1.exe", "/tmp/f1.exe"), ("f3.exe", "/tmp/f3.exe")]
+    with patch("worker.attack.validation.random.sample", return_value=selected):
+        validate_heuristic(files, mock_sandbox, four_file_reports, sample_rate=0.5)
+    assert mock_sandbox.analyze_file.call_count == 2
+
+
+def test_sample_rate_minimum_one_file():
+    """sample_rate=0.1 with 3 files still submits at least 1 file."""
+    reports = {
+        f"f{i}.exe": {"behash": f"h{i}", "raw_report": {"tags": [f"T{i}"]},
+                      "sandbox_report_ref": f"r{i}", "source": "virustotal"}
+        for i in range(1, 4)
+    }
+    mock_sandbox = MagicMock()
+    mock_sandbox.analyze_file.return_value = _make_report(
+        behash="h1", raw_report={"tags": ["T1"]}, source="virustotal"
+    )
+    files = [(f"f{i}.exe", f"/tmp/f{i}.exe") for i in range(1, 4)]
+    selected = [("f2.exe", "/tmp/f2.exe")]
+    with patch("worker.attack.validation.random.sample", return_value=selected) as mock_sample:
+        validate_heuristic(files, mock_sandbox, reports, sample_rate=0.1)
+        # max(1, round(3 * 0.1)) = max(1, 0) = 1
+        mock_sample.assert_called_once_with(files, 1)
+    assert mock_sandbox.analyze_file.call_count == 1
+
+
+def test_sample_rate_single_file_always_checked(template_reports):
+    """sample_rate=0.5 with only 1 file still checks that file."""
+    mock_sandbox = MagicMock()
+    mock_sandbox.analyze_file.return_value = _make_report(
+        behash="h1", raw_report={"tags": ["X"]}, source="virustotal"
+    )
+    validate_heuristic([("a.exe", "/tmp/a.exe")], mock_sandbox, template_reports, sample_rate=0.5)
+    assert mock_sandbox.analyze_file.call_count == 1
+
+
+def test_sample_rate_logs_sampling_info(four_file_reports, caplog):
+    """sample_rate < 1.0 emits a log message stating how many files were sampled."""
+    import logging
+    mock_sandbox = MagicMock()
+    mock_sandbox.analyze_file.return_value = _make_report(
+        behash="h1", raw_report={"tags": ["T1"]}, source="virustotal"
+    )
+    files = [(f"f{i}.exe", f"/tmp/f{i}.exe") for i in range(1, 5)]
+    selected = [("f2.exe", "/tmp/f2.exe"), ("f4.exe", "/tmp/f4.exe")]
+    with patch("worker.attack.validation.random.sample", return_value=selected):
+        with caplog.at_level(logging.INFO, logger="worker.attack.validation"):
+            validate_heuristic(files, mock_sandbox, four_file_reports, sample_rate=0.5)
+    assert any("Sampling 2 of 4" in r.message for r in caplog.records)

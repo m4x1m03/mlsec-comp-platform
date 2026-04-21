@@ -99,6 +99,7 @@ class AttackConfig(BaseModel):
         default_factory=lambda: os.getenv("CAPE_TOKEN", "")
     )
     cape_sandbox_name: str = Field(default="win10")
+    behavior_sample_rate: float = Field(default=1.0)
 
 
 class StorageConfig(BaseModel):
