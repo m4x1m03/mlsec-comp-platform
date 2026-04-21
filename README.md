@@ -90,7 +90,9 @@ Nginx terminates TLS on ports 80/443 and routes requests to the API or frontend.
 
 For a detailed description of how each component works, see [docs/architecture.md](docs/architecture.md).
 
-## Attribution
+## Credits and Acknowledgements
+
+### Developers
 
 MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texas A&M University. This project was sponsored by Dr. Marcus Botacin, and created by:
 
@@ -98,3 +100,9 @@ MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texa
 - Graham Dungan
 - Karl Farrar
 - Maxim Mouget
+
+### Third-Party Resources Used
+
+- Claude Sonnet 4.6 for generating parts of documentation and tests
+
+## License
