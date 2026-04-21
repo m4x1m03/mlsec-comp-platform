@@ -75,6 +75,8 @@ The platform uses Nginx to terminate TLS on port 443. To deploy with SSL on your
    ```bash
    make prod-up
    ```
+   > To test the UI before SSL is active, you can temporarily comment out the "Redirect" block and uncomment the "Temporary HTTP" block in `nginx.prod.conf`. This will allow access via `http://yourdomain.com` without the trying to force HTTPS.
+
 2. **Obtain Certificates**: Use Certbot to obtain certificates from Let's Encrypt (temporarily stop the platform or use a different machine to free port 80):
    ```bash
    docker run -it --rm -p 80:80 -v /etc/letsencrypt:/etc/letsencrypt \
