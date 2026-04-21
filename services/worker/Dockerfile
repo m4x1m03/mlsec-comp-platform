@@ -16,10 +16,11 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY . /app
 
-# Note: Running as root for Docker socket access in development
-# TODO: In production, properly configure Docker group permissions
-# RUN useradd --create-home --uid 10001 appuser
-# USER appuser
+# Create a non-root user
+RUN useradd --create-home --uid 10001 appuser
+RUN mkdir -p /app/cache && chown -R appuser:appuser /app
+
+USER appuser
 
 CMD ["sh", "-c", "celery -A worker.celery_app:celery_app worker --loglevel=INFO --concurrency=${CELERY_CONCURRENCY:-1}"]
 
