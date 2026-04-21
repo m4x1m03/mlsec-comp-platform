@@ -62,7 +62,10 @@ def send_login_code_email(*, to_email: str, code: str, expires_at: datetime) -> 
             if email_cfg.smtp_use_tls and not email_cfg.smtp_use_ssl:
                 smtp.starttls()
             if settings.smtp_user and settings.smtp_password:
+                logger.info("Attempting SMTP login for user: %s", settings.smtp_user)
                 smtp.login(settings.smtp_user, settings.smtp_password)
+            else:
+                logger.warning("Skipping SMTP login: SMTP_USER or SMTP_PASSWORD is not set")
             smtp.send_message(msg)
     except Exception:
         logger.exception("Failed to send login code email")
