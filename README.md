@@ -90,6 +90,13 @@ Nginx terminates TLS on ports 80/443 and routes requests to the API or frontend.
 
 For a detailed description of how each component works, see [docs/architecture.md](docs/architecture.md).
 
+## Future Work
+The following list contains possible improvements that could be made to MLSEC 2.0.
+- **MLSEC 2.0 Logo:** A unique logo to represent the MLSEC 2.0 platform.
+- **Defense Plagarism Checking:** Devise a system for checking plagarized defense submissions.
+- **Behavior Algorithm Configuration:** Create configuration for tweaking the settings of the attack behavior similarity algorithm.
+- **Gateway Logging:** Security audit information and logging for the Gateway network management Docker.
+
 ## Credits and Acknowledgements
 
 ### Developers
