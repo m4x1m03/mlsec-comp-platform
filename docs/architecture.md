@@ -53,7 +53,7 @@ Workers are Celery processes (Python 3.11) that consume jobs from RabbitMQ. They
 
 Two settings control parallelism:
 
-- `WORKER_CONCURRENCY` in `.env` sets the number of Celery worker processes per container (use 1 for development).
+- `WORKER_CONCURRENCY` in `.env` sets the number of Celery worker processes per container.
 - `worker.num_workers` in `config.yaml` sets the number of worker containers Compose launches.
 
 Within a single job, asyncio is used for concurrent image builds, container startups, and per-sample evaluation across multiple defenses in a batch. Redis coordinates shared state: the worker registry (`workers:active`), per-worker attack queues (`worker:{id}:attacks`), gateway port leases, and atomic duplicate-evaluation prevention via `SETNX`.
