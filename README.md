@@ -8,16 +8,64 @@ An open-source platform for hosting Machine Learning Security Evasion Competitio
 2. Review `config.yaml` and adjust settings to match your deployment (submission cooldowns, join code, email delivery, worker count, sandbox backend, etc.).
 3. If using a local sandbox backend, see [docs/sandbox.md](docs/sandbox.md) (WIP).
 4. Run `make prod-up` to launch all services in production mode.
-5. Register an account through the UI, then promote it to admin via the database:
+
+For local development, use `make up` instead.
+
+## Starting a Competition
+
+### 1. Create an admin account
+
+Register a normal account through the UI, then promote it to admin via the database:
 
 ```bash
 docker exec -it postgres-db psql -U mlsec2 -d mlsec \
   -c "UPDATE users SET is_admin = TRUE WHERE email = 'your@email.com';"
 ```
 
-Replace `mlsec2` with the value of `POSTGRES_USER` from your `.env` if you changed it. See [Admin](docs/architecture.md#4-admin) in the architecture docs for what admin accounts can do.
+Replace `mlsec2` with the value of `POSTGRES_USER` from your `.env` if you changed it. See [Admin](docs/architecture.md#4-admin) in the architecture docs for a full description of admin capabilities.
 
-For local development, use `make up` instead.
+### 2. Verify your configuration
+
+Before opening the competition, confirm that `config.yaml` and `.env` reflect the intended settings: submission cooldowns, resource limits for defense containers, sandbox backend, and whether a join code or email MFA is required for registration.
+
+### 3. Submit a defense validation set
+
+The defense validation set is used to pre-screen competitor defenses before they enter the leaderboard. It is a standard (non-password-protected) ZIP file containing two folders:
+
+```
+validation.zip
+├── malware/
+│   ├── sample_a.exe
+│   └── sample_b.exe
+└── goodware/
+    ├── clean_a.exe
+    └── clean_b.exe
+```
+
+Each folder holds representative binary samples of the respective class. When heuristic validation runs, these files are sent to the defense container and its true positive and false positive rates are measured against the configurable thresholds in `config.yaml` under `defense.validation`.
+
+Upload the validation set from the **Competition** tab of the admin panel.
+
+### 4. Submit an attack template
+
+The attack template is a non-password protected ZIP file containing the sample binaries that competitors are expected to make evasive. It defines the exact file set that every submitted attack must match structurally.
+
+```
+template.zip
+├── sample_a.exe
+├── sample_b.exe
+├── sample_c.exe
+└── sample_d.exe
+```
+
+Files in the template can optionally be seeded for behavioral analysis. When seeded, the platform submits each file to the configured sandbox (VirusTotal API key or CAPE) and records its behavioral signals. These signals are later used to score how similar a competitor's attack is to the original template. Seeding requires an active sandbox; see `config.yaml` under `attack` and `docs/sandbox.md` for configuration details.
+
+Upload the attack template from the **Competition** tab of the admin panel. Seeding begins automatically after upload if a sandbox is configured.
+
+### 5. Open the competition
+
+Once the defense validation set and attack template are uploaded and seeding is complete, open the competition from the **Competition** tab. You can open it immediately or schedule an automatic close time.
+
 
 ## System Overview
 
@@ -44,7 +92,7 @@ For a detailed description of how each component works, see [docs/architecture.m
 
 ## Attribution
 
-Created as a Spring 2026 Computer Science Engineering Capstone project at Texas A&M University by:
+MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texas A&M University. This project was sponsored by Dr. Marcus Botacin, and created by:
 
 - Aaron Thompson
 - Graham Dungan
