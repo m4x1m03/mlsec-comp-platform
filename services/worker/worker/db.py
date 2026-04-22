@@ -853,9 +853,6 @@ def is_template_fully_seeded(template_id: str) -> bool:
     are considered attempted and do not block this check. Those files are skipped
     during heuristic scoring with a warning.
 
-    # TODO: Add an admin endpoint to trigger a re-seed for a specific template,
-    # so operators can retry files that returned no behavioral signals without
-    # having to re-upload the template ZIP.
     """
     from sqlalchemy import text
     engine = get_engine()

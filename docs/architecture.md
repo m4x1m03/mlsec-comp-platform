@@ -113,15 +113,15 @@ The sandbox is responsible for analyzing attack files and producing behavioral r
 
 ### a. Behavioral Algorithm
 
-WIP
+Behavioral similarity between a submitted attack file and its corresponding template file is scored 0-100 using a weighted multi-section comparison. Behavioral signals are extracted and normalized into nine categories: threat (signatures, MITRE techniques, IDS alerts), network (IP traffic, HTTP conversations, TLS), registry (keys opened/set/deleted), file (files opened/written/deleted), process (commands executed, processes created), crypto algorithms, system API calls, modules loaded, and synchronization primitives (mutexes, services). Registry hives and Windows paths are normalized to canonical forms before comparison. Five sections (registry, file, process, modules, sync) use overlap coefficient; the remaining four use Jaccard similarity. Each section carries a fixed weight (threat 0.25, network 0.18, registry 0.14, file 0.12, process 0.10, crypto 0.08, system_api 0.06, modules 0.04, sync 0.03) and only sections with data in either report contribute to the final weighted average. If both reports share the same non-null `behash` from VirusTotal, a score of 100 is returned immediately without running the full comparison.
 
 ### b. VirusTotal
 
-WIP
+The VirusTotal backend submits files to the VirusTotal API v3 and retrieves behavioral sandbox reports. The file is uploaded via `POST /api/v3/files` and the resulting analysis ID is polled (`GET /api/v3/analyses/{id}`) at configurable intervals until the status transitions to `completed`. The SHA-256 is then used to fetch behavioral attributes from `GET /api/v3/files/{sha256}/behaviours`. The first report containing at least one populated signal field is selected and returned as a `SandboxReport`. Configure with `sandbox_backend: virustotal` in `config.yaml`; the API key is read from the `VIRUSTOTAL_API_KEY` environment variable in `.env`.
 
 ### c. CAPE
 
-WIP
+The CAPE backend submits files to a CAPEv2 instance and converts its JSON behavior report to the same attribute schema used by the behavioral similarity comparator. The file is submitted via `POST /apiv2/tasks/create/file/` with the configured `cape_sandbox_name` as the machine tag. The task is polled until status reaches `reported`, then the full report is fetched and mapped: file operations, registry keys, process commands, loaded modules (extracted from `LoadLibraryA/W` calls), system API calls, mutexes, and network traffic are each converted to the corresponding VirusTotal field names. Configure with `sandbox_backend: cape` and `cape_sandbox_name` in `config.yaml`; the instance URL and optional authentication token are read from `CAPE_URL` and `CAPE_TOKEN` in `.env`.
 
 ---
 

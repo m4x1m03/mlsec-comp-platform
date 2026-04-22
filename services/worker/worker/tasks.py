@@ -740,7 +740,6 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
             bucket_name = get_bucket_name()
 
             # Download ZIP to temporary file
-            # TODO: Store as individual files instead of zips, maybe?
             temp_zip = tempfile.NamedTemporaryFile(
                 suffix='.zip',
                 prefix=f'attack_{attack_submission_id}_',
