@@ -117,6 +117,8 @@ The following list contains possible improvements that could be made to MLSEC 2.
 - **Defense Plagiarism Checking:** Devise a system for checking plagiarized defense submissions.
 - **Behavior Algorithm Configuration:** Create configuration for tweaking the settings of the attack behavior similarity algorithm.
 - **Gateway Logging:** Security audit information and logging for the Gateway network management Docker.
+- **Fail2Ban**: Protections against DoS, spam.
+- **Automatic Load Balancing**: Automatic load balancing for high submission loads.
 
 ## Credits and Acknowledgements
 
@@ -132,5 +134,3 @@ MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texa
 ### Third-Party Resources Used
 
 - Claude Sonnet 4.6 for generating parts of documentation and tests
-
-## License
