@@ -31,6 +31,7 @@ from worker.db import (
     get_template_reports_for_template,
     is_template_fully_seeded,
     mark_attack_failed,
+    find_duplicate_attack_files,
 )
 from worker.redis_client import WorkerRegistry
 from worker.defense.validation import validate_functional, validate_heuristic as validate_defense_heuristic
@@ -859,6 +860,26 @@ def run_attack_job(self, *, job_id: str, attack_submission_id: str) -> None:
                         attack_submission_id, extracted_files)
                     logger.info(
                         f"Inserted {inserted_count} attack files into database")
+
+                # Plagiarism check
+                if attack_cfg.deny_duplicate_attacks and extracted_files:
+                    duplicates = find_duplicate_attack_files(attack_submission_id)
+                    if duplicates:
+                        dup_filename = duplicates[0]["filename"]
+                        error_msg = (
+                            f"Submission rejected: file '{dup_filename}' has been "
+                            f"detected in another competitor's submission."
+                        )
+                        logger.warning(
+                            "Attack %s rejected for duplicate sample: %s",
+                            attack_submission_id,
+                            dup_filename,
+                        )
+                        mark_attack_failed(attack_submission_id, error_msg)
+                        set_job_status(
+                            job_id=job_id, status="failed", error=error_msg
+                        )
+                        return
 
                 # Heuristic validation (behavioral similarity against template)
                 if attack_cfg.check_similarity and not attack_cfg.skip_seeding:

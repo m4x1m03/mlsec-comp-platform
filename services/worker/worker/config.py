@@ -100,6 +100,7 @@ class AttackConfig(BaseModel):
     )
     cape_sandbox_name: str = Field(default="win10")
     behavior_sample_rate: float = Field(default=1.0)
+    deny_duplicate_attacks: bool = False
 
 
 class StorageConfig(BaseModel):

@@ -232,6 +232,7 @@
   const editBtn = document.getElementById("login-code-edit") as HTMLButtonElement;
 
   let pendingEmail = "";
+  let isRequestingCode = false;
 
   function _extractDetail(detail: unknown): string {
     if (typeof detail === 'string') return detail;
@@ -261,6 +262,8 @@
   }
 
   async function requestLoginCode(email: string, btn?: HTMLButtonElement) {
+    if (isRequestingCode) return;
+    isRequestingCode = true;
     loginError.classList.add("hidden");
     loginCodeError.classList.add("hidden");
 
@@ -306,6 +309,7 @@
       loginError.classList.remove("hidden");
       showEmailStep();
     } finally {
+      isRequestingCode = false;
       if (btn) { btn.disabled = false; btn.textContent = originalText; }
     }
   }

@@ -13,6 +13,7 @@ interface Submission {
   heurval_tpr: number | null;
   heurval_fpr: number | null;
   detail_loaded?: boolean;
+  detail_error?: boolean;
   source_type?: string | null;
   sha256?: string | null;
   docker_image?: string | null;
@@ -126,7 +127,36 @@ function HeurvalStats({ tpr, fpr }: { tpr: number | null; fpr: number | null }) 
   );
 }
 
-function ExpandedDetail({ sub }: { sub: Submission }) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(text).then(() => setCopied(true)).catch(() => {}); }}
+      aria-label={copied ? 'Copied!' : 'Copy hash to clipboard'}
+      className="flex-shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
+    >
+      {copied ? (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-green-500">
+          <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+        </svg>
+      ) : (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+          <path d="M7 3.5A1.5 1.5 0 018.5 2h3.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0117 6.622V12.5a1.5 1.5 0 01-1.5 1.5h-1v-3.379a3 3 0 00-.879-2.121L10.5 5.379A3 3 0 008.379 4.5H7v-1z" />
+          <path d="M4.5 6A1.5 1.5 0 003 7.5v9A1.5 1.5 0 004.5 18h7a1.5 1.5 0 001.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06L9.44 6.439A1.5 1.5 0 008.378 6H4.5z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function ExpandedDetail({ sub, onRetry }: { sub: Submission; onRetry: () => void }) {
   const { status, functional_error, submission_type, heurval_tpr, heurval_fpr } = sub;
   const showHeurval = submission_type === 'defense' && (heurval_tpr !== null || heurval_fpr !== null);
 
@@ -165,8 +195,9 @@ function ExpandedDetail({ sub }: { sub: Submission }) {
           {sub.sha256 && (
             <>
               <dt className="text-gray-400 whitespace-nowrap">File Hash</dt>
-              <dd className="font-mono text-gray-600 truncate" title={sub.sha256}>
-                {sub.sha256.slice(0, 16)}...
+              <dd className="font-mono text-gray-600 flex items-center gap-1 min-w-0" title={sub.sha256}>
+                <span className="truncate">{sub.sha256.slice(0, 16)}...</span>
+                <CopyButton text={sub.sha256} />
               </dd>
             </>
           )}
@@ -183,6 +214,13 @@ function ExpandedDetail({ sub }: { sub: Submission }) {
             </>
           )}
         </dl>
+      ) : sub.detail_error ? (
+        <p className="mt-1 text-xs text-red-400">
+          Could not load details.{' '}
+          <button onClick={onRetry} className="underline hover:text-red-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-400 rounded">
+            Retry
+          </button>
+        </p>
       ) : (
         <p className="mt-1 text-xs text-gray-400">Loading details...</p>
       )}
@@ -203,7 +241,17 @@ export default function SubmissionHistory({ type, title }: Props) {
         return;
       }
       if (!res.ok) return;
-      setSubmissions(await res.json());
+      const fresh: Submission[] = await res.json();
+      setSubmissions(prev => {
+        const prevMap = new Map(prev.map(s => [s.submission_id, s]));
+        return fresh.map(s => {
+          const ex = prevMap.get(s.submission_id);
+          if (ex?.detail_loaded) {
+            return { ...s, detail_loaded: true, source_type: ex.source_type, sha256: ex.sha256, docker_image: ex.docker_image, git_repo: ex.git_repo };
+          }
+          return s;
+        });
+      });
     } catch {
       // user may not be logged in or network unavailable
     } finally {
@@ -240,24 +288,36 @@ export default function SubmissionHistory({ type, title }: Props) {
     );
   };
 
-  const toggleExpanded = async (id: string) => {
+  const loadDetail = useCallback(async (id: string) => {
+    setSubmissions(prev => prev.map(s => s.submission_id === id ? { ...s, detail_error: false } : s));
+    try {
+      const res = await fetch(`/api/submissions/${id}/detail`);
+      if (!res.ok) {
+        setSubmissions(prev => prev.map(s => s.submission_id === id ? { ...s, detail_error: true } : s));
+        return;
+      }
+      const d = await res.json();
+      setSubmissions(prev => prev.map(s =>
+        s.submission_id === id
+          ? { ...s, detail_loaded: true, detail_error: false, source_type: d.source_type, sha256: d.sha256, docker_image: d.docker_image, git_repo: d.git_repo }
+          : s
+      ));
+    } catch {
+      setSubmissions(prev => prev.map(s => s.submission_id === id ? { ...s, detail_error: true } : s));
+    }
+  }, []);
+
+  const toggleExpanded = (id: string) => {
+    const isExpanding = !expanded.has(id);
     setExpanded(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+    if (!isExpanding) return;
     const sub = submissions.find(s => s.submission_id === id);
     if (!sub || sub.detail_loaded) return;
-    try {
-      const res = await fetch(`/api/submissions/${id}/detail`);
-      if (!res.ok) return;
-      const d = await res.json();
-      setSubmissions(prev => prev.map(s =>
-        s.submission_id === id
-          ? { ...s, detail_loaded: true, source_type: d.source_type, sha256: d.sha256, docker_image: d.docker_image, git_repo: d.git_repo }
-          : s
-      ));
-    } catch {}
+    loadDetail(id);
   };
 
   return (
@@ -319,7 +379,7 @@ export default function SubmissionHistory({ type, title }: Props) {
                 {expanded.has(sub.submission_id) && (
                   <div className="px-3 pb-2.5 border-t border-gray-100">
                     <div className="pt-2">
-                      <ExpandedDetail sub={sub} />
+                      <ExpandedDetail sub={sub} onRetry={() => loadDetail(sub.submission_id)} />
                     </div>
                   </div>
                 )}

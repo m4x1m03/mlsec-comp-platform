@@ -1055,3 +1055,34 @@ def insert_attack_files(attack_submission_id: str, files: list[dict]) -> int:
             )
 
     return len(files)
+
+
+def find_duplicate_attack_files(attack_submission_id: str) -> list[dict]:
+    """
+    Return files in this submission whose SHA-256 matches a file in any
+    validated submission belonging to a different user.
+
+    Only checks against submissions with status 'validated', 'evaluating',
+    or 'evaluated' to avoid false positives from failed or in-flight submissions.
+
+    Returns a list of dicts with keys: sha256, filename.
+    Returns an empty list if no duplicates are found.
+    """
+    from sqlalchemy import text
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("""
+                SELECT DISTINCT af_other.sha256, af_new.filename
+                FROM attack_files af_new
+                JOIN attack_files af_other ON af_new.sha256 = af_other.sha256
+                JOIN submissions s_new   ON af_new.attack_submission_id   = s_new.id
+                JOIN submissions s_other ON af_other.attack_submission_id = s_other.id
+                WHERE af_new.attack_submission_id = :submission_id
+                  AND s_other.user_id != s_new.user_id
+                  AND s_other.status IN ('validated', 'evaluating', 'evaluated')
+                LIMIT 1
+            """),
+            {"submission_id": attack_submission_id},
+        ).fetchall()
+    return [{"sha256": r[0], "filename": r[1]} for r in rows]

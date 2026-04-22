@@ -111,7 +111,16 @@ Nginx terminates TLS on ports 80/443 and routes requests to the API or frontend.
 
 For a detailed description of how each component works, see [docs/architecture.md](docs/architecture.md).
 
-## Attribution
+## Future Work
+The following list contains possible improvements that could be made to MLSEC 2.0.
+- **MLSEC 2.0 Logo:** A unique logo to represent the MLSEC 2.0 platform.
+- **Defense Plagarism Checking:** Devise a system for checking plagarized defense submissions.
+- **Behavior Algorithm Configuration:** Create configuration for tweaking the settings of the attack behavior similarity algorithm.
+- **Gateway Logging:** Security audit information and logging for the Gateway network management Docker.
+
+## Credits and Acknowledgements
+
+### Developers
 
 MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texas A&M University. This project was sponsored by Dr. Marcus Botacin, and created by:
 
@@ -119,3 +128,9 @@ MLSEC 2.0 is a Spring 2026 Computer Science Engineering Capstone project at Texa
 - Graham Dungan
 - Karl Farrar
 - Maxim Mouget
+
+### Third-Party Resources Used
+
+- Claude Sonnet 4.6 for generating parts of documentation and tests
+
+## License
