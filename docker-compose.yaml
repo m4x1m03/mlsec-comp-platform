@@ -1,5 +1,4 @@
 services:
-  # TODO: PostgreSQL
   postgres:
     image: postgres:18
     container_name: postgres-db
@@ -81,7 +80,6 @@ services:
     networks:
       - backend_net
 
-  # TODO: FastAPI
   api:
     build:
       context: ./services/api
@@ -208,7 +206,6 @@ services:
       - postgres
 
 networks:
-  # TODO: Secure communication network for evaluation end.
   backend_net:
     name: backend_net
     driver: bridge
@@ -216,7 +213,6 @@ networks:
     name: defense_net
     driver: bridge
 volumes:
-  # TODO: Establish volumes for postgres, minio, rabbitmq
   pgdata:
   pgdata_test:
   rabbitmqdata:

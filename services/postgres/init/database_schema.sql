@@ -1,7 +1,6 @@
 --------------------------------------------------
 -- USERS
 --------------------------------------------------
--- TODO: In the future this should not be hard coded but pulled from YAML somehow
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username TEXT UNIQUE NOT NULL, -- do we want to use TEXT instead of VARCHAR 

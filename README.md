@@ -6,7 +6,7 @@ An open-source platform for hosting Machine Learning Security Evasion Competitio
 
 1. Copy `.env-example` to `.env` and replace all placeholder values with real passwords and secrets.
 2. Review `config.yaml` and adjust settings to match your deployment (submission cooldowns, join code, email delivery, worker count, sandbox backend, etc.).
-3. If using a local sandbox backend, see [docs/sandbox.md](docs/sandbox.md) (WIP).
+3. If using a local sandbox backend, see [docs/sandbox.md](docs/sandbox.md).
 4. Run `make prod-up` to launch all services in production mode.
 
 For local development, use `make up` instead.
@@ -75,7 +75,7 @@ The platform uses Nginx to terminate TLS on port 443. To deploy with SSL on your
    ```bash
    make prod-up
    ```
-   > To test the UI before SSL is active, you can temporarily comment out the "Redirect" block and uncomment the "Temporary HTTP" block in `nginx.prod.conf`. This will allow access via `http://yourdomain.com` without the trying to force HTTPS.
+   > To test the UI before SSL is active, you can temporarily comment out the "Redirect" block and uncomment the "Temporary HTTP" block in `nginx.prod.conf`. This will allow access via `http://yourdomain.com` without trying to force HTTPS.
 
 2. **Obtain Certificates**: Use Certbot to obtain certificates from Let's Encrypt (temporarily stop the platform or use a different machine to free port 80):
    ```bash
@@ -114,7 +114,7 @@ For a detailed description of how each component works, see [docs/architecture.m
 ## Future Work
 The following list contains possible improvements that could be made to MLSEC 2.0.
 - **MLSEC 2.0 Logo:** A unique logo to represent the MLSEC 2.0 platform.
-- **Defense Plagarism Checking:** Devise a system for checking plagarized defense submissions.
+- **Defense Plagiarism Checking:** Devise a system for checking plagiarized defense submissions.
 - **Behavior Algorithm Configuration:** Create configuration for tweaking the settings of the attack behavior similarity algorithm.
 - **Gateway Logging:** Security audit information and logging for the Gateway network management Docker.
 

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-CAPE is strongly encouraged to be installed on a **bare metal Linux machine**, not inside a VM. Running CAPE inside a VM (e.g. VirtualBox or WSL) might cause the hyperviosr to fail as it requires direct access to CPU virtualization extensions. Dual-booting Ubuntu 24.04 alongside Windows is the recommended approach if your primary OS is Windows. If you are wanting to run it inside a VM, VMware Workstation Pro has been the most successful platform to do so.
+CAPE is strongly encouraged to be installed on a **bare metal Linux machine**, not inside a VM. Running CAPE inside a VM (e.g. VirtualBox or WSL) might cause the hypervisor to fail as it requires direct access to CPU virtualization extensions. Dual-booting Ubuntu 24.04 alongside Windows is the recommended approach if your primary OS is Windows. If you are wanting to run it inside a VM, VMware Workstation Pro has been the most successful platform to do so.
 
 ---
 
@@ -141,7 +141,7 @@ snapshot = snapshot1
 arch = x64
 ```
 
-After this, CAPE will automatically chose the first available VM to send samples to in the win10 group.
+After this, CAPE will automatically choose the first available VM to send samples to in the win10 group.
 
 ### 3. Configure cuckoo.conf
 
@@ -209,7 +209,7 @@ sudo systemctl enable systemd-networkd
 sudo systemctl start systemd-networkd
 ```
 
-Next, we need to create our own manual **netplan** configuration by editing the file `/etc/netplan/99-manual.yaml` and adding all of the netwrok interface of our system manually. An example is provided in the [CAPE documentation](https://capev2.readthedocs.io/en/latest/installation/host/routing.html#routing) with more detailed explanations.
+Next, we need to create our own manual **netplan** configuration by editing the file `/etc/netplan/99-manual.yaml` and adding all of the network interface of our system manually. An example is provided in the [CAPE documentation](https://capev2.readthedocs.io/en/latest/installation/host/routing.html#routing) with more detailed explanations.
 > **_NOTE:_** The routing table **NUMBER** specified in the netplan config file should be the SAME as the one specified in `/etc/iproute2/rt_tables`.
 
 After editing the **netplan** config, we can execute the changes with 
@@ -241,9 +241,9 @@ sudo ufw allow in on <int> to <ip> port 22 proto tcp
 sudo ufw allow in on <int> to <ip> port 445 proto tcp
 ```
 
-We then need to allow the analysis VMs to access the CAPE reuslt server on port 2042 by running the following command:
+We then need to allow the analysis VMs to access the CAPE result server on port 2042 by running the following command:
 ```bash
-sudo ufw allow in on vibr0 to 192.168.122.1 port 2042 proto tcp
+sudo ufw allow in on virbr0 to 192.168.122.1 port 2042 proto tcp
 ```
 Finally, we can enable the firewall:
 ```bash
