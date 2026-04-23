@@ -111,6 +111,7 @@ def test_build_clones_without_branch(config_dict):
     assert "branch" not in call_kwargs[1]
 
 
+@pytest.mark.manual
 def test_build_from_real_github_repo(config_dict):
     """Test building image from actual GitHub repo: gmgrahamgm/good_defense."""
     git_repo_url = "https://github.com/gmgrahamgm/good_defense"
@@ -143,6 +144,7 @@ def test_build_from_real_github_repo(config_dict):
         client.close()
 
 
+@pytest.mark.manual
 def test_github_image_runnable(config_dict):
     """Test that image built from GitHub can be instantiated."""
     git_repo_url = "https://github.com/gmgrahamgm/good_defense"
@@ -172,6 +174,7 @@ def test_github_image_runnable(config_dict):
         client.close()
 
 
+@pytest.mark.manual
 def test_github_with_https_url(config_dict):
     """Test GitHub handler accepts HTTPS URL format."""
     git_repo_url = "https://github.com/gmgrahamgm/good_defense.git"
@@ -194,6 +197,7 @@ def test_github_with_https_url(config_dict):
         client.close()
 
 
+@pytest.mark.manual
 def test_invalid_github_repo(config_dict):
     """Test that invalid GitHub repos raise appropriate errors."""
     invalid_repo = "https://github.com/nonexistent/repothatdoesnotexist12345"
@@ -209,6 +213,7 @@ def test_invalid_github_repo(config_dict):
     print(f"✓ Invalid repo correctly raised error: {exc_info.value}")
 
 
+@pytest.mark.manual
 def test_github_build_timeout_config(config_dict):
     """Test that timeout configuration is respected."""
     git_repo_url = "https://github.com/gmgrahamgm/good_defense"
